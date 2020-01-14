@@ -16,7 +16,7 @@ def get_fault_data(sources_dir: str, fault_name: str):
     # Get the first info file
     info_file = glob.glob(os.path.join(sources_dir, fault_name, "Srf", "*.info"))[0]
 
-    with h5py.File(info_file) as f:
+    with h5py.File(info_file, "r") as f:
         return (
             fault_name,
             [
@@ -25,7 +25,7 @@ def get_fault_data(sources_dir: str, fault_name: str):
                 np.mean(f.attrs["width"]),
                 np.mean(f.attrs["dtop"]) if f.attrs["type"] > 1 else f.attrs["hdepth"],
                 f.attrs["mag"],
-                f.attrs["tect_type"],
+                str(f.attrs["tect_type"]) if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW",
             ],
         )
 

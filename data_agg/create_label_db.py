@@ -10,7 +10,7 @@ import pandas as pd
 def process_fault(input_dir: str, fault_name: str):
     # Find all the IM csv files
     im_files = glob.glob(
-        os.path.join(input_dir, fault_name, "*", "IM_calc", "*REL*.csv")
+        os.path.join(input_dir, fault_name, "*", "IM_calc", "*.csv")
     )
 
     # Get the number of IMs & stations in the IM csv files
