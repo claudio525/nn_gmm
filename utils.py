@@ -1,3 +1,4 @@
+import time
 import multiprocessing as mp
 from typing import Dict
 
@@ -110,31 +111,51 @@ def drop_missing_data(
     site_df: pd.DataFrame,
     source_df: pd.DataFrame,
     site_source_dict: Dict[str, pd.DataFrame],
-    verbose: bool = True
+    verbose: bool = True,
 ):
     # Check sites
     unique_sites = np.unique(sample_combs[:, 0])
     missing_sites = unique_sites[~pandas_isin(unique_sites, site_df.index.values)]
     sample_combs = sample_combs[~pandas_isin(sample_combs[:, 0], missing_sites), :]
-    if verbose:
+    if missing_sites.size > 0 and verbose:
         print(f"Site df is missing {missing_sites.size} sites")
 
     # Check sources
     unique_sources = np.unique(sample_combs[:, 1])
-    missing_sources = unique_sources[~pandas_isin(unique_sources, source_df.index.values)]
+    missing_sources = unique_sources[
+        ~pandas_isin(unique_sources, source_df.index.values)
+    ]
     sample_combs = sample_combs[~pandas_isin(sample_combs[:, 1], missing_sources), :]
-    if verbose:
+    if missing_sources.size > 0 and verbose:
         print(f"Source df is missing the source: {missing_sources}")
 
     # Check site-source
+    start_time = time.time()
+    missing_site_source_comb = []
     for cur_site in np.unique(sample_combs[:, 0]):
         cur_sources = sample_combs[sample_combs[:, 0] == cur_site, 1]
 
         cur_missing_site_sources = cur_sources[
             ~np.isin(cur_sources, site_source_dict[cur_site].index.values)
         ]
-        if verbose:
-            print(f"Site-source entries are missing for site {cur_site} - {cur_missing_site_sources}")
+        if cur_missing_site_sources.size > 0:
+            missing_site_source_comb.append(
+                np.char.add(cur_site, cur_missing_site_sources)
+            )
+            if verbose:
+                print(
+                    f"Site-source entries are missing for site {cur_site} - {cur_missing_site_sources}"
+                )
+    print(f"Site source checking took {time.time() - start_time}")
+
+    if len(missing_site_source_comb) > 0:
+        missing_site_source_comb = np.concatenate(missing_site_source_comb, axis=0)
+        if missing_site_source_comb.shape[0] > 0:
+            sample_combs = sample_combs[
+                ~np.all(sample_combs == missing_site_source_comb, axis=1)
+            ]
+
+    return sample_combs
 
 
 def pandas_isin(array_1: np.ndarray, array_2: np.ndarray) -> np.ndarray:

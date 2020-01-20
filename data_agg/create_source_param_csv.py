@@ -25,7 +25,7 @@ def get_fault_data(sources_dir: str, fault_name: str):
                 np.mean(f.attrs["width"]),
                 np.mean(f.attrs["dtop"]) if f.attrs["type"] > 1 else f.attrs["hdepth"],
                 f.attrs["mag"],
-                str(f.attrs["tect_type"]) if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW",
+                f.attrs["tect_type"].decode() if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW",
             ],
         )
 
