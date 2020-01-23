@@ -4,8 +4,7 @@ import argparse
 import pandas as pd
 import numpy as np
 
-import utils
-
+from nn_gmm import utils
 
 def main(
     site_params_ffp: str,
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("im_db_ffp", type=str, help="The path to the IM labels db")
     parser.add_argument("output_ffp", type=str, help="Path for the output h5")
-    parser.add_argument("--n_procs", type=int, help="Number of processes to use")
+    parser.add_argument("--n_procs", type=int, help="Number of processes to use", default=4)
 
     args = parser.parse_args()
 
