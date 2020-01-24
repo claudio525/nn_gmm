@@ -4,7 +4,8 @@ import argparse
 import pandas as pd
 import numpy as np
 
-from nn_gmm import utils
+from nn_gmm import agg_utils
+
 
 def main(
     site_params_ffp: str,
@@ -20,7 +21,7 @@ def main(
 
     # Load site-source params
     print("Loading site-source params")
-    site_source_dict = utils.load_site_source_dict(
+    site_source_dict = agg_utils.load_site_source_dict(
         site_df, site_source_ffp, n_procs=n_procs
     )
 
@@ -30,15 +31,15 @@ def main(
 
     # Load IM data
     print("Loading IM data")
-    im_dict = utils.load_im_dict(im_db_ffp, n_procs=n_procs)
+    im_dict = agg_utils.load_im_dict(im_db_ffp, n_procs=n_procs)
 
     # Create all possible sample combinations based on the available labels
     print("Creating possible sample combinations")
-    sample_combs = utils.create_sample_comb(im_dict)
+    sample_combs = agg_utils.create_sample_comb(im_dict)
 
     # Reduce sample set based on the input data availability
     print("Dropping samples with missing data")
-    sample_combs = utils.drop_missing_data(
+    sample_combs = agg_utils.drop_missing_data(
         sample_combs, site_df, source_df, site_source_dict
     )
 
