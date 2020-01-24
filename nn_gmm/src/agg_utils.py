@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import seistech_internal as si
-from src.utils import pandas_isin
+from .utils import pandas_isin
 
 
 def load_site_source_dict(
