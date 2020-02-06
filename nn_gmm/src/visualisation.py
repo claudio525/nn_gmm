@@ -27,6 +27,9 @@ def create_multi_hist(
     n_cols: int = 4,
     ind_fig_size: Tuple[int, int] = (25.0, 10.0),
 ):
+    """Creates a single large figure with histograms plots for
+    each of the columns in the provided dataframe
+    """
     n_plots = len(df.columns)
     n_rows = np.ceil(n_plots / n_cols)
 
@@ -39,6 +42,29 @@ def create_multi_hist(
     fig.savefig(plot_ffp)
 
 
+def create_IM_res_hist(
+    output_ffp: str, train_df: pd.DataFrame, im: str, val_df: pd.DataFrame = None
+):
+    im_mean, im_std = f"{im}_mean", f"{im}_std"
+
+    fig = plt.figure(figsize=(12, 6))
+    ax1, ax2 = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
+
+    # Mean histogram
+    sns.distplot(train_df[im_mean], kde=False, ax=ax1)
+    if val_df is not None:
+        sns.distplot(val_df[im_mean], kde=False, ax=ax1)
+
+    # Std histogram
+    sns.distplot(train_df[im_std], kde=False, ax=ax2)
+    if val_df is not None:
+        sns.distplot(val_df[im_std], kde=False, ax=ax2)
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close()
+
+
 def visualisation(eval_result: evaluation.EvaluationResult):
     """"""
     print(
@@ -48,41 +74,58 @@ def visualisation(eval_result: evaluation.EvaluationResult):
     output_dir = os.path.join(eval_result.training_result.output_dir, "visualisation")
     os.mkdir(output_dir)
 
-    print(f"Creating residual plots")
-    # Residual plots
-    create_multi_hist(
-        eval_result.res_train,
-        os.path.join(output_dir, "residual_train.png"),
-        title="Training residual",
-    )
-    create_multi_hist(
-        eval_result.res_val,
-        os.path.join(output_dir, "residual_val.png"),
-        title="Validation residual",
-    )
-
-    # Ln residual plots
-    create_multi_hist(
+    create_IM_res_hist(
+        os.path.join(output_dir, "ln_res_PGA"),
         eval_result.ln_res_train,
-        os.path.join(output_dir, "ln_residual_train.png"),
-        title="Log training residual",
-    )
-    create_multi_hist(
+        "PGA",
         eval_result.ln_res_val,
-        os.path.join(output_dir, "ln_residual_val.png"),
-        title="Log validation residual",
     )
 
-    # Relative residual plots
-    create_multi_hist(
-        eval_result.rel_res_train,
-        os.path.join(output_dir, "relative_residual_train.png"),
-        title="Relative training residual",
-    )
-    create_multi_hist(
-        eval_result.rel_res_val,
-        os.path.join(output_dir, "relative_residual_val.png"),
-        title="Relative validation residual",
-    )
+    # fig = plt.figure()
+    # ax = fig.add_subplot()
+    # mean_train_df = eval_result.ln_res_train["PGA_mean"]
+    # mean_val_df = eval_result.ln_res_val["PGA_mean"]
+    #
+    # sns.distplot(mean_train_df, kde=False, ax=ax)
+    # sns.distplot(mean_val_df, kde=False, ax=ax)
+
+    return
+
+    # print(f"Creating residual plots")
+    # # Residual plots
+    # create_multi_hist(
+    #     eval_result.res_train,
+    #     os.path.join(output_dir, "residual_train.png"),
+    #     title="Training residual",
+    # )
+    # create_multi_hist(
+    #     eval_result.res_val,
+    #     os.path.join(output_dir, "residual_val.png"),
+    #     title="Validation residual",
+    # )
+    #
+    # # Ln residual plots
+    # create_multi_hist(
+    #     eval_result.ln_res_train,
+    #     os.path.join(output_dir, "ln_residual_train.png"),
+    #     title="Log training residual",
+    # )
+    # create_multi_hist(
+    #     eval_result.ln_res_val,
+    #     os.path.join(output_dir, "ln_residual_val.png"),
+    #     title="Log validation residual",
+    # )
+    #
+    # # Relative residual plots
+    # create_multi_hist(
+    #     eval_result.rel_res_train,
+    #     os.path.join(output_dir, "relative_residual_train.png"),
+    #     title="Relative training residual",
+    # )
+    # create_multi_hist(
+    #     eval_result.rel_res_val,
+    #     os.path.join(output_dir, "relative_residual_val.png"),
+    #     title="Relative validation residual",
+    # )
 
     return

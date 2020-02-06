@@ -1,3 +1,4 @@
+import json
 import os
 import datetime
 from typing import List, Dict, Tuple
@@ -180,6 +181,13 @@ def run(input_config: Dict, train_config: Dict) -> TrainingResult:
         print(f"Ouput dir {output_dir} already exists, quitting!")
     os.mkdir(output_dir)
 
+    # Save the input & training config
+    with open(os.path.join(output_dir, "input_config.json"), "w") as f:
+        f.write(json.dumps(input_config))
+
+    with open(os.path.join(output_dir, "train_config.json"), "w") as f:
+        f.write(json.dumps(training_config))
+
     # Load & clean the data
     print(f"Loading samples")
     X, y = load_clean_samples(
@@ -187,7 +195,7 @@ def run(input_config: Dict, train_config: Dict) -> TrainingResult:
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    #X, y = X.iloc[:10000, :], y.iloc[:10000, :]
 
     # Split into train and validation set
     X_train, X_val, y_train, y_val = train_test_split(
@@ -229,7 +237,7 @@ def run(input_config: Dict, train_config: Dict) -> TrainingResult:
     # Create the model
     print(f"Creating model")
     model = create_model(model_config, n_features, n_outputs)
-    model.compile(optimizer="Adam", loss="MSE")
+    model.compile(optimizer="Adam", loss=training_config["loss"])
 
     # Model architecture summary
     model.summary()
@@ -250,10 +258,20 @@ def run(input_config: Dict, train_config: Dict) -> TrainingResult:
         train_dataset, epochs=n_epochs, validation_data=val_dataset, callbacks=callbacks
     )
 
+    # Save the loss
+    loss_df = pd.DataFrame.from_dict(history.history)
+    loss_df.to_csv(os.path.join(output_dir, "loss.csv"))
+
     # Create loss plot
     plt.figure()
-    plt.plot(history.epoch, history.history["loss"], label="Loss")
-    plt.plot(history.epoch, history.history["val_loss"], label="Validation loss")
+    plt.plot(history.epoch, loss_df.loss, label="Loss")
+    plt.plot(history.epoch, loss_df.val_loss, label="Validation loss")
+
+    plt.ylabel(training_config["loss"])
+    plt.xlabel("Epoch")
+
+    plt.legend()
+
     plt.savefig(os.path.join(output_dir, "loss.png"))
     plt.close()
 

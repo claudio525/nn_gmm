@@ -42,7 +42,7 @@ TRAIN_CONFIG = {
         "hidden_layer_func": hidden_layers.relu_BN_dropout,
         "units": [60, 60, 60],
     },
-    "training_config": {"val_size": 0.1, "batch_size": 32, "n_epochs": 5},
+    "training_config": {"val_size": 0.1, "batch_size": 32, "n_epochs": 5, "loss": "MSE"},
 }
 
 if __name__ == "__main__":
