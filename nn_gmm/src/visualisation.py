@@ -43,53 +43,67 @@ def create_multi_hist(
 
 
 def create_IM_res_hist(
-    output_ffp: str, train_df: pd.DataFrame, im: str, val_df: pd.DataFrame = None
+    output_ffp: str,
+    train_df: pd.DataFrame,
+    im: str,
+    val_df: pd.DataFrame = None,
+    xlim_n_std: float = None,
 ):
     im_mean, im_std = f"{im}_mean", f"{im}_std"
 
     fig = plt.figure(figsize=(12, 6))
     ax1, ax2 = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
 
-    # Mean histogram
-    sns.distplot(train_df[im_mean], kde=False, ax=ax1)
-    if val_df is not None:
-        sns.distplot(val_df[im_mean], kde=False, ax=ax1)
+    # Plot mean and std histogram
+    for cur_key, ax in zip([im_mean, im_std], [ax1, ax2]):
+        sns.distplot(train_df[cur_key], kde=False, ax=ax)
+        if val_df is not None:
+            sns.distplot(val_df[cur_key], kde=False, ax=ax)
 
-    # Std histogram
-    sns.distplot(train_df[im_std], kde=False, ax=ax2)
-    if val_df is not None:
-        sns.distplot(val_df[im_std], kde=False, ax=ax2)
+        if xlim_n_std is not None:
+            std_lim = train_df[cur_key].std() * xlim_n_std
+            ax.set_xlim(
+                -std_lim
+                if -std_lim > train_df[cur_key].min()
+                else train_df[cur_key].min(),
+                std_lim
+                if std_lim < train_df[cur_key].max()
+                else train_df[cur_key].max(),
+            )
 
     fig.tight_layout()
     fig.savefig(output_ffp)
     plt.close()
 
 
-def visualisation(eval_result: evaluation.EvaluationResult):
+def visualisation(eval_result: evaluation.EvaluationResult, hist_x_lim: float = None):
     """"""
     print(
         f"=============================== Visualisation ==============================="
     )
 
     output_dir = os.path.join(eval_result.training_result.output_dir, "visualisation")
-    os.mkdir(output_dir)
+    if not os.path.isdir(output_dir):
+        os.mkdir(output_dir)
 
-    create_IM_res_hist(
-        os.path.join(output_dir, "ln_res_PGA"),
-        eval_result.ln_res_train,
-        "PGA",
-        eval_result.ln_res_val,
+    # Get the different IMs predicted
+    ims = np.unique(
+        [
+            col.split("_")[0]
+            if not col.startswith("pSA")
+            else "_".join(col.split("_")[0:2])
+            for col in eval_result.ln_res_train.columns
+        ]
     )
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot()
-    # mean_train_df = eval_result.ln_res_train["PGA_mean"]
-    # mean_val_df = eval_result.ln_res_val["PGA_mean"]
-    #
-    # sns.distplot(mean_train_df, kde=False, ax=ax)
-    # sns.distplot(mean_val_df, kde=False, ax=ax)
-
-    return
+    for im in ims:
+        create_IM_res_hist(
+            os.path.join(output_dir, f"ln_res_{im}.png"),
+            eval_result.ln_res_train,
+            im,
+            eval_result.ln_res_val,
+            xlim_n_std=hist_x_lim,
+        )
 
     # print(f"Creating residual plots")
     # # Residual plots
@@ -127,5 +141,5 @@ def visualisation(eval_result: evaluation.EvaluationResult):
     #     os.path.join(output_dir, "relative_residual_val.png"),
     #     title="Relative validation residual",
     # )
-
-    return
+    #
+    # return

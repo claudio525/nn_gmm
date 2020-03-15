@@ -152,7 +152,7 @@ class TrainingResult:
         self.best_model_ffp = best_model_ffp
 
     def save(self, output_ffp: str):
-        with open(output_ffp, "w") as f:
+        with open(output_ffp, "wb") as f:
             pickle.dump(self, f)
 
 
