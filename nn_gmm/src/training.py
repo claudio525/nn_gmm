@@ -196,7 +196,7 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
         f.write(json.dumps(input_config))
 
     with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        f.write(json.dumps(model_config))
+        f.write(json.dumps({key: str(val) for key, val in model_config.items()}))
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
         f.write(json.dumps(training_config))
