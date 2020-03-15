@@ -1,3 +1,4 @@
+import pickle
 import json
 import os
 import datetime
@@ -150,8 +151,12 @@ class TrainingResult:
 
         self.best_model_ffp = best_model_ffp
 
+    def save(self, output_ffp: str):
+        with open(output_ffp, "w") as f:
+            pickle.dump(self, f)
 
-def run(input_config: Dict, train_config: Dict) -> TrainingResult:
+
+def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
 
@@ -286,4 +291,4 @@ def run(input_config: Dict, train_config: Dict) -> TrainingResult:
         std_scaler,
         min_max_scaler,
         best_model_ffp,
-    )
+    ), output_dir

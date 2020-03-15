@@ -1,16 +1,7 @@
 import os
-from typing import Tuple
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-sns.set()
 
 from nn_gmm import hidden_layers
 from nn_gmm import training, evaluation
-from nn_gmm import visualisation as vis
 
 INPUT_CONFIG = {
     "sample_db_ffp": "/Users/Clus/code/work/nn_gmm/data/sample_dbs/v18p6.h5",
@@ -46,6 +37,8 @@ TRAIN_CONFIG = {
 }
 
 if __name__ == "__main__":
-    training_result = training.run(INPUT_CONFIG, TRAIN_CONFIG)
-    eval_result = evaluation.evaluate(training_result)
-    vis.visualisation(eval_result)
+    train_result, output_dir = training.run(INPUT_CONFIG, TRAIN_CONFIG)
+    train_result.save(os.path.join(output_dir, "train_results.pickle"))
+    eval_result = evaluation.evaluate(train_result)
+    eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
+

@@ -1,3 +1,5 @@
+import pickle
+
 import pandas as pd
 import numpy as np
 from tensorflow import keras
@@ -31,6 +33,12 @@ class EvaluationResult:
 
         self.rel_res_train = rel_res_train
         self.rel_res_val = rel_res_val
+
+    def save(self, output_ffp: str):
+        with open(output_ffp, "w") as f:
+            pickle.dump(self, f)
+
+
 
 
 def evaluate(training_result: training.TrainingResult) -> EvaluationResult:
