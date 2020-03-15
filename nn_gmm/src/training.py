@@ -156,7 +156,7 @@ class TrainingResult:
             pickle.dump(self, f)
 
 
-def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
+def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
 
@@ -166,12 +166,17 @@ def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
         For an example see EXAMPLE_INPUT_CONFIG
     train_config: dictionary
         For an example see EXAMPLE_TRAIN_CONFIG
+    verbose: int
+        Model fitting verbosity for details, see
+        https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
 
     Returns
     -------
     TrainingResult
     """
-    print(f"================================ Training =================================")
+    print(
+        f"================================ Training ================================="
+    )
 
     # Load configs
     model_config = train_config["model_config"]
@@ -186,9 +191,12 @@ def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
         print(f"Ouput dir {output_dir} already exists, quitting!")
     os.mkdir(output_dir)
 
-    # Save the input & training config
+    # Save the input, model & training config
     with open(os.path.join(output_dir, "input_config.json"), "w") as f:
         f.write(json.dumps(input_config))
+
+    with open(os.path.join(output_dir, "model_config.json"), "w") as f:
+        f.write(json.dumps(model_config))
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
         f.write(json.dumps(training_config))
@@ -200,7 +208,7 @@ def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    #X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
 
     # Split into train and validation set
     X_train, X_val, y_train, y_val = train_test_split(
@@ -260,7 +268,11 @@ def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
     # Train
     print(f"Training...")
     history = model.fit(
-        train_dataset, epochs=n_epochs, validation_data=val_dataset, callbacks=callbacks
+        train_dataset,
+        epochs=n_epochs,
+        validation_data=val_dataset,
+        callbacks=callbacks,
+        verbose=verbose,
     )
 
     # Save the loss
@@ -280,15 +292,18 @@ def run(input_config: Dict, train_config: Dict) -> Tuple[TrainingResult, str]:
     plt.savefig(os.path.join(output_dir, "loss.png"))
     plt.close()
 
-    return TrainingResult(
-        input_config,
-        training_config,
+    return (
+        TrainingResult(
+            input_config,
+            training_config,
+            output_dir,
+            X_train,
+            y_train,
+            X_val,
+            y_val,
+            std_scaler,
+            min_max_scaler,
+            best_model_ffp,
+        ),
         output_dir,
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        std_scaler,
-        min_max_scaler,
-        best_model_ffp,
-    ), output_dir
+    )

@@ -4,6 +4,7 @@ import tensorflow as tf
 
 from nn_gmm import hidden_layers
 from nn_gmm import training, evaluation
+from nn_gmm import visualisation
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -59,3 +60,4 @@ if __name__ == "__main__":
     eval_result = evaluation.evaluate(train_result)
     eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
 
+    visualisation.visualisation(eval_result, hist_x_lim=4)

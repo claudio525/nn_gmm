@@ -56,20 +56,22 @@ def create_IM_res_hist(
 
     # Plot mean and std histogram
     for cur_key, ax in zip([im_mean, im_std], [ax1, ax2]):
-        sns.distplot(train_df[cur_key], kde=False, ax=ax)
-        if val_df is not None:
-            sns.distplot(val_df[cur_key], kde=False, ax=ax)
-
+        # Filter out data points that are not withing the specified limits
+        # Added to prevent outliers extending x-axis to far
         if xlim_n_std is not None:
             std_lim = train_df[cur_key].std() * xlim_n_std
-            ax.set_xlim(
-                -std_lim
-                if -std_lim > train_df[cur_key].min()
-                else train_df[cur_key].min(),
-                std_lim
-                if std_lim < train_df[cur_key].max()
-                else train_df[cur_key].max(),
-            )
+            min_x = -std_lim if -std_lim > train_df[cur_key].min() else train_df[cur_key].min()
+            max_x = std_lim if std_lim < train_df[cur_key].max() else train_df[cur_key].max()
+            train_mask = (train_df[cur_key].values > min_x) & (train_df[cur_key].values < max_x)
+            val_mask = (val_df[cur_key].values > min_x) &  (val_df[cur_key].values < max_x)
+
+            sns.distplot(train_df.loc[train_mask, cur_key], kde=False, ax=ax)
+            if val_df is not None:
+                sns.distplot(val_df.loc[val_mask, cur_key], kde=False, ax=ax)
+        else:
+            sns.distplot(train_df[cur_key], kde=False, ax=ax)
+            if val_df is not None:
+                sns.distplot(val_df[cur_key], kde=False, ax=ax)
 
     fig.tight_layout()
     fig.savefig(output_ffp)
