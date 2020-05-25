@@ -5,7 +5,7 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
-import seistech_internal as si
+# import seistech_internal as si
 from .utils import pandas_isin
 
 
