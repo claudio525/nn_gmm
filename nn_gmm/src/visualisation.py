@@ -1,5 +1,5 @@
 import os
-from typing import Tuple
+from typing import Tuple, Iterable
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,8 @@ import seaborn as sns
 from . import evaluation
 
 sns.set()
+
+IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 
 
 def multi_fig(
@@ -59,14 +61,16 @@ def create_IM_res_hist(
         # Filter out data points that are not withing the specified limits
         # Added to prevent outliers extending x-axis to far
         if xlim_n_std is not None:
-            std_lim = train_df[cur_key].std() * xlim_n_std
-            min_x = -std_lim if -std_lim > train_df[cur_key].min() else train_df[cur_key].min()
-            max_x = std_lim if std_lim < train_df[cur_key].max() else train_df[cur_key].max()
-            train_mask = (train_df[cur_key].values > min_x) & (train_df[cur_key].values < max_x)
-            val_mask = (val_df[cur_key].values > min_x) &  (val_df[cur_key].values < max_x)
+            min_x, max_x = __get_min_max_x(train_df.loc[:, cur_key].values, xlim_n_std)
+            train_mask = (train_df[cur_key].values > min_x) & (
+                train_df[cur_key].values < max_x
+            )
 
             sns.distplot(train_df.loc[train_mask, cur_key], kde=False, ax=ax)
             if val_df is not None:
+                val_mask = (val_df[cur_key].values > min_x) & (
+                    val_df[cur_key].values < max_x
+                )
                 sns.distplot(val_df.loc[val_mask, cur_key], kde=False, ax=ax)
         else:
             sns.distplot(train_df[cur_key], kde=False, ax=ax)
@@ -76,6 +80,73 @@ def create_IM_res_hist(
     fig.tight_layout()
     fig.savefig(output_ffp)
     plt.close()
+
+
+def __get_min_max_x(data: np.ndarray, xlim_n_std: float):
+    std_lim = np.nanstd(data) * xlim_n_std
+    min_x = -std_lim if -std_lim > np.nanmin(data) else np.nanmin(data)
+    max_x = std_lim if std_lim < np.nanmax(data) else np.nanmax(data)
+
+    return min_x, max_x
+
+
+def create_res_hist(
+    output_ffp: str,
+    train_df: pd.DataFrame,
+    ims: Iterable[str],
+    val_df: pd.DataFrame = None,
+    xlim_n_std: float = None,
+):
+    """Creates a residual histogram plot across IMs, should probably
+    be combined with create_IM_res_hist.."""
+    fig = plt.figure(figsize=(12, 6))
+    ax1, ax2 = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
+
+    for cur_temp, ax, cur_label in zip(
+        [IM_MEAN_KEY, IM_STD_KEY],
+        [ax1, ax2],
+        [r"$ln \frac{\hat{\mu}}{\mu}$", r"$ln \frac{\hat{\sigma}}{\sigma}$"],
+    ):
+        cur_keys = [cur_temp.format(im) for im in ims]
+        cur_train_data = train_df.loc[:, cur_keys].values.ravel()
+        cur_val_data = (
+            None if val_df is None else val_df.loc[:, cur_keys].values.ravel()
+        )
+
+        # Filter out data points that are not withing the specified limits
+        # Added to prevent outliers extending x-axis to far
+        if xlim_n_std is not None:
+            min_x, max_x = __get_min_max_x(cur_train_data, xlim_n_std)
+            train_mask = (cur_train_data > min_x) & (cur_train_data < max_x)
+
+            sns.distplot(cur_train_data[train_mask], kde=False, ax=ax)
+            if val_df is not None:
+                val_mask = (cur_val_data > min_x) & (cur_val_data < max_x)
+                sns.distplot(cur_val_data[val_mask], kde=False, ax=ax)
+        else:
+            sns.distplot(cur_train_data, kde=False, ax=ax)
+            if val_df is not None:
+                sns.distplot(cur_val_data, kde=False, ax=ax)
+
+        ax.set_xlabel(cur_label)
+
+    fig.suptitle("Residuals across all IMs")
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close()
+
+
+def _get_ims(eval_result: pd.DataFrame):
+    """Get the different IMs predicted"""
+    return np.unique(
+        [
+            col.split("_")[0]
+            if not col.startswith("pSA")
+            else "_".join(col.split("_")[0:2])
+            for col in eval_result.ln_res_train.columns
+        ]
+    )
 
 
 def visualisation(eval_result: evaluation.EvaluationResult, hist_x_lim: float = None):
@@ -98,6 +169,7 @@ def visualisation(eval_result: evaluation.EvaluationResult, hist_x_lim: float = 
         ]
     )
 
+    # Create a residual histogram for each IM
     for im in ims:
         create_IM_res_hist(
             os.path.join(output_dir, f"ln_res_{im}.png"),
@@ -106,6 +178,14 @@ def visualisation(eval_result: evaluation.EvaluationResult, hist_x_lim: float = 
             eval_result.ln_res_val,
             xlim_n_std=hist_x_lim,
         )
+
+    create_res_hist(
+        os.path.join(output_dir, "ln_res.png"),
+        eval_result.ln_res_train,
+        ims,
+        val_df=eval_result.ln_res_val,
+        xlim_n_std=hist_x_lim,
+    )
 
     # print(f"Creating residual plots")
     # # Residual plots
