@@ -349,6 +349,7 @@ def visualisation(
     ims = _get_ims(eval_result)
 
     # Create a residual histogram for each IM
+    print("Creating residual histograms for each IM")
     for im in ims:
         create_IM_res_hist(
             os.path.join(output_dir, f"ln_res_{im}.png"),
@@ -358,6 +359,7 @@ def visualisation(
             xlim_n_std=hist_x_lim,
         )
 
+    print("Creating residual histogram across all IMs")
     create_res_hist(
         os.path.join(output_dir, "ln_res.png"),
         eval_result.ln_res_train,
@@ -367,6 +369,7 @@ def visualisation(
     )
 
     # Create csv for spatial plotting
+    print("Generating spatial residual plotting data")
     comb_csv_files, im_csv_files = gen_spatial_data_csv(output_dir, eval_result, ims)
 
     if (
@@ -384,9 +387,11 @@ def visualisation(
         gen_options_dict = yaml.safe_load(f)
 
     if plot_spatial_comb_res:
+        print("Plotting combined IM spatial residual plots")
         plot_multiple(plot_items_ffp, gen_options_dict, in_ffps=comb_csv_files,
                       n_procs=n_procs, no_clobber=True)
 
     if plot_spatial_im_res:
+        print("Plotting IM spatial residual plots")
         plot_multiple(plot_items_ffp, gen_options_dict, in_ffps=im_csv_files,
                       n_procs=n_procs, no_clobber=True)
