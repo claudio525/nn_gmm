@@ -130,6 +130,8 @@ class TrainingResult:
         input_config: Dict,
         training_config: Dict,
         output_dir: str,
+        X: pd.DataFrame,
+        y: pd.DataFrame,
         X_train: pd.DataFrame,
         y_train: pd.DataFrame,
         X_val: pd.DataFrame,
@@ -138,9 +140,13 @@ class TrainingResult:
         min_max_scaler: preprocessing.MinMaxScaler,
         best_model_ffp: str,
     ):
+
         self.input_config = input_config
         self.training_config = training_config
         self.output_dir = output_dir
+
+        self.X = X
+        self.y = y
 
         self.X_train = X_train
         self.y_train = y_train
@@ -208,7 +214,7 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    X, y = X.iloc[:10000, :], y.iloc[:10000, :]
 
     # Split into train and validation set
     X_train, X_val, y_train, y_val = train_test_split(
@@ -297,6 +303,8 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
             input_config,
             training_config,
             output_dir,
+            X,
+            y,
             X_train,
             y_train,
             X_val,
