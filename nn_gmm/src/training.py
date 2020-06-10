@@ -214,7 +214,7 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
 
     # Split into train and validation set
     X_train, X_val, y_train, y_val = train_test_split(
