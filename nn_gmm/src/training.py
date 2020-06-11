@@ -260,7 +260,6 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
 
     # Model architecture summary
     model.summary()
-    keras.utils.plot_model(model, to_file=os.path.join(output_dir, "model.png"))
 
     # Callbacks
     best_model_ffp = os.path.join(output_dir, "best_model.h5")

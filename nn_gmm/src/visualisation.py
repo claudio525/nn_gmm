@@ -171,7 +171,7 @@ def gen_spatial_data_csv(
     output_dir: str,
     eval_result: evaluation.EvaluationResult,
     ims: Iterable[str],
-    agg_func: Callable = np.mean,
+    agg_func: Callable = np.nanmean,
 ):
     """Generates the spatial data for GMT plotting
 
@@ -187,6 +187,8 @@ def gen_spatial_data_csv(
     agg_func: callable
         The aggregation function to use to
         aggregate the data at each location
+        Make sure this function can handle nan
+        values..
 
     Returns
     ----------
@@ -220,6 +222,10 @@ def gen_spatial_data_csv(
         cur_loc_res = pd.merge(
             cur_loc_res, station_lookup, how="left", left_index=True, right_index=True
         )
+
+        # Deal with any nan values,
+        # these arise from the model predicting negative standard deviations
+        cur_loc_res.values[cur_loc_res.isna()] = 100
 
         cur_loc_res.to_csv(os.path.join(output_dir, "loc_ln_res.csv"))
 
@@ -309,13 +315,14 @@ def gen_gmt_options_dict(
     if data_series is not None:
         std = data_series.std()
 
-        cpt_max = float(np.round(3 * std, 1))
+        # Compute min/max and tick increments for colour bar
+        cpt_max = 2.5 * std
+        n_dec_points = 2 if cpt_max < 1.0 else 1
+        cpt_max = float(np.round(cpt_max, n_dec_points))
+        tick_inc = float(np.round((cpt_max / 4), n_dec_points))
+        cpt_max = tick_inc * 4
 
         options["xyz-cpt-max"], options["xyz-cpt-min"] = cpt_max, -cpt_max
-
-        # Round down to 1 decimal places, so that there are 4 ticks on each
-        # side of the colorbar
-        tick_inc = float(np.round((cpt_max / 4) - 0.05, 1))
         options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
 
     return cur_dict
@@ -345,7 +352,7 @@ def visualisation(
     else:
         output_dir = vis_output_dir
 
-    # # Get the different IMs predicted
+    # Get the different IMs predicted
     ims = _get_ims(eval_result)
 
     # Create a residual histogram for each IM
