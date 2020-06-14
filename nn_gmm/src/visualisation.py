@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from visualization.gmt.plotting import plot_multiple
-from . import evaluation
+from .evaluation import EvaluationResult
+from .training import TrainingResult
 
 sns.set()
 
@@ -44,6 +45,206 @@ def create_multi_hist(
 
     fig.suptitle(title)
     fig.savefig(plot_ffp)
+
+
+class PlotGen:
+
+    DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
+        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
+        "options": {
+            "xyz-grid-search": "12m",
+            "xyz-grid-automask": "12k",
+            "xyz-cpt": "polar",
+            "xyz-cpt-bg": "0/0/80",
+            "xyz-cpt-fg": "80/0/0",
+            "xyz-transparency": "30",
+            "xyz-size": "1k",
+            "xyz-cpt-inc": "0.25",
+            "xyz-cpt-tick": "0.5",
+            "xyz-cpt-min": "-2.0",
+            "xyz-cpt-max": "2.0",
+        },
+    }
+
+    LN_RES_IM_FNAME_TEMPLATE = "ln_res_{}.png"
+
+    def __init__(self, eval_result: EvaluationResult, output_dir: str = None):
+        """Constructor for Visualisation"""
+        self.eval_result = eval_result
+        self.train_result = eval_result.training_result
+        self.output_dir = (
+            output_dir
+            if output_dir is not None
+            else os.path.join(eval_result.training_result.output_dir, "visualisation")
+        )
+
+        self.train_res_df = eval_result.ln_res_train
+        self.val_res_df = eval_result.ln_res_val
+
+        self.ims = self._get_IMs()
+
+        # Spatial residual csv files for GMT plotting
+        # Don't use these variables directly, use the properties instead (lazy loading)
+        self._comb_res_csv_files, self._im_res_csv_files = None, None
+
+        # Spatial sigma csv files for GMT plotting
+        # Don't use these variables directly, use the properties instead (lazy loading)
+        self._im_sigma_csv_files = None
+
+    @property
+    def comb_res_csv_files(self):
+        if self._comb_res_csv_files is None:
+            print(f"Computing spatial residual data")
+            self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
+                self.output_dir, self.eval_result, self.ims
+            )
+        return self._comb_res_csv_files
+
+    @property
+    def im_res_csv_files(self):
+        if self._im_res_csv_files is None:
+            print(f"Computing spatial residual data")
+            self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
+                self.output_dir, self.eval_result, self.ims
+            )
+        return self._im_res_csv_files
+
+    @property
+    def im_sigma_csv_files(self):
+        if self._im_sigma_csv_files is None:
+            print(f"Computing spatial sigma data")
+            self._im_sigma_csv_files = gen_spatial_sigma_csv(
+                self.output_dir, self.eval_result, self.ims
+            )
+
+        return self._im_sigma_csv_files
+
+    def _get_IMs(self):
+        """Get the different IMs predicted"""
+        return np.unique(
+            [
+                col.split("_")[0]
+                if not col.startswith("pSA")
+                else "_".join(col.split("_")[0:2])
+                for col in self.train_res_df.columns
+            ]
+        )
+
+    def create_IM_res_hist(
+        self, im: str, output_ffp: str = None, xlim_n_std: float = None
+    ):
+        """Creates a ln residual for the specified IM"""
+        output_ffp = (
+            output_ffp
+            if output_ffp is not None
+            else os.path.join(self.output_dir, self.LN_RES_IM_FNAME_TEMPLATE.format(im))
+        )
+        return create_IM_res_hist(
+            output_ffp, self.train_res_df, im, self.val_res_df, xlim_n_std=xlim_n_std
+        )
+
+    def create_IM_res_hists(
+        self,
+        ims: Iterable[str] = None,
+        output_dir: str = None,
+        xlim_n_std: float = None,
+    ):
+        """Creates a residual histogram for each IM type"""
+        ims = ims if ims is not None else self.ims
+        output_dir = output_dir if output_dir is not None else self.output_dir
+
+        print("Creating ln residual histograms for each IM")
+        for im in ims:
+            self.create_IM_res_hist(
+                im,
+                os.path.join(output_dir, self.LN_RES_IM_FNAME_TEMPLATE.format(im)),
+                xlim_n_std=xlim_n_std,
+            )
+
+    def create_comb_res_hist(
+        self,
+        ims: Iterable[str] = None,
+        output_ffp: str = None,
+        xlim_n_std: float = None,
+    ):
+        """Creates a residual histogram across all the specified
+        IM types (defaults to all)"""
+        output_ffp = (
+            output_ffp
+            if output_ffp is not None
+            else os.path.join(self.output_dir, "ln_res.png")
+        )
+        ims = ims if ims is not None else self.ims
+
+        return create_res_hist(
+            output_ffp,
+            self.train_res_df,
+            ims,
+            val_df=self.val_res_df,
+            xlim_n_std=xlim_n_std,
+        )
+
+    def create_comb_res_maps(
+        self,
+        plot_items_ffp: str,
+        gen_options_dict: Dict = None,
+        n_procs: int = 4,
+        no_clobber: bool = True,
+    ):
+        """Creates the residual maps for the combined IMs (mean)
+        Requires GMT to be setup
+        """
+        gen_options_dict = (
+            gen_options_dict
+            if gen_options_dict is not None
+            else self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+        )
+
+        return plot_multiple(
+            plot_items_ffp,
+            gen_options_dict,
+            in_ffps=self.comb_res_csv_files,
+            n_procs=n_procs,
+            no_clobber=no_clobber,
+        )
+
+    def create_IM_res_maps(
+        self,
+        plot_items_ffp: str,
+        gen_options_dict: Dict = None,
+        n_procs: int = 4,
+        no_clobber: bool = True,
+    ):
+        """Creates a residual map for each IM
+        Requires GMT to be setup"""
+        gen_options_dict = (
+            gen_options_dict
+            if gen_options_dict is not None
+            else self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+        )
+
+        return plot_multiple(
+            plot_items_ffp,
+            gen_options_dict,
+            in_ffps=self.im_res_csv_files,
+            n_procs=n_procs,
+            no_clobber=no_clobber,
+        )
+
+    def create_sigma_maps(
+        self,
+        plot_items_ffp: str,
+        gen_options_dict: Dict = None,
+        n_procs: int = 4,
+        no_clobber: bool = True,
+    ):
+        plot_multiple(
+            plot_items_ffp,
+            gen_options_dict,
+            in_ffps=self.im_sigma_csv_files,
+            n_procs=n_procs,
+            no_clobber=no_clobber,
+        )
 
 
 def create_IM_res_hist(
@@ -139,18 +340,6 @@ def create_res_hist(
     plt.close()
 
 
-def _get_ims(eval_result: evaluation.EvaluationResult):
-    """Get the different IMs predicted"""
-    return np.unique(
-        [
-            col.split("_")[0]
-            if not col.startswith("pSA")
-            else "_".join(col.split("_")[0:2])
-            for col in eval_result.ln_res_train.columns
-        ]
-    )
-
-
 def get_station_from_id(ids: np.ndarray) -> List[str]:
     """Computes the stations from station_rupture ids"""
     return [cur_split[0] for cur_split in np.char.split(ids, "_")]
@@ -167,16 +356,49 @@ def get_station_lookup(X: pd.DataFrame):
     return station_lookup
 
 
-def gen_spatial_data_csv(
+def gen_spatial_sigma_csv(
     output_dir: str,
-    eval_result: evaluation.EvaluationResult,
+    eval_result: EvaluationResult,
+    ims: Iterable[str],
+    agg_func: Callable = np.nanmean,
+):
+    station_lookup = get_station_lookup(eval_result.training_result.X)
+
+    csv_files = []
+    for cur_df, prefix in zip(
+        [eval_result.y_train_est, eval_result.y_val_est], ["train", "val"]
+    ):
+        cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
+
+        cur_loc_sigma = cur_df.groupby("station").agg(agg_func)
+
+        pd.merge(
+            cur_loc_sigma, station_lookup, how="left", left_index=True, right_index=True
+        )
+
+        for im in ims:
+            csv_files.append(
+                _gmt_save(
+                    cur_loc_sigma,
+                    f"{im}_std",
+                    os.path.join(output_dir, f"{im}_std"),
+                    label=f"{im}_std",
+                )
+            )
+
+        return csv_files
+
+
+def gen_spatial_data_res_csv(
+    output_dir: str,
+    eval_result: EvaluationResult,
     ims: Iterable[str],
     agg_func: Callable = np.nanmean,
 ):
     """Generates the spatial data for GMT plotting
 
     For the combined residual, the individual IM residuals
-    are summed.
+    are averaged (mean).
 
     Parameters
     ----------
@@ -211,10 +433,10 @@ def gen_spatial_data_csv(
         cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
 
         # Sum across all IMs
-        cur_df["ln_res_mu"] = np.sum(
+        cur_df["ln_res_mu"] = np.nanmean(
             cur_df.loc[:, [f"{im}_mean" for im in ims]], axis=1
         )
-        cur_df["ln_res_sigma"] = np.sum(
+        cur_df["ln_res_sigma"] = np.nanmean(
             cur_df.loc[:, [f"{im}_std" for im in ims]], axis=1
         )
 
@@ -293,7 +515,8 @@ def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, label: str = None):
 
     options = {} if label is None else {"title": label, "xyz-cpt-labels": label}
     with open(f"{output_ffp}.yaml", "w") as f:
-        yaml.safe_dump(gen_gmt_options_dict(options=options, data_series=df[key]), f)
+        yaml.safe_dump(gen_gmt_options_dict(options=options), f)
+        # yaml.safe_dump(gen_gmt_options_dict(options=options, data_series=df[key]), f)
 
     return f"{output_ffp}.csv"
 
@@ -326,79 +549,3 @@ def gen_gmt_options_dict(
         options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
 
     return cur_dict
-
-
-def visualisation(
-    eval_result: evaluation.EvaluationResult,
-    hist_x_lim: float = None,
-    vis_output_dir: str = None,
-    plot_items_ffp: str = None,
-    gen_options_ffp: str = None,
-    plot_spatial_comb_res: bool = False,
-    plot_spatial_im_res: bool = False,
-    n_procs: int = 4,
-):
-    """"""
-    print(
-        f"=============================== Visualisation ==============================="
-    )
-
-    if vis_output_dir is None:
-        output_dir = os.path.join(
-            eval_result.training_result.output_dir, "visualisation"
-        )
-        if not os.path.isdir(output_dir):
-            os.mkdir(output_dir)
-    else:
-        output_dir = vis_output_dir
-
-    # Get the different IMs predicted
-    ims = _get_ims(eval_result)
-
-    # Create a residual histogram for each IM
-    print("Creating residual histograms for each IM")
-    for im in ims:
-        create_IM_res_hist(
-            os.path.join(output_dir, f"ln_res_{im}.png"),
-            eval_result.ln_res_train,
-            im,
-            eval_result.ln_res_val,
-            xlim_n_std=hist_x_lim,
-        )
-
-    print("Creating residual histogram across all IMs")
-    create_res_hist(
-        os.path.join(output_dir, "ln_res.png"),
-        eval_result.ln_res_train,
-        ims,
-        val_df=eval_result.ln_res_val,
-        xlim_n_std=hist_x_lim,
-    )
-
-    # Create csv for spatial plotting
-    print("Generating spatial residual plotting data")
-    comb_csv_files, im_csv_files = gen_spatial_data_csv(output_dir, eval_result, ims)
-
-    if (
-        plot_items_ffp is None
-        or gen_options_ffp is None
-        and (plot_spatial_comb_res or plot_spatial_im_res)
-    ):
-        print(
-            "Require path to the plot_items.py script in order to run "
-            "spatial residual plotting."
-        )
-        return
-
-    with open(gen_options_ffp, "r") as f:
-        gen_options_dict = yaml.safe_load(f)
-
-    if plot_spatial_comb_res:
-        print("Plotting combined IM spatial residual plots")
-        plot_multiple(plot_items_ffp, gen_options_dict, in_ffps=comb_csv_files,
-                      n_procs=n_procs, no_clobber=True)
-
-    if plot_spatial_im_res:
-        print("Plotting IM spatial residual plots")
-        plot_multiple(plot_items_ffp, gen_options_dict, in_ffps=im_csv_files,
-                      n_procs=n_procs, no_clobber=True)

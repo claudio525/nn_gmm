@@ -60,4 +60,6 @@ if __name__ == "__main__":
     eval_result = evaluation.evaluate(train_result)
     eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
 
-    visualisation.visualisation(eval_result, hist_x_lim=4)
+    vis = visualisation.PlotGen(eval_result)
+    vis.create_comb_res_hist()
+    vis.create_comb_res_hist()
