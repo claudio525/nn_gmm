@@ -7,18 +7,17 @@ from nn_gmm import training, evaluation
 from nn_gmm import visualisation
 
 # Grow the GPU memory usage as needed
-gpus = tf.config.experimental.list_physical_devices('GPU')
+gpus = tf.config.experimental.list_physical_devices("GPU")
 if gpus:
-  try:
-    # Currently, memory growth needs to be the same across GPUs
-    for gpu in gpus:
-      tf.config.experimental.set_memory_growth(gpu, True)
-    logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-    print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-  except RuntimeError as e:
-    # Memory growth must be set before GPUs have been initialized
-    print(e)
-
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices("GPU")
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
 
 
 INPUT_CONFIG = {
@@ -47,11 +46,16 @@ INPUT_CONFIG = {
 # Config
 TRAIN_CONFIG = {
     "model_config": {
-        "hidden_layer_config": {"dropout": 0.25},
+        "hidden_layer_config": {"dropout": 0.35},
         "hidden_layer_func": hidden_layers.relu_BN_dropout,
         "units": [60, 60, 60],
     },
-    "training_config": {"val_size": 0.1, "batch_size": 32, "n_epochs": 5, "loss": "MSE"},
+    "training_config": {
+        "val_size": 0.1,
+        "batch_size": 32,
+        "n_epochs": 1,
+        "loss": "MSE",
+    },
 }
 
 if __name__ == "__main__":
@@ -60,6 +64,13 @@ if __name__ == "__main__":
     eval_result = evaluation.evaluate(train_result)
     eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
 
-    vis = visualisation.PlotGen(eval_result)
-    vis.create_comb_res_hist()
-    vis.create_comb_res_hist()
+    plot_gen = visualisation.PlotGen(eval_result)
+    plot_gen.create_comb_res_hist()
+    plot_gen.create_IM_res_hists()
+
+    # GMT plots
+    # plot_items_ffp = "/path/to/visualization/visualization/gmt/plot_items.py"
+    # plot_gen.create_sigma_maps(plot_items_ffp, n_procs=8)
+    # plot_gen.create_nruptures_maps(plot_items_ffp, n_procs=8)
+    # plot_gen.create_comb_res_maps(plot_items_ffp, n_procs=8)
+    # plot_gen.create_IM_res_maps(plot_items_ffp, n_procs=8)

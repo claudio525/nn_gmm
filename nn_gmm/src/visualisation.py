@@ -66,6 +66,19 @@ class PlotGen:
         },
     }
 
+    DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
+        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
+        "options": {
+            "xyz-grid-search": "12m",
+            "xyz-grid-automask": "12k",
+            "xyz-cpt": "hot",
+            "xyz-transparency": "30",
+            "xyz-size": "1k",
+            "xyz-cpt-min": "0",
+            "xyz-cpt-max": "0.6",
+        },
+    }
+
     LN_RES_IM_FNAME_TEMPLATE = "ln_res_{}.png"
 
     def __init__(self, eval_result: EvaluationResult, output_dir: str = None):
@@ -83,13 +96,11 @@ class PlotGen:
 
         self.ims = self._get_IMs()
 
-        # Spatial residual csv files for GMT plotting
+        # Spatial csv files for GMT plotting
         # Don't use these variables directly, use the properties instead (lazy loading)
         self._comb_res_csv_files, self._im_res_csv_files = None, None
-
-        # Spatial sigma csv files for GMT plotting
-        # Don't use these variables directly, use the properties instead (lazy loading)
         self._im_sigma_csv_files = None
+        self._n_ruptures_csv_files = None
 
     @property
     def comb_res_csv_files(self):
@@ -118,6 +129,16 @@ class PlotGen:
             )
 
         return self._im_sigma_csv_files
+
+    @property
+    def n_ruptures_csv_files(self):
+        if self._n_ruptures_csv_files is None:
+            print(f"Computing spatial n_ruptures data")
+            self._n_ruptures_csv_files = gen_spatial_nruptures_csv(
+                self.output_dir, self.eval_result
+            )
+
+        return self._n_ruptures_csv_files
 
     def _get_IMs(self):
         """Get the different IMs predicted"""
@@ -238,10 +259,37 @@ class PlotGen:
         n_procs: int = 4,
         no_clobber: bool = True,
     ):
+        gen_options_dict = (
+            gen_options_dict
+            if gen_options_dict is not None
+            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        )
+
         plot_multiple(
             plot_items_ffp,
             gen_options_dict,
             in_ffps=self.im_sigma_csv_files,
+            n_procs=n_procs,
+            no_clobber=no_clobber,
+        )
+
+    def create_nruptures_maps(
+        self,
+        plot_items_ffp: str,
+        gen_options_dict: Dict = None,
+        n_procs: int = 4,
+        no_clobber: bool = True,
+    ):
+        gen_options_dict = (
+            gen_options_dict
+            if gen_options_dict is not None
+            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        )
+
+        plot_multiple(
+            plot_items_ffp,
+            gen_options_dict,
+            in_ffps=self.n_ruptures_csv_files,
             n_procs=n_procs,
             no_clobber=no_clobber,
         )
@@ -356,12 +404,61 @@ def get_station_lookup(X: pd.DataFrame):
     return station_lookup
 
 
+def gen_spatial_nruptures_csv(output_dir: str, eval_result: EvaluationResult):
+    station_lookup = get_station_lookup(eval_result.training_result.X)
+
+    csv_files = []
+    for cur_df, prefix in zip(
+        [eval_result.y_train_est, eval_result.y_val_est, eval_result.training_result.X],
+        ["train", "val", "all"],
+    ):
+        cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
+
+        cur_loc_count = cur_df.groupby("station").count().iloc[:, 0]
+        cur_loc_count.name = "n_ruptures"
+
+        cur_loc_count = pd.merge(
+            cur_loc_count, station_lookup, how="left", left_index=True, right_index=True
+        )
+
+        gmt_options = get_gmt_options_dict(
+            options={
+                **{"title": f"{prefix}_n_ruptures", "xyz-cpt-labels": f"n_ruptures"},
+                **compute_GMT_std_ticks(cur_loc_count["n_ruptures"], n_std=2),
+            }
+        )
+        csv_files.append(
+            _gmt_save(
+                cur_loc_count,
+                "n_ruptures",
+                os.path.join(output_dir, f"{prefix}_n_ruptures"),
+                gmt_options=gmt_options,
+            )
+        )
+
+    return csv_files
+
+
 def gen_spatial_sigma_csv(
     output_dir: str,
     eval_result: EvaluationResult,
     ims: Iterable[str],
     agg_func: Callable = np.nanmean,
 ):
+    """Generates the spatial sigma data for GMT plotting
+
+    Parameters
+    ----------
+    output_dir: str
+    eval_result: EvaluationResult
+    ims: iterable of strings
+        IMs of interest
+    agg_func: callable
+        The aggregation function to use to
+        aggregate the data at each location
+        Make sure this function can handle nan
+        values..
+    """
     station_lookup = get_station_lookup(eval_result.training_result.X)
 
     csv_files = []
@@ -372,17 +469,23 @@ def gen_spatial_sigma_csv(
 
         cur_loc_sigma = cur_df.groupby("station").agg(agg_func)
 
-        pd.merge(
+        cur_loc_sigma = pd.merge(
             cur_loc_sigma, station_lookup, how="left", left_index=True, right_index=True
         )
 
         for im in ims:
+            gmt_options = get_gmt_options_dict(
+                options={
+                    **{"title": f"{prefix}_{im}_std", "xyz-cpt-labels": f"{im}_std"},
+                    **compute_GMT_std_ticks(cur_loc_sigma[f"{im}_std"], n_std=3),
+                }
+            )
             csv_files.append(
                 _gmt_save(
                     cur_loc_sigma,
                     f"{im}_std",
-                    os.path.join(output_dir, f"{im}_std"),
-                    label=f"{im}_std",
+                    os.path.join(output_dir, f"{prefix}_{im.replace('.', 'p')}_std"),
+                    gmt_options=gmt_options,
                 )
             )
 
@@ -395,7 +498,7 @@ def gen_spatial_data_res_csv(
     ims: Iterable[str],
     agg_func: Callable = np.nanmean,
 ):
-    """Generates the spatial data for GMT plotting
+    """Generates the spatial residual data for GMT plotting
 
     For the combined residual, the individual IM residuals
     are averaged (mean).
@@ -454,12 +557,26 @@ def gen_spatial_data_res_csv(
         # Create the csv & option files for summed up residuals across all IMs
         cur_output_ffp = os.path.join(output_dir, f"{prefix}_loc_ln_res_mu")
         combined_csv_files.append(
-            _gmt_save(cur_loc_res, "ln_res_mu", cur_output_ffp, label="ln_res_mu")
+            _gmt_save(
+                cur_loc_res,
+                "ln_res_mu",
+                cur_output_ffp,
+                gmt_options=get_gmt_options_dict(
+                    options={"title": f"{prefix}_ln_res_mu", "xyz-cpt-labels": "ln_res_mu"}
+                ),
+            )
         )
 
         cur_output_ffp = os.path.join(output_dir, f"{prefix}_loc_ln_res_sigma")
         combined_csv_files.append(
-            _gmt_save(cur_loc_res, "ln_res_sigma", cur_output_ffp, label="ln_res_sigma")
+            _gmt_save(
+                cur_loc_res,
+                "ln_res_sigma",
+                cur_output_ffp,
+                gmt_options=get_gmt_options_dict(
+                    options={"title": f"{prefix}_ln_res_sigma", "xyz-cpt-labels": "ln_res_sigma"}
+                ),
+            )
         )
 
         # Create the csv & option files for each IM type
@@ -471,7 +588,12 @@ def gen_spatial_data_res_csv(
                     os.path.join(
                         output_dir, f"{prefix}_loc_{im.replace('.', 'p')}_ln_res_mu"
                     ),
-                    f"{im}_ln_res_mu",
+                    get_gmt_options_dict(
+                        options={
+                            "title": f"{prefix}_{im}_ln_res_mu",
+                            "xyz-cpt-labels": f"{im}_ln_res_mu",
+                        }
+                    ),
                 )
             )
             im_csv_files.append(
@@ -481,14 +603,19 @@ def gen_spatial_data_res_csv(
                     os.path.join(
                         output_dir, f"{prefix}_loc_{im.replace('.', 'p')}_ln_res_sigma"
                     ),
-                    f"{im}_ln_res_sigma",
+                    get_gmt_options_dict(
+                        options={
+                            "title": f"{prefix}_{im}_ln_res_sigma",
+                            "xyz-cpt-labels": f"{im}_ln_res_sigma",
+                        }
+                    ),
                 )
             )
 
     return combined_csv_files, im_csv_files
 
 
-def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, label: str = None):
+def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = None):
     """Saves the specified data in the correct csv format for GMT plotting,
     also creates the corresponding options file
 
@@ -501,8 +628,8 @@ def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, label: str = None):
         Column name that contains the values to save
     output_ffp: str
         Output file path without the extension
-    label: str, optional
-        Plot label
+    gmt_options: dictionary, optional
+        The individual GMT options dict
 
     Returns
     ----------
@@ -513,19 +640,14 @@ def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, label: str = None):
         f"{output_ffp}.csv"
     )
 
-    options = {} if label is None else {"title": label, "xyz-cpt-labels": label}
+    gmt_options = get_gmt_options_dict() if gmt_options is None else gmt_options
     with open(f"{output_ffp}.yaml", "w") as f:
-        yaml.safe_dump(gen_gmt_options_dict(options=options), f)
-        # yaml.safe_dump(gen_gmt_options_dict(options=options, data_series=df[key]), f)
+        yaml.safe_dump(gmt_options, f)
 
     return f"{output_ffp}.csv"
 
 
-def gen_gmt_options_dict(
-    flags: List[str] = None,
-    options: Dict[str, Any] = None,
-    data_series: pd.Series = None,
-):
+def get_gmt_options_dict(flags: List[str] = None, options: Dict[str, Any] = None):
     """Generates the GMT plot options dict"""
     cur_dict = TEMPLATE_OPTIONS_DICT.copy()
 
@@ -535,17 +657,31 @@ def gen_gmt_options_dict(
     if options is not None:
         cur_dict["options"] = options
 
-    if data_series is not None:
-        std = data_series.std()
-
-        # Compute min/max and tick increments for colour bar
-        cpt_max = 2.5 * std
-        n_dec_points = 2 if cpt_max < 1.0 else 1
-        cpt_max = float(np.round(cpt_max, n_dec_points))
-        tick_inc = float(np.round((cpt_max / 4), n_dec_points))
-        cpt_max = tick_inc * 4
-
-        options["xyz-cpt-max"], options["xyz-cpt-min"] = cpt_max, -cpt_max
-        options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
-
     return cur_dict
+
+
+def compute_GMT_std_ticks(
+    data_series: pd.Series, n_std: float = 2, center: float = None
+):
+    options = {}
+
+    std = data_series.std()
+    center = center if center is not None else data_series.mean()
+
+    # Compute min/max and tick increments for colour bar
+    cpt_max = center + (n_std * std)
+    n_dec_points = -int(f"{std:.10E}".split("E")[1])
+
+    # Can't use the np functions, as yaml does not know
+    # how to save type np.float
+    cpt_max = round(float(cpt_max), n_dec_points)
+    center = round(float(center), n_dec_points)
+
+    tick_inc = float(round(((cpt_max - center) / 4), n_dec_points))
+    cpt_max = round(center + (tick_inc * 4), n_dec_points)
+
+    options["xyz-cpt-max"] = cpt_max
+    options["xyz-cpt-min"] = round(center - (4 * tick_inc), n_dec_points)
+    options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
+
+    return options
