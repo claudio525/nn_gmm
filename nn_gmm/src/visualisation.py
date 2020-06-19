@@ -90,8 +90,9 @@ class PlotGen:
             if output_dir is not None
             else os.path.join(eval_result.training_result.output_dir, "visualisation")
         )
-        if not os.path.isdir(output_dir):
-            os.mkdir(output_dir)
+
+        if not os.path.isdir(self.output_dir):
+            os.mkdir(self.output_dir)
 
         self.train_res_df = eval_result.ln_res_train
         self.val_res_df = eval_result.ln_res_val
