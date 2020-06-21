@@ -229,8 +229,8 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
     # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
     with pd.option_context("mode.chained_assignment", None):
         std_scale_features = input_config["std_scale_features"]
+        std_scaler = preprocessing.StandardScaler()
         if std_scale_features is not None and len(std_scale_features) > 0:
-            std_scaler = preprocessing.StandardScaler()
             X_train.loc[:, std_scale_features] = std_scaler.fit_transform(
                 X_train.loc[:, std_scale_features].values
             )
@@ -239,8 +239,8 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
             )
 
         min_max_features = input_config["min_max_scale_features"]
+        min_max_scaler = preprocessing.MinMaxScaler()
         if min_max_features is not None and len(min_max_features) > 0:
-            min_max_scaler = preprocessing.MinMaxScaler()
             X_train.loc[:, min_max_features] = min_max_scaler.fit_transform(
                 X_train.loc[:, min_max_features].values
             )
