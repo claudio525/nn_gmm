@@ -3,6 +3,7 @@ import json
 import os
 import datetime
 from typing import List, Dict, Tuple
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -136,9 +137,7 @@ class TrainingResult:
         y_train: pd.DataFrame,
         X_val: pd.DataFrame,
         y_val: pd.DataFrame,
-        std_scaler: preprocessing.StandardScaler,
-        min_max_scaler: preprocessing.MinMaxScaler,
-        best_model_ffp: str,
+        best_model_dir: str,
     ):
 
         self.input_config = input_config
@@ -152,17 +151,17 @@ class TrainingResult:
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
-        self.std_scaler = std_scaler
-        self.min_max_scaler = min_max_scaler
 
-        self.best_model_ffp = best_model_ffp
+        self.best_model_dir = best_model_dir
 
     def save(self, output_ffp: str):
         with open(output_ffp, "wb") as f:
             pickle.dump(self, f)
 
 
-def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[TrainingResult, str]:
+def run(
+    input_config: Dict, train_config: Dict, verbose: int = 2
+) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
 
@@ -190,12 +189,14 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
     batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
 
     # Create the output directory
-    output_dir = input_config["output_dir"]
-    if output_dir is None:
-        output_dir = os.path.join(input_config["base_output_dir"], create_run_id())
-    if os.path.isdir(output_dir):
+    output_dir = (
+        Path(input_config["output_dir"])
+        if input_config["output_dir"] is not None
+        else Path(input_config["base_output_dir"]) / create_run_id()
+    )
+    if output_dir.is_dir():
         print(f"Ouput dir {output_dir} already exists, quitting!")
-    os.mkdir(output_dir)
+    output_dir.mkdir()
 
     # Save the input, model & training config
     with open(os.path.join(output_dir, "input_config.json"), "w") as f:
@@ -223,8 +224,7 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
     n_train, n_val = X_train.shape[0], X_val.shape[0]
     n_features, n_outputs = X_train.shape[1], y_train.shape[1]
 
-    # Preprocessing
-    # TODO: Hmh
+    # Preprocessing of features
     # Pretty sure this error message does not apply here
     # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
     with pd.option_context("mode.chained_assignment", None):
@@ -248,6 +248,18 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
                 X_val.loc[:, min_max_features].values
             )
 
+    # Preprocessing of the outputs
+    assert np.all(y_train.columns == y_val.columns)
+    std_scaler_y = preprocessing.StandardScaler()
+    y_train = pd.DataFrame(
+        index=y_train.index,
+        columns=y_train.columns,
+        data=std_scaler_y.fit_transform(y_train),
+    )
+    y_val = pd.DataFrame(
+        index=y_val.index, columns=y_val.columns, data=std_scaler_y.transform(y_val)
+    )
+
     # Create the train & validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices((X_train.values, y_train.values))
     train_dataset = train_dataset.shuffle(n_train).batch(batch_size).prefetch(50)
@@ -264,11 +276,11 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
     model.summary()
 
     # Callbacks
-    best_model_ffp = os.path.join(output_dir, "best_model.h5")
+    model_dir = output_dir / "best_model"
     callbacks = [
         # Saves the best model (based on the validation loss)
         keras.callbacks.ModelCheckpoint(
-            best_model_ffp, monitor="val_loss", save_best_only=True
+            str(model_dir), monitor="val_loss", save_best_only=True
         )
     ]
 
@@ -281,6 +293,25 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
         callbacks=callbacks,
         verbose=verbose,
     )
+
+    # Save the feature & output scalers
+    with open(model_dir / "scalers.pickle", "wb") as f:
+        pickle.dump(
+            {
+                "std_scaler": std_scaler,
+                "min_max_scaler": min_max_scaler,
+                "std_scaler_y": std_scaler_y,
+            },
+            f,
+        )
+
+    # Save the order of the input features
+    np.save(model_dir / "features.npy", X_train.columns.values.astype(str))
+
+    # Save the input (for the model)
+    with open(model_dir / "input_config.json", "w") as f:
+        json.dump(input_config, f)
+        # f.write(json.dumps(input_config))
 
     # Save the loss
     loss_df = pd.DataFrame.from_dict(history.history)
@@ -310,9 +341,7 @@ def run(input_config: Dict, train_config: Dict, verbose: int = 2) -> Tuple[Train
             y_train,
             X_val,
             y_val,
-            std_scaler,
-            min_max_scaler,
-            best_model_ffp,
+            model_dir,
         ),
         output_dir,
     )

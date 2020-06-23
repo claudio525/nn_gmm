@@ -5,6 +5,7 @@ import numpy as np
 from tensorflow import keras
 
 from . import training
+from .model import GMM
 
 
 class EvaluationResult:
@@ -39,8 +40,6 @@ class EvaluationResult:
             pickle.dump(self, f)
 
 
-
-
 def evaluate(training_result: training.TrainingResult) -> EvaluationResult:
     """
     Evaluates a trained model
@@ -53,24 +52,22 @@ def evaluate(training_result: training.TrainingResult) -> EvaluationResult:
     -------
     EvaluationResult
     """
-    print(
-        f"============================== Evaluation ==============================="
-    )
+    print(f"============================== Evaluation ===============================")
 
     # Load the model
-    print(f"Loading model {training_result.best_model_ffp}")
-    model = keras.models.load_model(training_result.best_model_ffp)
+    print(f"Loading model {training_result.best_model_dir}")
+    model = GMM.load(training_result.best_model_dir)
 
     # Get training and validation dataset predictions
     print(f"Computing training and validation predictions")
-    y_train_est = model.predict(training_result.X_train)
+    y_train_est = model.predict(training_result.X_train, pre_process=False)
     y_train_est = pd.DataFrame(
         data=y_train_est,
         index=training_result.y_train.index,
         columns=training_result.y_train.columns,
     )
 
-    y_val_est = model.predict(training_result.X_val)
+    y_val_est = model.predict(training_result.X_val, pre_process=False)
     y_val_est = pd.DataFrame(
         data=y_val_est,
         index=training_result.y_val.index,
