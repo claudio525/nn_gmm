@@ -14,6 +14,7 @@ from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 
 from . import hidden_layers
+from . import utils
 
 EXAMPLE_INPUT_CONFIG = {
     "sample_db_ffp": "/Users/Clus/code/work/nn_gmm/data/sample_dbs/v18p6.h5",
@@ -200,13 +201,13 @@ def run(
 
     # Save the input, model & training config
     with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-        f.write(json.dumps(input_config))
+        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder)
 
     with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        f.write(json.dumps({key: str(val) for key, val in model_config.items()}))
+        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        f.write(json.dumps(training_config))
+        json.dump(train_config, f, cls=utils.GenericObjJSONEncoder)
 
     # Load & clean the data
     print(f"Loading samples")
