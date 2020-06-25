@@ -1,20 +1,62 @@
 import os
-from typing import Tuple, Iterable, Callable, Dict, List, Any
+from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 
 import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.lines import Line2D
 
+import empirical.util.classdef as classdef
+import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple
 from .evaluation import EvaluationResult
 from .training import TrainingResult
-
-sns.set()
+from .model import GMM
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
+
+MARKERS = [
+    ".",
+    ",",
+    "o",
+    "v",
+    "^",
+    "<",
+    ">",
+    "1",
+    "2",
+    "3",
+    "4",
+    "8",
+    "s",
+    "p",
+    "*",
+    "h",
+    "H",
+    "+",
+    "x",
+    "D",
+    "d",
+    "|",
+    "_",
+    "P",
+    "X",
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+]
 
 
 def multi_fig(
@@ -47,7 +89,198 @@ def create_multi_hist(
     fig.savefig(plot_ffp)
 
 
-class PlotGen:
+class IMvsPlotGen:
+    def __init__(self, model: GMM):
+        self.model = model
+
+    def get_B10_values(
+        self,
+        im: str,
+        feature_key: str,
+        feature_range: np.ndarray,
+        const_values: pd.Series,
+    ) -> pd.Series:
+        period = 0 if im in ["PGA", "PGV"] else float(im.split("_")[-1])
+        if feature_key == "rrup":
+            fault = classdef.Fault(
+                Mw=const_values.mag,
+                rake=const_values.rake,
+                dip=const_values.dip,
+                ztor=const_values.ztor,
+            )
+
+            im_values = []
+            for cur_rrup in feature_range:
+                cur_site = classdef.Site(
+                    rrup=cur_rrup,
+                    rjb=cur_rrup,
+                    rx=cur_rrup,
+                    hw=True,
+                    rtvz=0,
+                    vs30=const_values.vs30,
+                    vs30measured=False,
+                )
+                cur_mean, (cur_sigma, _, __) = emp_factory.compute_gmm(
+                    fault, cur_site, classdef.GMM.Br_10, im, [period]
+                )
+                im_values.append(cur_mean)
+            return pd.Series(index=feature_range, data=np.asarray(im_values))
+
+    def get_est_values(
+        self,
+        feature_key: str,
+        feature_values: np.ndarray,
+        const_values: pd.Series,
+        locations: pd.DataFrame,
+    ):
+        feature_df = pd.DataFrame(
+            data=np.concatenate(
+                (
+                    np.repeat(locations.values, len(feature_values), axis=0),
+                    np.tile(feature_values, locations.shape[0])[:, np.newaxis],
+                ),
+                axis=1,
+            ),
+            columns=list(locations.columns) + [feature_key],
+        )
+
+        constants_df = pd.DataFrame(
+            data=np.repeat(
+                const_values.values[np.newaxis, :], feature_df.shape[0], axis=0
+            ),
+            columns=const_values.index.values,
+        )
+
+        # Drop the column that is varied
+        constants_df.drop(columns=[feature_key], inplace=True)
+
+        # Merge
+        feature_df = feature_df.merge(constants_df, left_index=True, right_index=True)
+
+        # Run estimation
+        y_est_df = self.model.predict(feature_df, pre_process=True)
+        y_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
+        return feature_df, y_est_df
+
+    def gen_plot(
+        self,
+        im: str,
+        feature_key: str,
+        feature_df: pd.DataFrame,
+        y_est_df: pd.DataFrame,
+        locations: pd.DataFrame,
+        emp_df: pd.Series = None,
+        output_ffp: str = None,
+    ):
+
+        # Create the plot
+        fig = plt.figure(figsize=(18, 13.5))
+
+        if locations.shape[0] < len(MARKERS):
+            for loc_ix in range(locations.shape[0]):
+                cur_loc_mask = (feature_df["lon"] == locations.iloc[loc_ix].lon) & (
+                    feature_df["lat"] == locations.iloc[loc_ix].lat
+                )
+                plt.scatter(
+                    feature_df.loc[cur_loc_mask, feature_key],
+                    y_est_df.loc[cur_loc_mask, im],
+                    marker=MARKERS[loc_ix],
+                )
+        else:
+            plt.scatter(feature_df[feature_key], y_est_df[im], marker=".", s=1)
+
+        # Add mean & std line
+        feature_means = y_est_df.groupby(feature_key).mean()
+        feature_stds = y_est_df.groupby(feature_key).std()
+        plt.plot(
+            feature_means.index.values,
+            feature_means[im],
+            linewidth=0.75,
+            c="k",
+            label="mean",
+        )
+        plt.plot(
+            feature_means.index.values,
+            feature_means[im] + feature_stds[im],
+            linestyle="--",
+            c="k",
+            linewidth=0.75,
+            label="std",
+        )
+        plt.plot(
+            feature_means.index.values,
+            feature_means[im] - feature_stds[im],
+            linestyle="--",
+            c="k",
+            linewidth=0.75,
+        )
+
+        if emp_df is not None:
+            plt.plot(
+                emp_df.index.values,
+                emp_df.values,
+                c="r",
+                label=emp_df.name if emp_df.name is not None else None,
+            )
+
+        plt.xlabel(feature_key)
+        plt.ylabel(im)
+        plt.yscale("log")
+        plt.legend()
+
+        if output_ffp is not None:
+            plt.savefig(output_ffp)
+            plt.close()
+        else:
+            plt.show()
+
+        return fig
+
+
+# class IMvsPlotGen:
+#     def __init__(
+#         self,
+#         feature_df: pd.DataFrame,
+#         y_est: pd.DataFrame,
+#         stations: Iterable[str] = None,
+#     ):
+#         self.y_est = y_est
+#         self.feature_df = feature_df.loc[self.y_est.index.values]
+#
+#         # Add station column
+#         self.y_est["station"] = get_station_from_id(self.y_est.index.values.astype(str))
+#         self.feature_df["station"] = get_station_from_id(
+#             self.feature_df.index.values.astype(str)
+#         )
+#
+#         # Ensure same order & sanity check
+#         self.y_est.sort_index(inplace=True)
+#         self.feature_df.sort_index(inplace=True)
+#         assert np.all(self.y_est.index == self.feature_df.index)
+#
+#         self.station_lookup = get_station_lookup(feature_df)
+#
+#         if stations is not None:
+#             self.stations = np.ndarray(stations)
+#         else:
+#             # Just choose some random stations for now
+#             self.stations = np.random.choice(
+#                 self.station_lookup.index.values.astype(str), 5, replace=False
+#             )
+#         # Station maks for self.y_est and self.feature_df
+#         self._station_mask = np.isin(self.y_est.index.values.astype(str), stations)
+#
+#     def gen_plot(self, im: str, feature_key: str, const_values: Dict):
+#         fig = plt.figure(figsize=(16, 10))
+#
+#         if len(self.stations) <= len(MARKERS):
+#             for cur_station, cur_marker in zip(self.stations, MARKERS):
+#                 plt.scatter(self.feature_df.loc[self._station_mask, feature_key], self.y_est.loc[self._station_mask, im], marker=cur_marker)
+#
+#         pass
+
+
+class EvalPlotGen:
 
     DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
         "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
@@ -565,7 +798,10 @@ def gen_spatial_data_res_csv(
                 "ln_res_mu",
                 cur_output_ffp,
                 gmt_options=get_gmt_options_dict(
-                    options={"title": f"{prefix}_ln_res_mu", "xyz-cpt-labels": "ln_res_mu"}
+                    options={
+                        "title": f"{prefix}_ln_res_mu",
+                        "xyz-cpt-labels": "ln_res_mu",
+                    }
                 ),
             )
         )
@@ -577,7 +813,10 @@ def gen_spatial_data_res_csv(
                 "ln_res_sigma",
                 cur_output_ffp,
                 gmt_options=get_gmt_options_dict(
-                    options={"title": f"{prefix}_ln_res_sigma", "xyz-cpt-labels": "ln_res_sigma"}
+                    options={
+                        "title": f"{prefix}_ln_res_sigma",
+                        "xyz-cpt-labels": "ln_res_sigma",
+                    }
                 ),
             )
         )

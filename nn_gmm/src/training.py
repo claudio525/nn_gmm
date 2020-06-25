@@ -54,7 +54,7 @@ def load_clean_samples(
     sample_db_ffp: str,
     ignore_features: List[str] = None,
     categorial_features: List[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
     """
     Loads the data from the sample database, drops unwanted features
     and performs one-hot encoding for the categorial features
@@ -83,11 +83,24 @@ def load_clean_samples(
         X = X.drop(columns=ignore_features)
 
     # One hot encoding of categorial features
+    cat_columns = None
     if categorial_features is not None:
         if np.isin(categorial_features, X.columns):
             X = pd.get_dummies(X, columns=categorial_features)
 
-    return X, y
+            # Get all the new one-hot encoded categorial columns\
+            cat_columns = [
+                cur_col
+                for cur_col in X.columns.values.astype(str)
+                if any(
+                    [
+                        cur_col.startswith(cat_feature)
+                        for cat_feature in categorial_features
+                    ]
+                )
+            ]
+
+    return X, y, cat_columns
 
 
 def create_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
@@ -211,7 +224,7 @@ def run(
 
     # Load & clean the data
     print(f"Loading samples")
-    X, y = load_clean_samples(
+    X, y, cat_columns = load_clean_samples(
         input_config["sample_db_ffp"],
         input_config["ignore_features"],
         input_config["categorial_features"],
@@ -296,23 +309,24 @@ def run(
     )
 
     # Save the feature & output scalers
-    with open(model_dir / "scalers.pickle", "wb") as f:
+    with open(model_dir / "preprocessing.pickle", "wb") as f:
         pickle.dump(
             {
                 "std_scaler": std_scaler,
                 "min_max_scaler": min_max_scaler,
                 "std_scaler_y": std_scaler_y,
+                "cat_columns": cat_columns,
             },
             f,
         )
 
-    # Save the order of the input features
+    # Save the order of the features and output
     np.save(model_dir / "features.npy", X_train.columns.values.astype(str))
+    np.save(model_dir / "outputs.npy", y_train.columns.values.astype(str))
 
     # Save the input (for the model)
     with open(model_dir / "input_config.json", "w") as f:
         json.dump(input_config, f)
-        # f.write(json.dumps(input_config))
 
     # Save the loss
     loss_df = pd.DataFrame.from_dict(history.history)
