@@ -92,21 +92,23 @@ def create_multi_hist(
 
 class IMvsPlotGen:
 
-    CONST_DEFAULT_VALUES = pd.Series(data={
-        "vs30": 388,
-        "z1p0": 0.21,
-        "z2p5": 1.3,
-        "dip": 60,
-        "rake": 45,
-        "width": 18.2775,
-        "ztor": 0,
-        "mag": 7.0,
-        "rjb": 91,
-        "rrup": 91,
-        "rx": 91,
-        "ry": 91,
-        "tect_type": "ACTIVE_SHALLOW",
-    })
+    CONST_DEFAULT_VALUES = pd.Series(
+        data={
+            "vs30": 388,
+            "z1p0": 0.21,
+            "z2p5": 1.3,
+            "dip": 60,
+            "rake": 45,
+            "width": 18.2775,
+            "ztor": 0,
+            "mag": 7.0,
+            "rjb": 91,
+            "rrup": 91,
+            "rx": 91,
+            "ry": 91,
+            "tect_type": "ACTIVE_SHALLOW",
+        }
+    )
 
     def __init__(self, model: GMM):
         self.model = model
@@ -117,8 +119,11 @@ class IMvsPlotGen:
         feature_key: str,
         feature_range: np.ndarray,
         const_values: pd.Series,
-    ) -> pd.Series:
-        period = 0 if im in ["PGA", "PGV"] else float(im.split("_")[-1])
+    ) -> Union[pd.Series, None]:
+        if im.lower() not in ["pga", "pgv"] and not im.lower().startswith("psa"):
+            return None
+
+        period = 0 if im.lower() in ["pga", "pgv"] else float(im.split("_")[-1])
         if feature_key == "rrup":
             fault = classdef.Fault(
                 Mw=const_values.mag,
@@ -138,9 +143,14 @@ class IMvsPlotGen:
                     vs30=const_values.vs30,
                     vs30measured=False,
                 )
-                cur_mean, (cur_sigma, _, __) = emp_factory.compute_gmm(
+                emp_result = emp_factory.compute_gmm(
                     fault, cur_site, classdef.GMM.Br_10, im, [period]
                 )
+                if period == 0:
+                    cur_mean, (cur_sigma, _, __) = emp_result
+                else:
+                    cur_mean, (cur_sigma, _, __) = emp_result[0]
+
                 im_values.append(cur_mean)
             return pd.Series(index=feature_range, data=np.asarray(im_values))
 
@@ -191,7 +201,7 @@ class IMvsPlotGen:
         output_ffp: Union[str, Path] = None,
     ):
         output_ffp = output_ffp if isinstance(output_ffp, Path) else Path(output_ffp)
-        im = f"{im}_mean"
+        im_key = f"{im}_mean"
 
         # Create the plot
         fig = plt.figure(figsize=(18, 13.5))
@@ -203,25 +213,25 @@ class IMvsPlotGen:
                 )
                 plt.scatter(
                     feature_df.loc[cur_loc_mask, feature_key],
-                    y_est_df.loc[cur_loc_mask, im],
+                    y_est_df.loc[cur_loc_mask, im_key],
                     marker=MARKERS[loc_ix],
                 )
         else:
-            plt.scatter(feature_df[feature_key], y_est_df[im], marker=".", s=1)
+            plt.scatter(feature_df[feature_key], y_est_df[im_key], marker=".", s=1)
 
         # Add mean & std line
         feature_means = y_est_df.groupby(feature_key).mean()
         feature_stds = y_est_df.groupby(feature_key).std()
         plt.plot(
             feature_means.index.values,
-            feature_means[im],
+            feature_means[im_key],
             linewidth=0.75,
             c="k",
             label="mean",
         )
         plt.plot(
             feature_means.index.values,
-            feature_means[im] + feature_stds[im],
+            feature_means[im_key] + feature_stds[im_key],
             linestyle="--",
             c="k",
             linewidth=0.75,
@@ -229,7 +239,7 @@ class IMvsPlotGen:
         )
         plt.plot(
             feature_means.index.values,
-            feature_means[im] - feature_stds[im],
+            feature_means[im_key] - feature_stds[im_key],
             linestyle="--",
             c="k",
             linewidth=0.75,
@@ -249,13 +259,44 @@ class IMvsPlotGen:
         plt.legend()
 
         if output_ffp is not None:
-            output_ffp.parent.mkdir(parents=True)
+            if not output_ffp.parent.is_dir():
+                output_ffp.parent.mkdir(parents=True)
             plt.savefig(output_ffp)
             plt.close()
         else:
             plt.show()
 
         return fig
+
+    def gen_plots(
+        self,
+        ims: np.ndarray,
+        feature_dict: Dict[str, np.ndarray],
+        locations: pd.DataFrame,
+        output_dir: Union[Path, None],
+    ):
+        if not output_dir.is_dir():
+            output_dir.mkdir(parents=True)
+
+        for cur_feature, cur_feature_values in feature_dict.items():
+            cur_feature_df, cur_y_est_df = self.get_est_values(
+                cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
+            )
+
+            for cur_im in ims:
+                cur_emp_df = self.get_B10_values(
+                    cur_im, cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES
+                )
+                self.gen_plot(
+                    cur_im,
+                    cur_feature,
+                    cur_feature_df,
+                    cur_y_est_df,
+                    locations,
+                    emp_df=cur_emp_df,
+                    output_ffp=output_dir
+                    / f"{cur_im.replace('.', 'p')}_{cur_feature}.png",
+                )
 
 
 class EvalPlotGen:
