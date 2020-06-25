@@ -173,7 +173,7 @@ class TrainingResult:
             pickle.dump(self, f)
 
 
-def run(
+def train(
     input_config: Dict, train_config: Dict, verbose: int = 2
 ) -> Tuple[TrainingResult, str]:
     """

@@ -1,5 +1,6 @@
 import os
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
+from pathlib import Path
 
 import yaml
 import numpy as np
@@ -90,6 +91,23 @@ def create_multi_hist(
 
 
 class IMvsPlotGen:
+
+    CONST_DEFAULT_VALUES = pd.Series(data={
+        "vs30": 388,
+        "z1p0": 0.21,
+        "z2p5": 1.3,
+        "dip": 60,
+        "rake": 45,
+        "width": 18.2775,
+        "ztor": 0,
+        "mag": 7.0,
+        "rjb": 91,
+        "rrup": 91,
+        "rx": 91,
+        "ry": 91,
+        "tect_type": "ACTIVE_SHALLOW",
+    })
+
     def __init__(self, model: GMM):
         self.model = model
 
@@ -170,8 +188,10 @@ class IMvsPlotGen:
         y_est_df: pd.DataFrame,
         locations: pd.DataFrame,
         emp_df: pd.Series = None,
-        output_ffp: str = None,
+        output_ffp: Union[str, Path] = None,
     ):
+        output_ffp = output_ffp if isinstance(output_ffp, Path) else Path(output_ffp)
+        im = f"{im}_mean"
 
         # Create the plot
         fig = plt.figure(figsize=(18, 13.5))
@@ -229,55 +249,13 @@ class IMvsPlotGen:
         plt.legend()
 
         if output_ffp is not None:
+            output_ffp.parent.mkdir(parents=True)
             plt.savefig(output_ffp)
             plt.close()
         else:
             plt.show()
 
         return fig
-
-
-# class IMvsPlotGen:
-#     def __init__(
-#         self,
-#         feature_df: pd.DataFrame,
-#         y_est: pd.DataFrame,
-#         stations: Iterable[str] = None,
-#     ):
-#         self.y_est = y_est
-#         self.feature_df = feature_df.loc[self.y_est.index.values]
-#
-#         # Add station column
-#         self.y_est["station"] = get_station_from_id(self.y_est.index.values.astype(str))
-#         self.feature_df["station"] = get_station_from_id(
-#             self.feature_df.index.values.astype(str)
-#         )
-#
-#         # Ensure same order & sanity check
-#         self.y_est.sort_index(inplace=True)
-#         self.feature_df.sort_index(inplace=True)
-#         assert np.all(self.y_est.index == self.feature_df.index)
-#
-#         self.station_lookup = get_station_lookup(feature_df)
-#
-#         if stations is not None:
-#             self.stations = np.ndarray(stations)
-#         else:
-#             # Just choose some random stations for now
-#             self.stations = np.random.choice(
-#                 self.station_lookup.index.values.astype(str), 5, replace=False
-#             )
-#         # Station maks for self.y_est and self.feature_df
-#         self._station_mask = np.isin(self.y_est.index.values.astype(str), stations)
-#
-#     def gen_plot(self, im: str, feature_key: str, const_values: Dict):
-#         fig = plt.figure(figsize=(16, 10))
-#
-#         if len(self.stations) <= len(MARKERS):
-#             for cur_station, cur_marker in zip(self.stations, MARKERS):
-#                 plt.scatter(self.feature_df.loc[self._station_mask, feature_key], self.y_est.loc[self._station_mask, im], marker=cur_marker)
-#
-#         pass
 
 
 class EvalPlotGen:
