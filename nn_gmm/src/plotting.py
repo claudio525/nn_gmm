@@ -124,6 +124,7 @@ class IMvsPlotGen:
             return None
 
         period = 0 if im.lower() in ["pga", "pgv"] else float(im.split("_")[-1])
+        im_values = []
         if feature_key == "rrup":
             fault = classdef.Fault(
                 Mw=const_values.mag,
@@ -132,7 +133,6 @@ class IMvsPlotGen:
                 ztor=const_values.ztor,
             )
 
-            im_values = []
             for cur_rrup in feature_range:
                 cur_site = classdef.Site(
                     rrup=cur_rrup,
@@ -153,6 +153,34 @@ class IMvsPlotGen:
 
                 im_values.append(cur_mean)
             return pd.Series(index=feature_range, data=np.asarray(im_values))
+        elif feature_key == "mag":
+            site = classdef.Site(
+                rrup=const_values.rrup,
+                rjb=const_values.rjb,
+                rx=const_values.rx,
+                hw=True,
+                rtvz=0,
+                vs30=const_values.vs30,
+                vs30measured=False,
+            )
+
+            for cur_mag in feature_range:
+                cur_fault = classdef.Fault(
+                    Mw=cur_mag,
+                    rake=const_values.rake,
+                    dip=const_values.dip,
+                    ztor=const_values.ztor,
+                )
+
+                emp_result = emp_factory.compute_gmm(cur_fault, site, classdef.GMM.Br_10, im, [period])
+                if period == 0:
+                    cur_mean, (cur_sigma, _, __) = emp_result
+                else:
+                    cur_mean, (cur_sigma, _, __) = emp_result[0]
+
+                im_values.append(cur_mean)
+            return pd.Series(index=feature_range, data=np.asarray(im_values))
+
 
     def get_est_values(
         self,
