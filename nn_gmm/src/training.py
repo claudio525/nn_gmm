@@ -72,6 +72,9 @@ def load_clean_samples(
     -------
     X: pd.DataFrame
     y: pd.DataFrame
+    cat_columns: list of strings
+        Names of all the one-hot-encoded
+        categorical columns
     """
     # Load the data
     with pd.HDFStore(sample_db_ffp, mode="r") as store:
@@ -262,16 +265,18 @@ def train(
                 X_val.loc[:, min_max_features].values
             )
 
-    # Preprocessing of the outputs
+    # Preprocessing of the outputs, log transform & standardise
     assert np.all(y_train.columns == y_val.columns)
     std_scaler_y = preprocessing.StandardScaler()
     y_train = pd.DataFrame(
         index=y_train.index,
         columns=y_train.columns,
-        data=std_scaler_y.fit_transform(y_train),
+        data=std_scaler_y.fit_transform(np.log(y_train.values)),
     )
     y_val = pd.DataFrame(
-        index=y_val.index, columns=y_val.columns, data=std_scaler_y.transform(y_val)
+        index=y_val.index,
+        columns=y_val.columns,
+        data=std_scaler_y.transform(np.log(y_val.values)),
     )
 
     # Create the train & validation datasets

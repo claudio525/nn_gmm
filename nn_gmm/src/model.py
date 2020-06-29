@@ -19,7 +19,7 @@ class GMM:
         std_scaler: StandardScaler,
         min_max_scaler: MinMaxScaler,
         std_scaler_y: StandardScaler,
-        cat_columns: List[str]
+        cat_columns: List[str],
     ):
         self.model = model
         self.features = features
@@ -60,11 +60,13 @@ class GMM:
 
         # Ensure that all the required features exist
         if not np.all(np.isin(self.features, X.columns.values.astype(str))):
-            raise ValueError(
-                "Not all required features exist in the given dataframe")
+            raise ValueError("Not all required features exist in the given dataframe")
 
         y_est = self.model.predict(X.loc[:, self.features])
-        y_est_df = pd.DataFrame(data=self.std_scaler_y.inverse_transform(y_est), columns=self.outputs)
+        y_est_df = pd.DataFrame(
+            data=np.exp(self.std_scaler_y.inverse_transform(y_est)),
+            columns=self.outputs,
+        )
         return y_est_df
 
     @classmethod
@@ -92,5 +94,5 @@ class GMM:
             pre_dict["std_scaler"],
             pre_dict["min_max_scaler"],
             pre_dict["std_scaler_y"],
-            pre_dict["cat_columns"]
+            pre_dict["cat_columns"],
         )
