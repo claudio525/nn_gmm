@@ -32,7 +32,7 @@ class GMM:
 
         self.std_scaler_y = std_scaler_y
 
-    def predict(self, X: pd.DataFrame, pre_process: bool = True):
+    def predict(self, X: pd.DataFrame, pre_process: bool = True, result_df_index: np.ndarray = None):
         std_features = self.input_config["std_scale_features"]
         cat_features = self.input_config["categorial_features"]
         min_max_features = self.input_config["min_max_scale_features"]
@@ -66,6 +66,7 @@ class GMM:
         y_est_df = pd.DataFrame(
             data=np.exp(self.std_scaler_y.inverse_transform(y_est)),
             columns=self.outputs,
+            index=result_df_index
         )
         return y_est_df
 

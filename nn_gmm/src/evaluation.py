@@ -60,18 +60,16 @@ def evaluate(training_result: training.TrainingResult) -> EvaluationResult:
 
     # Get training and validation dataset predictions
     print(f"Computing training and validation predictions")
-    y_train_est = model.predict(training_result.X_train, pre_process=False)
-    y_train_est = pd.DataFrame(
-        data=y_train_est,
-        index=training_result.y_train.index,
-        columns=training_result.y_train.columns,
+    y_train_est = model.predict(
+        training_result.X_train,
+        pre_process=False,
+        result_df_index=training_result.X_train.index.values.astype(str),
     )
 
-    y_val_est = model.predict(training_result.X_val, pre_process=False)
-    y_val_est = pd.DataFrame(
-        data=y_val_est,
-        index=training_result.y_val.index,
-        columns=training_result.y_val.columns,
+    y_val_est = model.predict(
+        training_result.X_val,
+        pre_process=False,
+        result_df_index=training_result.X_val.index.values.astype(str),
     )
 
     # Compute residuals
