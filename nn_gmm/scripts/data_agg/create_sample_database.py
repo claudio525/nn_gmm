@@ -21,7 +21,7 @@ def main(
 
     # Load site-source params
     print("Loading site-source params")
-    site_source_dict = agg_utils.load_site_source_dict(
+    site_source_df = agg_utils.load_site_source_dict(
         site_df, site_source_ffp, n_procs=n_procs
     )
 
@@ -31,59 +31,72 @@ def main(
 
     # Load IM data
     print("Loading IM data")
-    im_dict = agg_utils.load_im_dict(im_db_ffp, n_procs=n_procs)
+    im_df = agg_utils.load_im_dict(im_db_ffp, n_procs=n_procs)
+    im_df.sort_index(inplace=True)
 
     # Create all possible sample combinations based on the available labels
     print("Creating possible sample combinations")
-    sample_combs = agg_utils.create_sample_comb(im_dict)
+    sample_combs = agg_utils.create_sample_comb(im_df)
 
-    # Reduce sample set based on the input data availability
-    print("Dropping samples with missing data")
-    sample_combs = agg_utils.drop_missing_data(
-        sample_combs, site_df, source_df, site_source_dict
-    )
+    # # Reduce sample set based on the input data availability
+    # print("Dropping samples with missing data")
+    # sample_combs = agg_utils.drop_missing_data(
+    #     sample_combs, site_df, source_df, site_source_dict
+    # )
 
-    input_samples = {}
-    labels = {}
+    # Create the input dataframe (X)
+    input_df = sample_combs.copy()
+    input_df = pd.merge(input_df, source_df, how="inner", left_on="source", right_index=True)
+    input_df = pd.merge(input_df, site_df, how="inner", left_on="site", right_index=True)
+    input_df["id"] = input_df.index.values.astype(str)
 
-    start_time = time.time()
-    print("Creating samples")
-    for cur_id, cur_row in sample_combs.iterrows():
-        cur_site_params = site_df.loc[cur_row.site].values
-        cur_source_params = source_df.loc[cur_row.source].values
-        cur_site_source_params = site_source_dict[cur_row.site].loc[cur_row.source].values
-        cur_im_data = im_dict[cur_row.source].loc[cur_row.site].values
+    input_df = pd.merge(input_df, site_source_df, how="inner", left_on=["source", "site"], right_on=["source", "site"])
+    input_df.set_index("id", inplace=True)
+    input_df.sort_index(inplace=True)
 
-        input_samples[cur_id] = np.concatenate(
-            [cur_site_params, cur_source_params, cur_site_source_params]
-        )
-        labels[cur_id] = cur_im_data
+    assert np.all(input_df.index.values.astype(str) == im_df.index.values.astype(str))
 
-        continue
-    print(f"Took {time.time() - start_time} seconds")
-
-    print("Creating dataframe")
-    input_df = pd.DataFrame.from_dict(
-        input_samples,
-        orient="index",
-        columns=np.concatenate(
-            [
-                site_df.columns.values.astype(str),
-                source_df.columns.values.astype(str),
-                site_source_dict[cur_station].loc[cur_source].index.values.astype(str),
-            ]
-        ),
-    )
-    labels_df = pd.DataFrame.from_dict(
-        labels,
-        orient="index",
-        columns=im_dict[cur_source].loc[cur_station].index.values.astype(str),
-    )
+    # input_samples = {}
+    # labels = {}
+    #
+    # start_time = time.time()
+    # print("Creating samples")
+    # for cur_id, cur_row in sample_combs.iterrows():
+    #     cur_site_params = site_df.loc[cur_row.site].values
+    #     cur_source_params = source_df.loc[cur_row.source].values
+    #     cur_site_source_params = site_source_dict[cur_row.site].loc[cur_row.source].values
+    #     cur_im_data = im_df[cur_row.source].loc[cur_id].values
+    #
+    #     input_samples[cur_id] = np.concatenate(
+    #         [cur_site_params, cur_source_params, cur_site_source_params]
+    #     )
+    #     labels[cur_id] = cur_im_data
+    #
+    #     continue
+    # print(f"Took {time.time() - start_time} seconds")
+    #
+    # print("Creating dataframe")
+    # input_df = pd.DataFrame.from_dict(
+    #     input_samples,
+    #     orient="index",
+    #     columns=np.concatenate(
+    #         [
+    #             site_df.columns.values.astype(str),
+    #             source_df.columns.values.astype(str),
+    #             site_source_dict[cur_station].loc[cur_source].index.values.astype(str),
+    #         ]
+    #     ),
+    # )
+    # labels_df = pd.DataFrame.from_dict(
+    #     labels,
+    #     orient="index",
+    #     columns=im_df[cur_source].loc[cur_station].index.values.astype(str),
+    # )
 
     print(f"Writing to {output_ffp}")
     with pd.HDFStore(output_ffp) as store:
         store["X"] = input_df
-        store["y"] = labels_df
+        store["y"] = im_df
 
 
 if __name__ == "__main__":

@@ -38,7 +38,8 @@ def load_site_source_dict(
                 __load_site_df,
                 [(station, site_source_ffp) for station in site_df.index.values],
             )
-    return {key: value for key, value in results}
+
+    return pd.concat(results)
 
 
 def __load_site_df(cur_site, site_source_ffp):
@@ -49,10 +50,12 @@ def __load_site_df(cur_site, site_source_ffp):
         except KeyError:
             return None
 
-        faults = db["faults"]
-        df.index = faults.loc[df.fault_id].fault_name
+        faults = db["faults"].loc[df.fault_id].fault_name.values
+        df.index = [f"{cur_fault}_{cur_site}" for cur_fault in faults]
+        df["source"] = faults
+        df["site"] = cur_site
 
-    return cur_site, df
+    return df
 
 
 def load_im_dict(im_db_ffp: str, n_procs: int = 4):
@@ -78,16 +81,24 @@ def load_im_dict(im_db_ffp: str, n_procs: int = 4):
 
     with mp.Pool(processes=n_procs) as p:
         results = p.starmap(__load_im_df, [(fault, im_db_ffp) for fault in faults])
-    return {key: value for key, value in results}
+
+    # Check that all the dataframes have the same IMs
+    assert np.all(
+        [
+            np.all(np.isin(cur_df.columns.values, results[0].columns.values))
+            for cur_df in results
+        ]
+    )
+    return pd.concat(results, sort=True)
 
 
 def __load_im_df(cur_fault: str, im_db_ffp: str):
     """MP helper function"""
     with pd.HDFStore(im_db_ffp, "r") as store:
-        return cur_fault, store[cur_fault]
+        return store[cur_fault]
 
 
-def create_sample_comb(im_dict: Dict):
+def create_sample_comb(im_df: pd.DataFrame):
     """Generates the site-source combinations
     for which there is IM data available
 
@@ -105,19 +116,30 @@ def create_sample_comb(im_dict: Dict):
     numpy array
         with 2 columns, [site, source]
     """
-    ids, sources, sites = [], [], []
-    for cur_source, cur_df in im_dict.items():
-        cur_ids = cur_df.index.values.astype(str)
-        split_ids = np.stack(np.char.split(cur_ids, "_"), axis=0)
+    split_ids = np.stack(np.char.split(im_df.index.values.astype(str), "_"), axis=0)
 
-        ids.append(cur_ids)
-        sources.append(split_ids[:, 0])
-        sites.append(split_ids[:, 2])
+    sample_combs = pd.DataFrame(index=im_df.index)
+    sample_combs["source"] = split_ids[:, 0]
+    sample_combs["site"] = split_ids[:, 2]
 
-    ids = np.concatenate(ids)
-    sources, sites = np.concatenate(sources), np.concatenate(sites)
-    sample_combs_df = pd.DataFrame(index=ids, data=np.stack([sources, sites], axis=1), columns=["source", "site"])
-    return sample_combs_df
+    return sample_combs
+
+    # ids, sources, sites = [], [], []
+    #
+    # for cur_source, cur_df in im_dict.items():
+    #     cur_ids = cur_df.index.values.astype(str)
+    #     split_ids = np.stack(np.char.split(cur_ids, "_"), axis=0)
+    #
+    #     ids.append(cur_ids)
+    #     sources.append(split_ids[:, 0])
+    #     sites.append(split_ids[:, 2])
+    #
+    # ids = np.concatenate(ids)
+    # sources, sites = np.concatenate(sources), np.concatenate(sites)
+    # sample_combs_df = pd.DataFrame(
+    #     index=ids, data=np.stack([sources, sites], axis=1), columns=["source", "site"]
+    # )
+    # return sample_combs_df
 
 
 def drop_missing_data(
@@ -139,7 +161,9 @@ def drop_missing_data(
     missing_sources = unique_sources[
         ~pandas_isin(unique_sources, source_df.index.values)
     ]
-    sample_combs = sample_combs.loc[~pandas_isin(sample_combs.source, missing_sources), :]
+    sample_combs = sample_combs.loc[
+        ~pandas_isin(sample_combs.source, missing_sources), :
+    ]
     if missing_sources.size > 0 and verbose:
         print(f"Source df is missing the source: {missing_sources}")
 
@@ -147,14 +171,26 @@ def drop_missing_data(
     start_time = time.time()
 
     # Check all sites exist
-    missing_sites_source_mask = pd.Series(index=sample_combs.index, data=~pandas_isin(sample_combs.site, np.asarray(list(site_source_dict.keys()))))
+    missing_sites_source_mask = pd.Series(
+        index=sample_combs.index,
+        data=~pandas_isin(sample_combs.site, np.asarray(list(site_source_dict.keys()))),
+    )
     if np.any(missing_sites_source_mask) and verbose:
-        print(f"Site-Source dict is missing an entry for site/s: {missing_sites_source_mask.loc[missing_sites_source_mask == True]}")
+        print(
+            f"Site-Source dict is missing an entry for site/s: {missing_sites_source_mask.loc[missing_sites_source_mask == True]}"
+        )
 
     for cur_site in np.unique(sample_combs.site):
-        cur_site_ids = sample_combs.loc[sample_combs.site == cur_site].index.values.astype(str)
+        cur_site_ids = sample_combs.loc[
+            sample_combs.site == cur_site
+        ].index.values.astype(str)
 
-        missing_source_ids = cur_site_ids[~np.isin(sample_combs.loc[cur_site_ids, "source"], site_source_dict[cur_site].index.values.astype(str))]
+        missing_source_ids = cur_site_ids[
+            ~np.isin(
+                sample_combs.loc[cur_site_ids, "source"],
+                site_source_dict[cur_site].index.values.astype(str),
+            )
+        ]
         if missing_source_ids.size > 0:
             missing_sites_source_mask.loc[missing_source_ids] = True
             if verbose:
@@ -168,5 +204,3 @@ def drop_missing_data(
     print(f"Site source checking took {time.time() - start_time}")
 
     return sample_combs
-
-
