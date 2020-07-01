@@ -48,20 +48,16 @@ def main(
 
     start_time = time.time()
     print("Creating samples")
-    for row_ix in range(sample_combs.shape[0]):
-        # for row_ix in range(1000):
-        cur_station, cur_source = sample_combs[row_ix, :]
-        sample_id = f"{cur_station}_{cur_source}"
+    for cur_id, cur_row in sample_combs.iterrows():
+        cur_site_params = site_df.loc[cur_row.site].values
+        cur_source_params = source_df.loc[cur_row.source].values
+        cur_site_source_params = site_source_dict[cur_row.site].loc[cur_row.source].values
+        cur_im_data = im_dict[cur_row.source].loc[cur_row.site].values
 
-        cur_site_params = site_df.loc[cur_station].values
-        cur_source_params = source_df.loc[cur_source].values
-        cur_site_source_params = site_source_dict[cur_station].loc[cur_source].values
-        cur_im_data = im_dict[cur_source].loc[cur_station].values
-
-        input_samples[sample_id] = np.concatenate(
+        input_samples[cur_id] = np.concatenate(
             [cur_site_params, cur_source_params, cur_site_source_params]
         )
-        labels[sample_id] = cur_im_data
+        labels[cur_id] = cur_im_data
 
         continue
     print(f"Took {time.time() - start_time} seconds")

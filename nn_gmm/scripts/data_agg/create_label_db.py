@@ -21,31 +21,40 @@ def process_fault(input_dir: str, fault_name: str):
     ims = ref_df.columns.values.astype(str)
     ims = ims[ims != "component"]  # Drop the component column
 
-    # Pre-allocate the 3D-array, shape: [n_station, n_ims, n_realisation]
-    im_data = np.full((stations.size, ims.size, len(im_files)), np.nan)
+    n_rels, n_stations = len(im_files), stations.shape[0]
+
+
+    # Pre-allocate the 2D-array, shape: [n_station * n_realisations, n_ims]
+    im_data = np.full((stations.size * n_rels, ims.size), np.nan)
+    ids = []
     for ix, cur_im_file in enumerate(im_files):
+        rel_id = os.path.basename(cur_im_file.split("_")[-1].split(".")[0])
         cur_df = pd.read_csv(cur_im_file, index_col=0, engine="c", sep=",").sort_index()
 
         assert np.all(cur_df.index.values.astype(str) == stations)
         assert np.all(np.isin(ims, cur_df.columns.values))
 
-        im_data[:, :, ix] = cur_df.loc[stations, ims].values
+        im_data[ix * n_stations: (ix + 1) * n_stations, :] = cur_df.loc[stations, ims].values
+        ids.append(np.char.add(f"{fault_name}_{rel_id}_", stations))
 
     # Sanity check
     assert ~np.any(np.isnan(im_data))
 
-    # Reduce along the realisation axis
-    im_means = np.mean(im_data, axis=2)
-    im_std = np.std(im_data, axis=2)
+    # Create the dataframe
+    im_df = pd.DataFrame(index=np.concatenate(ids), data=im_data, columns=ims)
 
-    # Create IM df
-    im_dict = {}
-    for ix, im in enumerate(ims):
-        im_dict[f"{im}_mean"] = im_means[:, ix]
-        im_dict[f"{im}_std"] = im_std[:, ix]
-
-    im_df = pd.DataFrame.from_dict(im_dict)
-    im_df.index = stations
+    # # Reduce along the realisation axis
+    # im_means = np.mean(im_data, axis=2)
+    # im_std = np.std(im_data, axis=2)
+    #
+    # # Create IM df
+    # im_dict = {}
+    # for ix, im in enumerate(ims):
+    #     im_dict[f"{im}_mean"] = im_means[:, ix]
+    #     im_dict[f"{im}_std"] = im_std[:, ix]
+    #
+    # im_df = pd.DataFrame.from_dict(im_dict)
+    # im_df.index = stations
 
     return fault_name, im_df
 
