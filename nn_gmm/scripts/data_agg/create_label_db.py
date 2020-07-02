@@ -43,20 +43,7 @@ def process_fault(input_dir: str, fault_name: str):
     assert ~np.any(np.isnan(im_data))
 
     # Create the dataframe
-    im_df = pd.DataFrame(index=np.concatenate(ids), data=im_data, columns=ims)
-
-    # # Reduce along the realisation axis
-    # im_means = np.mean(im_data, axis=2)
-    # im_std = np.std(im_data, axis=2)
-    #
-    # # Create IM df
-    # im_dict = {}
-    # for ix, im in enumerate(ims):
-    #     im_dict[f"{im}_mean"] = im_means[:, ix]
-    #     im_dict[f"{im}_std"] = im_std[:, ix]
-    #
-    # im_df = pd.DataFrame.from_dict(im_dict)
-    # im_df.index = stations
+    im_df = pd.DataFrame(index=np.concatenate(ids), data=np.log(im_data), columns=ims)
 
     return fault_name, im_df
 
