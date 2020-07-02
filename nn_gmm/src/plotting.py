@@ -19,6 +19,7 @@ from .model import GMM
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
 
+
 MARKERS = [
     ".",
     ",",
@@ -125,6 +126,7 @@ class IMvsPlotGen:
 
         period = 0 if im.lower() in ["pga", "pgv"] else float(im.split("_")[-1])
         im_values = []
+        im_sigmas = []
         if feature_key == "rrup":
             fault = classdef.Fault(
                 Mw=const_values.mag,
@@ -152,7 +154,9 @@ class IMvsPlotGen:
                     cur_mean, (cur_sigma, _, __) = emp_result[0]
 
                 im_values.append(cur_mean)
-            return pd.Series(index=feature_range, data=np.asarray(im_values))
+                im_sigmas.append(cur_sigma)
+            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+
         elif feature_key == "mag":
             site = classdef.Site(
                 rrup=const_values.rrup,
@@ -179,7 +183,39 @@ class IMvsPlotGen:
                     cur_mean, (cur_sigma, _, __) = emp_result[0]
 
                 im_values.append(cur_mean)
-            return pd.Series(index=feature_range, data=np.asarray(im_values))
+                im_sigmas.append(cur_sigma)
+            return  pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+        
+        elif feature_key == "vs30":
+            fault = classdef.Fault(
+                Mw=const_values.mag,
+                rake=const_values.rake,
+                dip=const_values.dip,
+                ztor=const_values.ztor,
+            )
+
+            for cur_vs30 in feature_range:
+                cur_site = classdef.Site(
+                    rrup=const_values.rrup,
+                    rjb=const_values.rjb,
+                    rx=const_values.rx,
+                    hw=True,
+                    rtvz=0,
+                    vs30=cur_vs30,
+                    vs30measured=True, # not sure about this parameter
+                )
+                emp_result = emp_factory.compute_gmm(
+                    fault, cur_site, classdef.GMM.Br_10, im, [period]
+                )
+                if period == 0:
+                    cur_mean, (cur_sigma, _, __) = emp_result
+                else:
+                    cur_mean, (cur_sigma, _, __) = emp_result[0]
+
+                im_values.append(cur_mean)
+                im_sigmas.append(cur_sigma)
+            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+           
 
 
     def get_est_values(
@@ -232,7 +268,8 @@ class IMvsPlotGen:
         im_key = f"{im}_mean"
 
         # Create the plot
-        fig = plt.figure(figsize=(18, 13.5))
+        # fig = plt.figure(figsize=(18, 13.5))
+        fig = plt.figure(figsize=(7,5.5))
 
         if locations.shape[0] < len(MARKERS):
             for loc_ix in range(locations.shape[0]):
@@ -255,7 +292,7 @@ class IMvsPlotGen:
             feature_means[im_key],
             linewidth=0.75,
             c="k",
-            label="mean",
+            label="Mean NN",
         )
         plt.plot(
             feature_means.index.values,
@@ -263,7 +300,7 @@ class IMvsPlotGen:
             linestyle="--",
             c="k",
             linewidth=0.75,
-            label="std",
+            label="Std NN",
         )
         plt.plot(
             feature_means.index.values,
@@ -272,24 +309,41 @@ class IMvsPlotGen:
             c="k",
             linewidth=0.75,
         )
-
+        # empirical plots 
         if emp_df is not None:
+            # mean prediction
             plt.plot(
                 emp_df.index.values,
-                emp_df.values,
+                emp_df['mu'].values,
                 c="r",
-                label=emp_df.name if emp_df.name is not None else None,
+                label="Mean emp.",
+            )
+            # +- sigma 
+            plt.plot(
+                emp_df.index.values,
+                emp_df['mu'].values*np.exp(emp_df['sigma'].values),
+                c="r",
+                linestyle="--",
+                label="Std emp.",
+            )
+            plt.plot(
+                emp_df.index.values,
+                emp_df['mu'].values*np.exp(-emp_df['sigma'].values),
+                c="r",
+                linestyle="--",
             )
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
         plt.yscale("log")
+        plt.grid(linestyle='--', linewidth=0.25)
         plt.legend()
+        plt.title('{} {}'.format(im, feature_key))
 
         if output_ffp is not None:
             if not output_ffp.parent.is_dir():
                 output_ffp.parent.mkdir(parents=True)
-            plt.savefig(output_ffp)
+            plt.savefig(output_ffp, dpi=300)
             plt.close()
         else:
             plt.show()
