@@ -9,9 +9,7 @@ import pandas as pd
 
 def process_fault(input_dir: str, fault_name: str):
     # Find all the IM csv files
-    im_files = glob.glob(
-        os.path.join(input_dir, fault_name, "*", "IM_calc", "*.csv")
-    )
+    im_files = glob.glob(os.path.join(input_dir, fault_name, "*", "IM_calc", "*.csv"))
 
     # Get the number of IMs & stations in the IM csv files
     # Note: Assumes that all IM csv files for a specific fault have the
@@ -23,7 +21,6 @@ def process_fault(input_dir: str, fault_name: str):
 
     n_rels, n_stations = len(im_files), stations.shape[0]
 
-
     # Pre-allocate the 2D-array, shape: [n_station * n_realisations, n_ims]
     im_data = np.full((stations.size * n_rels, ims.size), np.nan)
     ids = []
@@ -32,9 +29,14 @@ def process_fault(input_dir: str, fault_name: str):
         cur_df = pd.read_csv(cur_im_file, index_col=0, engine="c", sep=",").sort_index()
 
         assert np.all(cur_df.index.values.astype(str) == stations)
-        assert np.all(np.isin(ims, cur_df.columns.values))
+        assert np.all(np.isin(ims, cur_df.columns.values)), (
+            f"The IMs are not matching across all IM csv files, "
+            f"e.g. {os.path.basename(im_files[0])} and {os.path.basename(cur_im_file)}"
+        )
 
-        im_data[ix * n_stations: (ix + 1) * n_stations, :] = cur_df.loc[stations, ims].values
+        im_data[ix * n_stations : (ix + 1) * n_stations, :] = cur_df.loc[
+            stations, ims
+        ].values
         ids.append(np.char.add(f"{fault_name}_{rel_id}_", stations))
 
     # Sanity check
