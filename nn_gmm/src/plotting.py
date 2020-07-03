@@ -452,7 +452,7 @@ class EvalPlotGen:
         if self._comb_res_csv_files is None:
             print(f"Computing spatial residual data")
             self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
-                self.output_dir, self.eval_result, self.ims
+                self.output_dir, self.eval_result, self.ims, self.station_lookup
             )
         return self._comb_res_csv_files
 
@@ -462,7 +462,7 @@ class EvalPlotGen:
         if self._im_res_csv_files is None:
             print(f"Computing spatial residual data")
             self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
-                self.output_dir, self.eval_result, self.ims
+                self.output_dir, self.eval_result, self.ims, self.station_lookup
             )
         return self._im_res_csv_files
 
@@ -471,7 +471,7 @@ class EvalPlotGen:
         if self._im_sigma_csv_files is None:
             print(f"Computing spatial sigma data")
             self._im_sigma_csv_files = gen_spatial_sigma_csv(
-                self.output_dir, self.eval_result, self.ims
+                self.output_dir, self.eval_result, self.ims, self.station_lookup
             )
 
         return self._im_sigma_csv_files
@@ -481,7 +481,7 @@ class EvalPlotGen:
         if self._n_ruptures_csv_files is None:
             print(f"Computing spatial n_ruptures data")
             self._n_ruptures_csv_files = gen_spatial_nruptures_csv(
-                self.output_dir, self.eval_result
+                self.output_dir, self.eval_result, self.station_lookup
             )
 
         return self._n_ruptures_csv_files
