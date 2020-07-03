@@ -7,14 +7,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from matplotlib.lines import Line2D
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple
 from .evaluation import EvaluationResult
-from .training import TrainingResult
 from .model import GMM
+from .utils import get_station_from_id
+
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
@@ -424,6 +424,8 @@ class EvalPlotGen:
         """Constructor for Visualisation"""
         self.eval_result = eval_result
         self.train_result = eval_result.training_result
+        self.station_lookup = self.train_result.station_lookup
+
         self.output_dir = (
             output_dir
             if output_dir is not None
@@ -446,6 +448,7 @@ class EvalPlotGen:
 
     @property
     def comb_res_csv_files(self):
+        """The combined (i.e. sum of all IMs for a given sample) residual csv files"""
         if self._comb_res_csv_files is None:
             print(f"Computing spatial residual data")
             self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
@@ -455,6 +458,7 @@ class EvalPlotGen:
 
     @property
     def im_res_csv_files(self):
+        """The IM residual csv files, one for each IM"""
         if self._im_res_csv_files is None:
             print(f"Computing spatial residual data")
             self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
@@ -730,25 +734,10 @@ def create_res_hist(
     plt.close()
 
 
-def get_station_from_id(ids: np.ndarray) -> List[str]:
-    """Computes the stations from station_rupture ids"""
-    return [cur_split[0] for cur_split in np.char.split(ids, "_")]
 
 
-def get_station_lookup(X: pd.DataFrame):
-    """Creates a station - id lookup dataframe"""
-    X = X.loc[:, ["lon", "lat"]].copy()
 
-    X["station"] = get_station_from_id(X.index.values.astype(str))
-    X.drop_duplicates("station", inplace=True)
-    station_lookup = X.set_index("station")
-
-    return station_lookup
-
-
-def gen_spatial_nruptures_csv(output_dir: str, eval_result: EvaluationResult):
-    station_lookup = get_station_lookup(eval_result.training_result.X)
-
+def gen_spatial_nruptures_csv(output_dir: str, eval_result: EvaluationResult, station_lookup: pd.DataFrame):
     csv_files = []
     for cur_df, prefix in zip(
         [eval_result.y_train_est, eval_result.y_val_est, eval_result.training_result.X],
@@ -785,6 +774,7 @@ def gen_spatial_sigma_csv(
     output_dir: str,
     eval_result: EvaluationResult,
     ims: Iterable[str],
+    station_lookup: pd.DataFrame,
     agg_func: Callable = np.nanmean,
 ):
     """Generates the spatial sigma data for GMT plotting
@@ -795,14 +785,15 @@ def gen_spatial_sigma_csv(
     eval_result: EvaluationResult
     ims: iterable of strings
         IMs of interest
+    station_lookup: dataframe
+        Station location lookup
+        index = station name, columns = [lat, lon]
     agg_func: callable
         The aggregation function to use to
         aggregate the data at each location
         Make sure this function can handle nan
         values..
     """
-    station_lookup = get_station_lookup(eval_result.training_result.X)
-
     csv_files = []
     for cur_df, prefix in zip(
         [eval_result.y_train_est, eval_result.y_val_est], ["train", "val"]
@@ -838,6 +829,7 @@ def gen_spatial_data_res_csv(
     output_dir: str,
     eval_result: EvaluationResult,
     ims: Iterable[str],
+    station_lookup: pd.DataFrame,
     agg_func: Callable = np.nanmean,
 ):
     """Generates the spatial residual data for GMT plotting
@@ -851,6 +843,9 @@ def gen_spatial_data_res_csv(
     eval_result: EvaluationResult
     ims: iterable of strings
         IMs of interest
+    station_lookup: dataframe
+        Station location lookup
+        index = station name, columns = [lat, lon]
     agg_func: callable
         The aggregation function to use to
         aggregate the data at each location
@@ -866,8 +861,6 @@ def gen_spatial_data_res_csv(
         File paths of the csv files for the individual
         IM type residuals
     """
-    station_lookup = get_station_lookup(eval_result.training_result.X)
-
     combined_csv_files, im_csv_files = [], []
     for cur_df, prefix in zip(
         [eval_result.ln_res_train, eval_result.ln_res_val], ["train", "val"]
@@ -982,7 +975,7 @@ def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = N
     Returns
     ----------
     string
-        Name of the ouput csv file
+        Name of the output csv file
     """
     df.loc[:, ["lon", "lat", key]].rename(columns={key: "value"}).to_csv(
         f"{output_ffp}.csv"

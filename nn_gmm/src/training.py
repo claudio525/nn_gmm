@@ -75,11 +75,16 @@ def load_clean_samples(
     cat_columns: list of strings
         Names of all the one-hot-encoded
         categorical columns
+    station_lookup: dataframe
+        Station location lookup
+        index = station name, columns = [lat, lon]
     """
     # Load the data
     with pd.HDFStore(sample_db_ffp, mode="r") as store:
         X = store["X"]
         y = store["y"]
+
+    station_lookup = utils.get_station_lookup(X)
 
     # Drop the ignored features columns
     if ignore_features is not None:
@@ -103,7 +108,7 @@ def load_clean_samples(
                 )
             ]
 
-    return X, y, cat_columns
+    return X, y, cat_columns, station_lookup
 
 
 def create_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
@@ -150,6 +155,7 @@ class TrainingResult:
         output_dir: str,
         X: pd.DataFrame,
         y: pd.DataFrame,
+        station_lookup: pd.DataFrame,
         X_train: pd.DataFrame,
         y_train: pd.DataFrame,
         X_val: pd.DataFrame,
@@ -163,6 +169,7 @@ class TrainingResult:
 
         self.X = X
         self.y = y
+        self.station_lookup = station_lookup
 
         self.X_train = X_train
         self.y_train = y_train
@@ -227,7 +234,7 @@ def train(
 
     # Load & clean the data
     print(f"Loading samples")
-    X, y, cat_columns = load_clean_samples(
+    X, y, cat_columns, station_lookup = load_clean_samples(
         input_config["sample_db_ffp"],
         input_config["ignore_features"],
         input_config["categorial_features"],
@@ -357,6 +364,7 @@ def train(
             output_dir,
             X,
             y,
+            station_lookup,
             X_train,
             y_train,
             X_val,

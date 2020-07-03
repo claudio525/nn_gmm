@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 import pandas as pd
@@ -45,3 +45,19 @@ def sel_rand_locations(df: pd.DataFrame, n_locs: int):
         data=locations[np.random.randint(0, locations.shape[0], n_locs), :],
         columns=["lon", "lat"],
     )
+
+
+def get_station_lookup(X: pd.DataFrame):
+    """Creates a station - id lookup dataframe"""
+    X = X.loc[:, ["lon", "lat"]].copy()
+
+    X["station"] = get_station_from_id(X.index.values.astype(str))
+    X.drop_duplicates("station", inplace=True)
+    station_lookup = X.set_index("station")
+
+    return station_lookup
+
+
+def get_station_from_id(ids: np.ndarray) -> List[str]:
+    """Computes the stations from station_rupture ids"""
+    return [cur_split[0] for cur_split in np.char.split(ids, "_")]
