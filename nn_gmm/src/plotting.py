@@ -120,7 +120,7 @@ class IMvsPlotGen:
         feature_key: str,
         feature_range: np.ndarray,
         const_values: pd.Series,
-    ) -> Union[pd.Series, None]:
+    ) -> Union[pd.DataFrame, None]:
         if im.lower() not in ["pga", "pgv"] and not im.lower().startswith("psa"):
             return None
 
@@ -184,7 +184,7 @@ class IMvsPlotGen:
 
                 im_values.append(cur_mean)
                 im_sigmas.append(cur_sigma)
-            return  pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
         
         elif feature_key == "vs30":
             fault = classdef.Fault(
@@ -215,26 +215,27 @@ class IMvsPlotGen:
                 im_values.append(cur_mean)
                 im_sigmas.append(cur_sigma)
             return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
-           
-
 
     def get_est_values(
         self,
         feature_key: str,
         feature_values: np.ndarray,
         const_values: pd.Series,
-        locations: pd.DataFrame,
+        locations: pd.DataFrame = None,
     ):
-        feature_df = pd.DataFrame(
-            data=np.concatenate(
-                (
-                    np.repeat(locations.values, len(feature_values), axis=0),
-                    np.tile(feature_values, locations.shape[0])[:, np.newaxis],
+        if locations is not None:
+            feature_df = pd.DataFrame(
+                data=np.concatenate(
+                    (
+                        np.repeat(locations.values, len(feature_values), axis=0),
+                        np.tile(feature_values, locations.shape[0])[:, np.newaxis],
+                    ),
+                    axis=1,
                 ),
-                axis=1,
-            ),
-            columns=list(locations.columns) + [feature_key],
-        )
+                columns=list(locations.columns) + [feature_key],
+            )
+        else:
+            feature_df = pd.DataFrame(data=feature_values, columns=[feature_key])
 
         constants_df = pd.DataFrame(
             data=np.repeat(
@@ -251,7 +252,7 @@ class IMvsPlotGen:
 
         # Run estimation
         y_est_df = self.model.predict(feature_df, pre_process=True)
-        y_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
+        # y_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
         return feature_df, y_est_df
 
     def gen_plot(
@@ -260,7 +261,7 @@ class IMvsPlotGen:
         feature_key: str,
         feature_df: pd.DataFrame,
         y_est_df: pd.DataFrame,
-        locations: pd.DataFrame,
+        locations: pd.DataFrame = None,
         emp_df: pd.Series = None,
         output_ffp: Union[str, Path] = None,
     ):
@@ -271,45 +272,49 @@ class IMvsPlotGen:
         # fig = plt.figure(figsize=(18, 13.5))
         fig = plt.figure(figsize=(7,5.5))
 
-        if locations.shape[0] < len(MARKERS):
-            for loc_ix in range(locations.shape[0]):
-                cur_loc_mask = (feature_df["lon"] == locations.iloc[loc_ix].lon) & (
-                    feature_df["lat"] == locations.iloc[loc_ix].lat
-                )
-                plt.scatter(
-                    feature_df.loc[cur_loc_mask, feature_key],
-                    y_est_df.loc[cur_loc_mask, im_key],
-                    marker=MARKERS[loc_ix],
-                )
+        if locations is None:
+            plt.plot(feature_df[feature_key], y_est_df[im_key], marker="x")
         else:
-            plt.scatter(feature_df[feature_key], y_est_df[im_key], marker=".", s=1)
+            if locations.shape[0] < len(MARKERS):
+                for loc_ix in range(locations.shape[0]):
+                    cur_loc_mask = (feature_df["lon"] == locations.iloc[loc_ix].lon) & (
+                        feature_df["lat"] == locations.iloc[loc_ix].lat
+                    )
+                    plt.scatter(
+                        feature_df.loc[cur_loc_mask, feature_key],
+                        y_est_df.loc[cur_loc_mask, im_key],
+                        marker=MARKERS[loc_ix],
+                    )
+            else:
+                plt.scatter(feature_df[feature_key], y_est_df[im_key], marker=".", s=1)
 
-        # Add mean & std line
-        feature_means = y_est_df.groupby(feature_key).mean()
-        feature_stds = y_est_df.groupby(feature_key).std()
-        plt.plot(
-            feature_means.index.values,
-            feature_means[im_key],
-            linewidth=0.75,
-            c="k",
-            label="Mean NN",
-        )
-        plt.plot(
-            feature_means.index.values,
-            feature_means[im_key] + feature_stds[im_key],
-            linestyle="--",
-            c="k",
-            linewidth=0.75,
-            label="Std NN",
-        )
-        plt.plot(
-            feature_means.index.values,
-            feature_means[im_key] - feature_stds[im_key],
-            linestyle="--",
-            c="k",
-            linewidth=0.75,
-        )
-        # empirical plots 
+            # Add mean & std line
+            feature_means = y_est_df.groupby(feature_key).mean()
+            feature_stds = y_est_df.groupby(feature_key).std()
+            plt.plot(
+                feature_means.index.values,
+                feature_means[im_key],
+                linewidth=0.75,
+                c="k",
+                label="Mean NN",
+            )
+            plt.plot(
+                feature_means.index.values,
+                feature_means[im_key] + feature_stds[im_key],
+                linestyle="--",
+                c="k",
+                linewidth=0.75,
+                label="Std NN",
+            )
+            plt.plot(
+                feature_means.index.values,
+                feature_means[im_key] - feature_stds[im_key],
+                linestyle="--",
+                c="k",
+                linewidth=0.75,
+            )
+
+        # #mpirical plots
         if emp_df is not None:
             # mean prediction
             plt.plot(
@@ -354,8 +359,8 @@ class IMvsPlotGen:
         self,
         ims: np.ndarray,
         feature_dict: Dict[str, np.ndarray],
-        locations: pd.DataFrame,
         output_dir: Union[Path, None],
+        locations: pd.DataFrame = None,
     ):
         if not output_dir.is_dir():
             output_dir.mkdir(parents=True)
