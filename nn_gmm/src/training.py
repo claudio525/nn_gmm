@@ -2,7 +2,7 @@ import pickle
 import json
 import os
 import datetime
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Callable
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras as keras
+import tensorflow_probability as tfp
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 
@@ -106,9 +107,52 @@ def load_clean_samples(
     return X, y, cat_columns
 
 
-def create_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
+def nnelu(input: tf):
+    """Non-negative elu function, i.e. ELU(z) + 1"""
+    return tf.add(tf.constant(1, dtype=tf.float32), tf.nn.elu(input))
+
+
+def create_gaussian_model(
+    model_config: Dict, n_inputs: int, n_outputs: int
+) -> keras.Model:
+    """Creates a model that estimates the mean & standard deviation
+    for the given target variables
+
+    Parameters
+    ----------
+    model_config: dictionary
+    n_inputs: int
+        Number of inputs/features
+    n_outputs: int
+        Number of target variables, the number of
+        actual model outputs will be 2 * n_outputs, since
+        the model will estimate a mean & std for each
+        target variable
+
+    Returns
+    -------
+    keras.Model
     """
-    Creates a functional keras model from the model config
+    hidden_layer_func = model_config["hidden_layer_func"]
+    hidden_layer_config = model_config["hidden_layer_config"]
+    units = model_config["units"]
+
+    input = keras.Input(n_inputs)
+
+    x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    for unit in units[1:]:
+        x = hidden_layer_func(x, unit, **hidden_layer_config)
+
+    mean_output = keras.layers.Dense(units=n_outputs, activation=None, name="means")(x)
+    std_output = keras.layers.Dense(units=n_outputs, activation=nnelu, name="stds")(x)
+
+    output = keras.layers.Concatenate(name="output")([mean_output, std_output])
+    return output
+
+
+def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
+    """Creates a functional keras model from the model config,
+    with a linear output layer
 
     Parameters
     ----------
@@ -176,8 +220,26 @@ class TrainingResult:
             pickle.dump(self, f)
 
 
+class MargNLLLoss(keras.losses.Loss):
+    def __init__(self, n_outputs: int):
+        super().__init__()
+        self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
+
+    def call(self, y_true, parameters):
+        means = parameters[:, self.n_outputs]
+        stds = parameters[:, self.n_outputs :]
+
+        gaussians = tfp.distributions.Normal(loc=means, scale=stds)
+        log_likelihood = gaussians.log_prob(tf.transpose(y_true))
+
+        return -tf.reduce_mean(log_likelihood, axis=-1)
+
+
 def train(
-    input_config: Dict, train_config: Dict, verbose: int = 2
+    input_config: Dict,
+    train_config: Dict,
+    model_fn: Callable = create_reg_model,
+    verbose: int = 2,
 ) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
@@ -188,7 +250,11 @@ def train(
         For an example see EXAMPLE_INPUT_CONFIG
     train_config: dictionary
         For an example see EXAMPLE_TRAIN_CONFIG
-    verbose: int
+    model_fn: callabel, optional
+        Function that returns a keras model to train,
+        must take 3 inputs: model_config, n_inputs, n_outputs
+        Defaults to "create_reg_model"
+    verbose: int, optional
         Model fitting verbosity for details, see
         https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
 
@@ -232,7 +298,7 @@ def train(
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    X, y = X.iloc[:10000, :], y.iloc[:10000, :]
 
     # Split into train and validation set
     X_train, X_val, y_train, y_val = train_test_split(
@@ -288,8 +354,8 @@ def train(
 
     # Create the model
     print(f"Creating model")
-    model = create_model(model_config, n_features, n_outputs)
-    model.compile(optimizer="Adam", loss=training_config["loss"])
+    model = model_fn(model_config, n_features, n_outputs)
+    model.compile(optimizer=train_config["optimizer"], loss=training_config["loss"])
 
     # Model architecture summary
     model.summary()
