@@ -251,29 +251,29 @@ class IMvsPlotGen:
         feature_df = feature_df.merge(constants_df, left_index=True, right_index=True)
 
         # Run estimation
-        y_est_df = self.model.predict(feature_df, pre_process=True)
-        # y_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
-        return feature_df, y_est_df
+        mean_est_df, std_est_df = self.model.predict(feature_df, pre_process=True)
+        mean_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
+        std_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
+        return feature_df, (mean_est_df, std_est_df)
 
     def gen_plot(
         self,
         im: str,
         feature_key: str,
         feature_df: pd.DataFrame,
-        y_est_df: pd.DataFrame,
+        mean_est_df: pd.DataFrame,
         locations: pd.DataFrame = None,
         emp_df: pd.Series = None,
         output_ffp: Union[str, Path] = None,
     ):
         output_ffp = output_ffp if isinstance(output_ffp, Path) else Path(output_ffp)
-        im_key = f"{im}_mean"
 
         # Create the plot
         # fig = plt.figure(figsize=(18, 13.5))
         fig = plt.figure(figsize=(7,5.5))
 
         if locations is None:
-            plt.plot(feature_df[feature_key], y_est_df[im_key], marker="x")
+            plt.plot(feature_df[feature_key], mean_est_df[im], marker="x")
         else:
             if locations.shape[0] < len(MARKERS):
                 for loc_ix in range(locations.shape[0]):
@@ -282,25 +282,25 @@ class IMvsPlotGen:
                     )
                     plt.scatter(
                         feature_df.loc[cur_loc_mask, feature_key],
-                        y_est_df.loc[cur_loc_mask, im_key],
+                        mean_est_df.loc[cur_loc_mask, im],
                         marker=MARKERS[loc_ix],
                     )
             else:
-                plt.scatter(feature_df[feature_key], y_est_df[im_key], marker=".", s=1)
+                plt.scatter(feature_df[feature_key], mean_est_df[im], marker=".", s=1)
 
             # Add mean & std line
-            feature_means = y_est_df.groupby(feature_key).mean()
-            feature_stds = y_est_df.groupby(feature_key).std()
+            feature_means = mean_est_df.groupby(feature_key).mean()
+            feature_stds = mean_est_df.groupby(feature_key).std()
             plt.plot(
                 feature_means.index.values,
-                feature_means[im_key],
+                feature_means[im],
                 linewidth=0.75,
                 c="k",
                 label="Mean NN",
             )
             plt.plot(
                 feature_means.index.values,
-                feature_means[im_key] + feature_stds[im_key],
+                feature_means[im] + feature_stds[im],
                 linestyle="--",
                 c="k",
                 linewidth=0.75,
@@ -308,7 +308,7 @@ class IMvsPlotGen:
             )
             plt.plot(
                 feature_means.index.values,
-                feature_means[im_key] - feature_stds[im_key],
+                feature_means[im] - feature_stds[im],
                 linestyle="--",
                 c="k",
                 linewidth=0.75,
@@ -366,7 +366,7 @@ class IMvsPlotGen:
             output_dir.mkdir(parents=True)
 
         for cur_feature, cur_feature_values in feature_dict.items():
-            cur_feature_df, cur_y_est_df = self.get_est_values(
+            cur_feature_df, (cur_mean_est_df, cur_std_est_df) = self.get_est_values(
                 cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
             )
 
@@ -378,7 +378,7 @@ class IMvsPlotGen:
                     cur_im,
                     cur_feature,
                     cur_feature_df,
-                    cur_y_est_df,
+                    cur_mean_est_df,
                     locations,
                     emp_df=cur_emp_df,
                     output_ffp=output_dir

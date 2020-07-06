@@ -55,7 +55,7 @@ def load_clean_samples(
     sample_db_ffp: str,
     ignore_features: List[str] = None,
     categorial_features: List[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, List[str], pd.DataFrame]:
     """
     Loads the data from the sample database, drops unwanted features
     and performs one-hot encoding for the categorial features
@@ -109,6 +109,7 @@ def load_clean_samples(
                 )
             ]
 
+    X.drop(columns=["source", "site", "fault_id"], inplace=True)
     return X, y, cat_columns, station_lookup
 
 
@@ -152,7 +153,7 @@ def create_gaussian_model(
     std_output = keras.layers.Dense(units=n_outputs, activation=nnelu, name="stds")(x)
 
     output = keras.layers.Concatenate(name="output")([mean_output, std_output])
-    return output
+    return keras.Model(inputs=input, outputs=output)
 
 
 def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
@@ -197,13 +198,10 @@ class TrainingResult:
         input_config: Dict,
         training_config: Dict,
         output_dir: str,
-        X: pd.DataFrame,
-        y: pd.DataFrame,
+        ids: np.ndarray,
         station_lookup: pd.DataFrame,
-        X_train: pd.DataFrame,
-        y_train: pd.DataFrame,
-        X_val: pd.DataFrame,
-        y_val: pd.DataFrame,
+        ids_train: np.ndarray,
+        ids_val: np.ndarray,
         best_model_dir: str,
     ):
 
@@ -211,14 +209,11 @@ class TrainingResult:
         self.training_config = training_config
         self.output_dir = output_dir
 
-        self.X = X
-        self.y = y
+        self.ids = ids
         self.station_lookup = station_lookup
 
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
+        self.ids_train = ids_train
+        self.ids_val = ids_val
 
         self.best_model_dir = best_model_dir
 
@@ -228,18 +223,22 @@ class TrainingResult:
 
 
 class MargNLLLoss(keras.losses.Loss):
-    def __init__(self, n_outputs: int):
-        super().__init__()
+    def __init__(self, n_outputs: int, **kwargs):
+        super().__init__(**kwargs)
         self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
 
     def call(self, y_true, parameters):
-        means = parameters[:, self.n_outputs]
+        means = parameters[:, : self.n_outputs]
         stds = parameters[:, self.n_outputs :]
 
         gaussians = tfp.distributions.Normal(loc=means, scale=stds)
-        log_likelihood = gaussians.log_prob(tf.transpose(y_true))
+        log_likelihood = gaussians.log_prob(y_true)
 
         return -tf.reduce_mean(log_likelihood, axis=-1)
+
+    def get_config(self):
+        base_config = super().get_config()
+        return {**base_config, "n_outputs": int(self.n_outputs)}
 
 
 def train(
@@ -247,7 +246,12 @@ def train(
     train_config: Dict,
     model_fn: Callable = create_reg_model,
     verbose: int = 2,
-) -> Tuple[TrainingResult, str]:
+) -> Tuple[
+    TrainingResult,
+    str,
+    Tuple[pd.DataFrame, pd.DataFrame],
+    Tuple[pd.DataFrame, pd.DataFrame],
+]:
     """
     Runs the training based on the specified configs
 
@@ -305,12 +309,16 @@ def train(
         input_config["ignore_features"],
         input_config["categorial_features"],
     )
-    X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
+    ids = X.index.values.astype(str)
+    assert np.all(ids == y.index.values.astype(str))
 
     # Split into train and validation set
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=training_config["val_size"]
+    X_train, X_val, y_train, y_val, ids_train, ids_val = train_test_split(
+        X, y, ids, test_size=training_config["val_size"]
     )
+    del X, y
+
     n_train, n_val = X_train.shape[0], X_val.shape[0]
     n_features, n_outputs = X_train.shape[1], y_train.shape[1]
 
@@ -340,17 +348,6 @@ def train(
 
     # Preprocessing of the outputs, log transform & standardise
     assert np.all(y_train.columns == y_val.columns)
-    std_scaler_y = preprocessing.StandardScaler()
-    y_train = pd.DataFrame(
-        index=y_train.index,
-        columns=y_train.columns,
-        data=std_scaler_y.fit_transform(np.log(y_train.values)),
-    )
-    y_val = pd.DataFrame(
-        index=y_val.index,
-        columns=y_val.columns,
-        data=std_scaler_y.transform(np.log(y_val.values)),
-    )
 
     # Create the train & validation datasets
     train_dataset = tf.data.Dataset.from_tensor_slices((X_train.values, y_train.values))
@@ -362,7 +359,12 @@ def train(
     # Create the model
     print(f"Creating model")
     model = model_fn(model_config, n_features, n_outputs)
-    model.compile(optimizer=train_config["optimizer"], loss=training_config["loss"])
+    # model.compile(optimizer=training_config["optimizer"], loss=training_config["loss"])
+    model.compile(
+        optimizer=training_config["optimizer"],
+        loss=training_config["loss"],
+        run_eagerly=True,
+    )
 
     # Model architecture summary
     model.summary()
@@ -392,7 +394,7 @@ def train(
             {
                 "std_scaler": std_scaler,
                 "min_max_scaler": min_max_scaler,
-                "std_scaler_y": std_scaler_y,
+                # "std_scaler_y": std_scaler_y,
                 "cat_columns": cat_columns,
             },
             f,
@@ -428,14 +430,13 @@ def train(
             input_config,
             training_config,
             output_dir,
-            X,
-            y,
+            ids,
             station_lookup,
-            X_train,
-            y_train,
-            X_val,
-            y_val,
+            ids_train,
+            ids_val,
             model_dir,
         ),
         output_dir,
+        (X_train, y_train),
+        (X_val, y_val),
     )

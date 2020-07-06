@@ -1,12 +1,14 @@
 import json
 import pickle
 from pathlib import Path
-from typing import Union, Dict, List
+from typing import Union, Dict, List, Tuple
 
 import pandas as pd
 import numpy as np
 from tensorflow import keras
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+from .training import MargNLLLoss
 
 
 class GMM:
@@ -18,7 +20,7 @@ class GMM:
         input_config: Dict,
         std_scaler: StandardScaler,
         min_max_scaler: MinMaxScaler,
-        std_scaler_y: StandardScaler,
+        # std_scaler_y: StandardScaler,
         cat_columns: List[str],
     ):
         self.model = model
@@ -30,9 +32,9 @@ class GMM:
         self.std_scaler = std_scaler
         self.cat_columns = cat_columns
 
-        self.std_scaler_y = std_scaler_y
+        # self.std_scaler_y = std_scaler_y
 
-    def predict(self, X: pd.DataFrame, pre_process: bool = True, result_df_index: np.ndarray = None):
+    def predict(self, X: pd.DataFrame, pre_process: bool = True, result_df_index: np.ndarray = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
         std_features = self.input_config["std_scale_features"]
         cat_features = self.input_config["categorial_features"]
         min_max_features = self.input_config["min_max_scale_features"]
@@ -63,18 +65,17 @@ class GMM:
             raise ValueError("Not all required features exist in the given dataframe")
 
         y_est = self.model.predict(X.loc[:, self.features])
-        y_est_df = pd.DataFrame(
-            data=np.exp(self.std_scaler_y.inverse_transform(y_est)),
-            columns=self.outputs,
-            index=result_df_index
-        )
-        return y_est_df
+
+        mean_df = pd.DataFrame(data=np.exp(y_est[:, :self.outputs.size]), columns=self.outputs, index=result_df_index)
+        std_df = pd.DataFrame(data=y_est[:, self.outputs.size:], columns=self.outputs, index=result_df_index)
+
+        return mean_df, std_df
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):
         model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
 
-        model = keras.models.load_model(str(model_dir))
+        model = keras.models.load_model(str(model_dir), custom_objects={"MargNLLLoss": MargNLLLoss})
 
         # Features (and their order)
         features = np.load(model_dir / "features.npy")
@@ -94,6 +95,6 @@ class GMM:
             input_config,
             pre_dict["std_scaler"],
             pre_dict["min_max_scaler"],
-            pre_dict["std_scaler_y"],
+            # pre_dict["std_scaler_y"],
             pre_dict["cat_columns"],
         )
