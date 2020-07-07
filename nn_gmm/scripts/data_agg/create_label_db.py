@@ -66,9 +66,9 @@ def main(input_dir: str, output_ffp: str, n_procs: int = 4):
 
     # Write to db
     print(f"Writing to db")
-    with pd.HDFStore(output_ffp, "w") as store:
+    with pd.HDFStore(output_ffp, "w", ) as store:
         for fault_name, fault_im_data in result:
-            store[fault_name] = fault_im_data
+            store.put(fault_name, fault_im_data, format="table")
 
 
 if __name__ == "__main__":
