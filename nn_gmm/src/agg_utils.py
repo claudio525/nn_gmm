@@ -8,9 +8,7 @@ import pandas as pd
 from .utils import pandas_isin
 
 
-def load_site_source_dict(
-    site_df: pd.DataFrame, site_source_ffp: str, n_procs: int = 4
-):
+def load_site_source_df(site_df: pd.DataFrame, site_source_ffp: str, n_procs: int = 4):
     """Loads the site-source parameters into a dictionary
 
     Parameters
@@ -58,44 +56,21 @@ def __load_site_df(cur_site, site_source_ffp):
     return df
 
 
-def load_im_dict(im_db_ffp: str, n_procs: int = 4):
-    """Loads the IM values dictionary
-
-    Parameters
-    ----------
-    im_db_ffp: str
-        File path to the IM db
-    n_procs: int
-
-    Returns
-    -------
-    Dictionary
-        Keys are the fault names
-        Values are the IM dataframes, with the station
-            as index and the columns of the format "IM_mean"/"IM_std"
-            for each IM
-    """
-    # Get all the faults in the db
+def load_fault_im_df(cur_fault: str, im_db_ffp: str):
+    """Loads the IM dataframe for the specified fault"""
     with pd.HDFStore(im_db_ffp, "r") as store:
-        faults = [key[1:] for key in store.keys()]
-
-    with mp.Pool(processes=n_procs) as p:
-        results = p.starmap(__load_im_df, [(fault, im_db_ffp) for fault in faults])
-
-    # Check that all the dataframes have the same IMs
-    assert np.all(
-        [
-            np.all(np.isin(cur_df.columns.values, results[0].columns.values))
-            for cur_df in results
-        ]
-    )
-    return pd.concat(results, sort=True)
+        try:
+            return store[cur_fault]
+        except KeyError:
+            return None
 
 
-def __load_im_df(cur_fault: str, im_db_ffp: str):
-    """MP helper function"""
-    with pd.HDFStore(im_db_ffp, "r") as store:
-        return store[cur_fault]
+def apply_one_hot_enc(df: pd.DataFrame, col: str, enc_dict: Dict):
+    for key, value in enc_dict.items():
+        df[value] = np.zeros(df.shape[0], dtype=int)
+        df.loc[df[col] == key, value] = 1
+
+    return df.drop(columns=[col])
 
 
 def create_sample_comb(im_df: pd.DataFrame):
@@ -123,23 +98,6 @@ def create_sample_comb(im_df: pd.DataFrame):
     sample_combs["site"] = split_ids[:, 2]
 
     return sample_combs
-
-    # ids, sources, sites = [], [], []
-    #
-    # for cur_source, cur_df in im_dict.items():
-    #     cur_ids = cur_df.index.values.astype(str)
-    #     split_ids = np.stack(np.char.split(cur_ids, "_"), axis=0)
-    #
-    #     ids.append(cur_ids)
-    #     sources.append(split_ids[:, 0])
-    #     sites.append(split_ids[:, 2])
-    #
-    # ids = np.concatenate(ids)
-    # sources, sites = np.concatenate(sources), np.concatenate(sites)
-    # sample_combs_df = pd.DataFrame(
-    #     index=ids, data=np.stack([sources, sites], axis=1), columns=["source", "site"]
-    # )
-    # return sample_combs_df
 
 
 def drop_missing_data(
