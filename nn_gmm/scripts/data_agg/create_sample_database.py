@@ -1,3 +1,4 @@
+import pickle
 import time
 import argparse
 from pathlib import Path
@@ -5,12 +6,64 @@ from typing import Dict
 
 import pandas as pd
 import numpy as np
+import tensorflow as tf
 from sklearn.model_selection import train_test_split
 
 from nn_gmm import agg_utils
 
+def _bytes_feature(value):
+    """Returns a bytes_list from a string / byte."""
+    if isinstance(value, type(tf.constant(0))):
+        value = value.numpy()  # BytesList won't unpack a string from an EagerTensor.
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-def gen_csvs(
+
+def _float_feature(value):
+    """Returns a float_list from a float / double."""
+    return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+
+
+def _float_features(values: np.ndarray):
+    """Returns a float_list from a float / double."""
+    return tf.train.Feature(float_list=tf.train.FloatList(value=values))
+
+
+def _int64_feature(value):
+    """Returns an int64_list from a bool / enum / int / uint."""
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+
+# def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
+#     ser_examples = []
+#     for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(input_df.iterrows(), im_df.iterrows()):
+#         assert ix_1 == ix_2
+#
+#         feature = {
+#             "feature": _float_features(cur_input_row.values),
+#             "labels": _float_features(cur_im_df_row.values),
+#         }
+#
+#         example_proto = tf.train.Example(features=tf.train.Features(feature=feature))
+#         ser_examples.append(example_proto.SerializeToString())
+#
+#     return ser_examples
+
+def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
+    ser_examples = []
+
+    for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(input_df.iterrows(), im_df.iterrows()):
+        assert ix_1 == ix_2
+
+        features = {**{key: _float_feature(value) for key, value in cur_input_row.items()},
+                    **{key: _float_feature(value) for key, value in cur_im_df_row.items()}}
+
+        example_proto = tf.train.Example(features=tf.train.Features(feature=features))
+        ser_examples.append(example_proto.SerializeToString())
+
+    return ser_examples
+
+
+def gen_tf_records(
     sources: np.ndarray,
     source_df: pd.DataFrame,
     site_df: pd.DataFrame,
@@ -46,6 +99,7 @@ def gen_csvs(
         cur_input_df.set_index("id", inplace=True)
         cur_input_df.sort_index(inplace=True)
         cur_input_df = cur_input_df.drop(columns=["source", "site", "rtvz"])
+        # cur_input_df = cur_input_df.drop(columns=["source", "site"])
         cur_input_df = agg_utils.apply_one_hot_enc(
             cur_input_df, "tect_type", tect_type_one_hot_dict
         )
@@ -54,9 +108,20 @@ def gen_csvs(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
         )
 
-        cur_input_df.to_csv(output_dir / f"{cur_source}_inputs.csv", index_label="id")
-        cur_im_df.to_csv(output_dir / f"{cur_source}_ims.csv", index_label="id")
+        examples = serialize_examples(cur_input_df, cur_im_df)
 
+        if ix == 0:
+            feature_description = {
+                **{col: tf.io.FixedLenFeature([], tf.float32) for col in
+                   cur_input_df.columns.values.astype(str)},
+                **{col: tf.io.FixedLenFeature([], tf.float32) for col in
+                   cur_im_df.columns.values.astype(str)}}
+            with open(str(output_dir / "feature_details.pickle"), "wb") as f:
+                pickle.dump(feature_description, f)
+
+        with tf.io.TFRecordWriter(str(output_dir / f"{cur_source}.tfrecord")) as writer:
+            for example in examples:
+                writer.write(example)
 
 def main(
     site_params_ffp: str,
@@ -95,13 +160,38 @@ def main(
         val_dir.mkdir()
 
         # Split
-        train_sources, val_sources = train_test_split(source_df.index.values.astype(str), test_size=val_prop)
+        train_sources, val_sources = train_test_split(
+            source_df.index.values.astype(str), test_size=val_prop
+        )
 
-        gen_csvs(train_sources, source_df, site_df, site_source_df, im_db_ffp, train_dir, tect_type_one_hot_dict)
-        gen_csvs(val_sources, source_df, site_df, site_source_df, im_db_ffp, val_dir, tect_type_one_hot_dict)
+        gen_tf_records(
+            train_sources,
+            source_df,
+            site_df,
+            site_source_df,
+            im_db_ffp,
+            train_dir,
+            tect_type_one_hot_dict,
+        )
+        gen_tf_records(
+            val_sources,
+            source_df,
+            site_df,
+            site_source_df,
+            im_db_ffp,
+            val_dir,
+            tect_type_one_hot_dict,
+        )
     else:
-        gen_csvs(source_df.index.values.astype(str),
-                 source_df, site_df, site_source_df, im_db_ffp, output_dir, tect_type_one_hot_dict)
+        gen_tf_records(
+            source_df.index.values.astype(str),
+            source_df,
+            site_df,
+            site_source_df,
+            im_db_ffp,
+            output_dir,
+            tect_type_one_hot_dict,
+        )
 
 
 if __name__ == "__main__":
