@@ -116,7 +116,7 @@ def load_clean_samples(
 
 def nnelu(input):
     """Non-negative elu function, i.e. ELU(z) + 1"""
-    return tf.add(tf.constant(1.00000001, dtype=tf.float32), tf.nn.elu(input))
+    return tf.add(tf.constant(1.0, dtype=tf.float32), tf.nn.elu(input))
 
 
 def create_gaussian_model(
@@ -243,26 +243,36 @@ class MargNLLLoss(keras.losses.Loss):
         base_config = super().get_config()
         return {**base_config, "n_outputs": int(self.n_outputs)}
 
-def _load_dataset(data_dir: Path, feature_details: Dict):
-    data_files = glob.glob(str(data_dir / "*.tfrecord"))
-    raw_dataset = tf.data.TFRecordDataset(data_files)
 
+def _load_dataset(data_dir: Path, feature_details: Dict, batch_size: int):
     def _parse_fn(example_proto):
-        parsed = tf.io.parse_single_example(example_proto, feature_details)
+        parsed = tf.io.parse_example(example_proto, feature_details)
         return parsed
 
-    parsed_dataset = raw_dataset.map(_parse_fn)
+    # TODO: Add explanation
+    parsed_dataset = tf.data.Dataset.list_files(
+        str(data_dir / "*.tfrecord"), shuffle=True
+    ).interleave(
+        lambda f: tf.data.TFRecordDataset(f).batch(batch_size).map(
+            _parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
+        ),
+        num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        cycle_length=32, block_length=1,
+        deterministic=False
+    )
 
     return parsed_dataset
 
-def load_datasets(train_dir: Path, val_dir: Path = None):
+
+def load_datasets(train_dir: Path, batch_size: int,  val_dir: Path = None):
     with (train_dir / "feature_details.pickle").open("rb") as f:
         feature_details = pickle.load(f)
 
-    train_ds = _load_dataset(train_dir, feature_details)
-    val_ds = _load_dataset(val_dir, feature_details) if val_dir is not None else None
+    train_ds = _load_dataset(train_dir, feature_details, batch_size)
+    val_ds = _load_dataset(val_dir, feature_details, batch_size) if val_dir is not None else None
 
     return train_ds, val_ds
+
 
 def preprocess(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
     def _apply_pre_config(item):
@@ -274,14 +284,16 @@ def preprocess(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
         for name, func in im_config.items():
             target_values.append(func(item[name]) if func is not None else item[name])
 
-        return tf.stack(features), tf.stack(target_values)
+        return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
 
-    return ds.map(_apply_pre_config, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    return ds.map(
+        tf.function(_apply_pre_config), num_parallel_calls=tf.data.experimental.AUTOTUNE
+    )
 
 
 def train(
     input_config: Dict,
-    train_config: Dict,
+    config: Dict,
     model_fn: Callable = create_reg_model,
     verbose: int = 2,
 ) -> Tuple[
@@ -297,7 +309,7 @@ def train(
     ----------
     input_config: dictionary
         For an example see EXAMPLE_INPUT_CONFIG
-    train_config: dictionary
+    config: dictionary
         For an example see EXAMPLE_TRAIN_CONFIG
     model_fn: callabel, optional
         Function that returns a keras model to train,
@@ -316,8 +328,8 @@ def train(
     )
 
     # Load configs
-    model_config = train_config["model_config"]
-    training_config = train_config["training_config"]
+    model_config = config["model_config"]
+    training_config = config["training_config"]
     batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
 
     # Create the output directory
@@ -338,11 +350,20 @@ def train(
         json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        json.dump(train_config, f, cls=utils.GenericObjJSONEncoder)
+        json.dump(config, f, cls=utils.GenericObjJSONEncoder)
 
-    train_ds, val_ds = load_datasets(Path(input_config["train_data_dir"]), Path(input_config["val_data_dir"]))
+    train_ds, val_ds = load_datasets(
+        Path(input_config["train_data_dir"]),
+        training_config["batch_size"],
+        Path(input_config["val_data_dir"])
+        if input_config["val_data_dir"] is not None
+        else None,
+    )
 
-    feature_config, im_config = input_config["feature_config"], input_config["im_config"]
+    feature_config, im_config = (
+        input_config["feature_config"],
+        input_config["im_config"],
+    )
     n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
     train_ds = preprocess(train_ds, feature_config, im_config)
     val_ds = val_ds if val_ds is None else preprocess(val_ds, feature_config, im_config)
@@ -367,11 +388,14 @@ def train(
         # Saves the best model (based on the validation loss)
         keras.callbacks.ModelCheckpoint(
             str(model_dir), monitor="val_loss", save_best_only=True
-        )
+        ),
+        # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
-    train_ds = train_ds.shuffle(int(2e4)).batch(training_config["batch_size"]).prefetch(tf.data.experimental.AUTOTUNE)
-    val_ds = val_ds.batch(training_config["batch_size"]).prefetch(tf.data.experimental.AUTOTUNE)
+    # TODO: Need to sort out shuffling
+    print(f"Preparing datasets, batching is currently done on loading")
+    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
     # Train
     print(f"Training...")
@@ -382,22 +406,6 @@ def train(
         callbacks=callbacks,
         verbose=verbose,
     )
-
-    # Save the feature & output scalers
-    # with open(model_dir / "preprocessing.pickle", "wb") as f:
-    #     pickle.dump(
-    #         {
-    #             "std_scaler": std_scaler,
-    #             "min_max_scaler": min_max_scaler,
-    #             # "std_scaler_y": std_scaler_y,
-    #             "cat_columns": cat_columns,
-    #         },
-    #         f,
-    #     )
-
-    # Save the order of the features and output
-    # np.save(model_dir / "features.npy", X_train.columns.values.astype(str))
-    # np.save(model_dir / "outputs.npy", y_train.columns.values.astype(str))
 
     # Save the input (for the model)
     with open(model_dir / "input_config.json", "w") as f:
@@ -425,13 +433,7 @@ def train(
             input_config,
             training_config,
             output_dir,
-            # ids,
-            # station_lookup,
-            # ids_train,
-            # ids_val,
             model_dir,
         ),
         output_dir,
-        # (X_train, y_train),
-        # (X_val, y_val),
     )

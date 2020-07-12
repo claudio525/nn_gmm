@@ -33,21 +33,6 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 
-# def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
-#     ser_examples = []
-#     for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(input_df.iterrows(), im_df.iterrows()):
-#         assert ix_1 == ix_2
-#
-#         feature = {
-#             "feature": _float_features(cur_input_row.values),
-#             "labels": _float_features(cur_im_df_row.values),
-#         }
-#
-#         example_proto = tf.train.Example(features=tf.train.Features(feature=feature))
-#         ser_examples.append(example_proto.SerializeToString())
-#
-#     return ser_examples
-
 def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
     ser_examples = []
 
@@ -56,6 +41,7 @@ def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
 
         features = {**{key: _float_feature(value) for key, value in cur_input_row.items()},
                     **{key: _float_feature(value) for key, value in cur_im_df_row.items()}}
+        features["id"] = _bytes_feature(str.encode(ix_1))
 
         example_proto = tf.train.Example(features=tf.train.Features(feature=features))
         ser_examples.append(example_proto.SerializeToString())
@@ -111,11 +97,13 @@ def gen_tf_records(
         examples = serialize_examples(cur_input_df, cur_im_df)
 
         if ix == 0:
+            print(f"Writing feature details")
             feature_description = {
                 **{col: tf.io.FixedLenFeature([], tf.float32) for col in
                    cur_input_df.columns.values.astype(str)},
                 **{col: tf.io.FixedLenFeature([], tf.float32) for col in
                    cur_im_df.columns.values.astype(str)}}
+            feature_description = {**feature_description, **{"id": tf.io.FixedLenFeature([], tf.string)}}
             with open(str(output_dir / "feature_details.pickle"), "wb") as f:
                 pickle.dump(feature_description, f)
 
