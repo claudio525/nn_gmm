@@ -204,15 +204,15 @@ def _load_dataset(
     return parsed_dataset
 
 
-def load_datasets(train_dir: Path, batch_size: int, val_dir: Path = None):
+def load_datasets(train_dir: Path, batch_size: int, val_dir: Path = None, shuffle_buffer: int = None):
     """Loads the training and validation (if specified) datasets
     from the .tfrecord files in the given directories"""
     with (train_dir / "feature_details.pickle").open("rb") as f:
         feature_details = pickle.load(f)
 
-    train_ds = _load_dataset(train_dir, feature_details, batch_size)
+    train_ds = _load_dataset(train_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer)
     val_ds = (
-        _load_dataset(val_dir, feature_details, batch_size)
+        _load_dataset(val_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer)
         if val_dir is not None
         else None
     )
@@ -334,9 +334,10 @@ def train(
     train_ds, val_ds = load_datasets(
         Path(input_config["train_data_dir"]),
         training_config["batch_size"],
-        Path(input_config["val_data_dir"])
+        val_dir=Path(input_config["val_data_dir"])
         if input_config["val_data_dir"] is not None
         else None,
+        shuffle_buffer=training_config["shuffle_buffer_size"]
     )
 
     feature_config, im_config = (

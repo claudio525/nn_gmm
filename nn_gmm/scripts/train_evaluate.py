@@ -108,10 +108,11 @@ CONFIG = {
     "model_config": {
         "hidden_layer_config": {"dropout": 0.25},
         "hidden_layer_func": nn_gmm.relu_dropout,
-        "units": [128, 128],
+        "units": [128],
     },
     "training_config": {
-        "batch_size": 1000,
+        "batch_size": 10000,
+        "shuffle_buffer_size": int(5e6),
         "n_epochs": 10,
         "optimizer": "Adam",
         "loss": nn_gmm.MargNLLLoss(38),
