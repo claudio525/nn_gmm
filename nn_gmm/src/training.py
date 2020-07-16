@@ -18,101 +18,6 @@ from sklearn.model_selection import train_test_split
 from . import hidden_layers
 from . import utils
 
-EXAMPLE_INPUT_CONFIG = {
-    "sample_db_ffp": "/Users/Clus/code/work/nn_gmm/data/sample_dbs/v18p6.h5",
-    "base_output_dir": "/Users/Clus/code/work/nn_gmm/results/test",
-    "output_dir": None,
-    "ignore_features": ["rtvz"],
-    "categorial_features": ["tect_type"],
-    "std_scale_features": [
-        "vs30",
-        "z1p0",
-        "z2p5",
-        "dip",
-        "rake",
-        "width",
-        "ztor",
-        "mag",
-        "rjb",
-        "rrup",
-        "rx",
-        "ry",
-    ],
-    "min_max_scale_features": ["lat", "lon"],
-}
-
-# Config
-EXAMPLE_TRAIN_CONFIG = {
-    "model_config": {
-        "hidden_layer_config": {"dropout": 0.25},
-        "hidden_layer_func": hidden_layers.relu_BN_dropout,
-        "units": [60, 60, 60],
-    },
-    "training_config": {"val_size": 0.1, "batch_size": 32, "n_epochs": 5},
-}
-
-
-def load_clean_samples(
-    sample_db_ffp: str,
-    ignore_features: List[str] = None,
-    categorial_features: List[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[str], pd.DataFrame]:
-    """
-    Loads the data from the sample database, drops unwanted features
-    and performs one-hot encoding for the categorial features
-
-    Parameters
-    ----------
-    sample_db_ffp: str
-        File path to the samples db
-    ignore_features: list of strings
-        Names of the features to ignore
-    categorial_features: list of strings
-        Names of the features to one-hot encode
-
-    Returns
-    -------
-    X: pd.DataFrame
-    y: pd.DataFrame
-    cat_columns: list of strings
-        Names of all the one-hot-encoded
-        categorical columns
-    station_lookup: dataframe
-        Station location lookup
-        index = station name, columns = [lat, lon]
-    """
-    # Load the data
-    with pd.HDFStore(sample_db_ffp, mode="r") as store:
-        X = store["X"]
-        y = store["y"]
-
-    station_lookup = utils.get_station_lookup(X)
-
-    # Drop the ignored features columns
-    if ignore_features is not None:
-        X = X.drop(columns=ignore_features)
-
-    # One hot encoding of categorial features
-    cat_columns = None
-    if categorial_features is not None:
-        if np.isin(categorial_features, X.columns):
-            X = pd.get_dummies(X, columns=categorial_features)
-
-            # Get all the new one-hot encoded categorial columns\
-            cat_columns = [
-                cur_col
-                for cur_col in X.columns.values.astype(str)
-                if any(
-                    [
-                        cur_col.startswith(cat_feature)
-                        for cat_feature in categorial_features
-                    ]
-                )
-            ]
-
-    X.drop(columns=["source", "site", "fault_id"], inplace=True)
-    return X, y, cat_columns, station_lookup
-
 
 def nnelu(input):
     """Non-negative elu function, i.e. ELU(z) + 1"""
@@ -146,9 +51,7 @@ def create_gaussian_model(
 
     input = keras.Input(n_inputs)
 
-    x = tf.keras.layers.BatchNormalization()(input)
-    x = hidden_layer_func(x, units[0], **hidden_layer_config)
-    # x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    x = hidden_layer_func(input, units[0], **hidden_layer_config)
     for unit in units[1:]:
         x = hidden_layer_func(x, unit, **hidden_layer_config)
 
@@ -201,22 +104,12 @@ class TrainingResult:
         input_config: Dict,
         training_config: Dict,
         output_dir: str,
-        # ids: np.ndarray,
-        # station_lookup: pd.DataFrame,
-        # ids_train: np.ndarray,
-        # ids_val: np.ndarray,
         best_model_dir: str,
     ):
 
         self.input_config = input_config
         self.training_config = training_config
         self.output_dir = output_dir
-
-        # self.ids = ids
-        # self.station_lookup = station_lookup
-        #
-        # self.ids_train = ids_train
-        # self.ids_val = ids_val
 
         self.best_model_dir = best_model_dir
 
@@ -244,32 +137,85 @@ class MargNLLLoss(keras.losses.Loss):
         return {**base_config, "n_outputs": int(self.n_outputs)}
 
 
-def _load_dataset(data_dir: Path, feature_details: Dict, batch_size: int):
+def _load_dataset(
+    data_dir: Path,
+    feature_details: Dict,
+    batch_size: int,
+    shuffle_buffer: int = 1_000_000,
+    n_open_files: int = 32,
+):
+    """
+    Performs the loading and parsing of a tensorflow dataset from
+    the .tfrecord files in the given directory
+
+    Parameters
+    ----------
+    data_dir: Path
+        Directory that contains the .tfrecord files to use
+    feature_details: dictionary
+        Specifies how to parse the data,
+        see https://www.tensorflow.org/api_docs/python/tf/io/parse_example?hl=en
+        for more details
+    batch_size: int
+        Batch size, has to be done at this step as parsing of batches is
+        much more efficient when using batches compared to single entries
+    shuffle_buffer: int, optional
+        Size of the shuffle buffer (in number of entries) to use,
+        defaults to 1 Million
+    n_open_files: int, optional
+        How many .tfrecord files to read concurrently using the interleave
+        function (https://www.tensorflow.org/api_docs/python/tf/data/Dataset#interleave)
+
+    Returns
+    -------
+    tf.data.Dataset
+        Note: The dataset will not return single training samples,
+        but instead batches of batch_size!
+    """
+
     def _parse_fn(example_proto):
         parsed = tf.io.parse_example(example_proto, feature_details)
         return parsed
 
-    # TODO: Add explanation
-    parsed_dataset = tf.data.Dataset.list_files(
-        str(data_dir / "*.tfrecord"), shuffle=True
-    ).interleave(
-        lambda f: tf.data.TFRecordDataset(f).batch(batch_size).map(
-            _parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
-        ),
-        num_parallel_calls=tf.data.experimental.AUTOTUNE,
-        cycle_length=32, block_length=1,
-        deterministic=False
+    # 1) Finds all .tfrecord files in the given directory, the shuffle option
+    # means that the order of the files is shuffled every repeat (i.e. epoch) of the
+    # dataset
+    # 2) Uses interleave cycle through the n_open_files .tfrecord files and feed one
+    # one serialized sample into the shuffle buffer, opening new the next .tfrecord file
+    # once one runs out of samples
+    # 3) Shuffles all samples in the buffer and adding more into the buffer
+    # as samples are removed
+    # 4) Batch
+    # 5) Parse each batch
+    parsed_dataset = (
+        tf.data.Dataset.list_files(str(data_dir / "*.tfrecord"), shuffle=True)
+        .interleave(
+            lambda f: tf.data.TFRecordDataset(f),
+            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+            cycle_length=n_open_files,
+            block_length=1,
+            deterministic=False,
+        )
+        .shuffle(shuffle_buffer)
+        .batch(batch_size)
+        .map(_parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     )
 
     return parsed_dataset
 
 
-def load_datasets(train_dir: Path, batch_size: int,  val_dir: Path = None):
+def load_datasets(train_dir: Path, batch_size: int, val_dir: Path = None):
+    """Loads the training and validation (if specified) datasets
+    from the .tfrecord files in the given directories"""
     with (train_dir / "feature_details.pickle").open("rb") as f:
         feature_details = pickle.load(f)
 
     train_ds = _load_dataset(train_dir, feature_details, batch_size)
-    val_ds = _load_dataset(val_dir, feature_details, batch_size) if val_dir is not None else None
+    val_ds = (
+        _load_dataset(val_dir, feature_details, batch_size)
+        if val_dir is not None
+        else None
+    )
 
     return train_ds, val_ds
 
@@ -291,17 +237,50 @@ def preprocess(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
     )
 
 
+def get_standard_scaling_fn(mean: float, std: float):
+    """Returns a tensorflow function for standardising
+    data using the specified mean and standard deviation"""
+
+    def standard_fn(tensor):
+        return (tensor - mean) / std
+
+    return tf.function(standard_fn)
+
+
+def get_min_max_scaling_fn(
+    data_min: float, data_max: float, target_min: float = 0.0, target_max: float = 1.0
+):
+    """Returns a tensorflow function that performs
+    min-max scaling to the specified range
+
+    Parameters
+    ----------
+    data_min: float
+    data_max: float
+        The min & max values from the unscaled data
+    target_min
+    target_max
+        The target min & max values
+
+    Returns
+    -------
+    tf.function
+    """
+
+    def min_max_fn(tensor):
+        return ((tensor - data_min) / (data_max - data_min)) * (
+            target_max - target_min
+        ) + target_min
+
+    return tf.function(min_max_fn)
+
+
 def train(
     input_config: Dict,
     config: Dict,
     model_fn: Callable = create_reg_model,
     verbose: int = 2,
-) -> Tuple[
-    TrainingResult,
-    str,
-    # Tuple[pd.DataFrame, pd.DataFrame],
-    # Tuple[pd.DataFrame, pd.DataFrame],
-]:
+) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
 
@@ -371,11 +350,10 @@ def train(
     # Create the model
     print(f"Creating model")
     model = model_fn(model_config, n_features, n_outputs)
-    # model.compile(optimizer=training_config["optimizer"], loss=training_config["loss"])
     model.compile(
         optimizer=training_config["optimizer"],
         loss=training_config["loss"],
-        run_eagerly=True,
+        run_eagerly=False,
     )
 
     # Model architecture summary
@@ -392,8 +370,7 @@ def train(
         # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
-    # TODO: Need to sort out shuffling
-    print(f"Preparing datasets, batching is currently done on loading")
+    print(f"Preparing datasets")
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -408,8 +385,8 @@ def train(
     )
 
     # Save the input (for the model)
-    with open(model_dir / "input_config.json", "w") as f:
-        json.dump(input_config, f)
+    with open(model_dir / "input_config.pickle", "wb") as f:
+        pickle.dump(input_config, f)
 
     # Save the loss
     loss_df = pd.DataFrame.from_dict(history.history)
@@ -429,11 +406,6 @@ def train(
     plt.close()
 
     return (
-        TrainingResult(
-            input_config,
-            training_config,
-            output_dir,
-            model_dir,
-        ),
+        TrainingResult(input_config, training_config, output_dir, model_dir),
         output_dir,
     )

@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 from .training import MargNLLLoss
 
+TECT_TYPE_ONE_HOT_DICT = {'ACTIVE_SHALLOW': 'active_shallow', 'VOLCANIC': 'volcanic'}
 
 class GMM:
     def __init__(
@@ -18,19 +19,19 @@ class GMM:
         features: np.ndarray,
         outputs: np.ndarray,
         input_config: Dict,
-        std_scaler: StandardScaler,
-        min_max_scaler: MinMaxScaler,
-        # std_scaler_y: StandardScaler,
-        cat_columns: List[str],
+        # std_scaler: StandardScaler,
+        # min_max_scaler: MinMaxScaler,
+        # # std_scaler_y: StandardScaler,
+        # cat_columns: List[str],
     ):
         self.model = model
         self.features = features
         self.outputs = outputs
         self.input_config = input_config
 
-        self.min_max_scaler = min_max_scaler
-        self.std_scaler = std_scaler
-        self.cat_columns = cat_columns
+        # self.min_max_scaler = min_max_scaler
+        # self.std_scaler = std_scaler
+        # self.cat_columns = cat_columns
 
         # self.std_scaler_y = std_scaler_y
 
@@ -93,8 +94,4 @@ class GMM:
             features,
             outputs,
             input_config,
-            pre_dict["std_scaler"],
-            pre_dict["min_max_scaler"],
-            # pre_dict["std_scaler_y"],
-            pre_dict["cat_columns"],
         )

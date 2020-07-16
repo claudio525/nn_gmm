@@ -1,5 +1,4 @@
 import pickle
-import time
 import argparse
 from pathlib import Path
 from typing import Dict
@@ -33,7 +32,8 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 
-def serialize_examples(input_df: pd.DataFrame, im_df: pd.DataFrame):
+def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame):
+    """Serializes training data (features & labels) into the tf.train.Example format"""
     ser_examples = []
 
     for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(input_df.iterrows(), im_df.iterrows()):
@@ -58,6 +58,9 @@ def gen_tf_records(
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
 ):
+    """Generates tfrecord files using the tf.train.Example protocol,
+    one file is generated per event
+    """
     for ix, cur_source in enumerate(sources):
         print(f"Processing {ix + 1}/{sources.size}")
         cur_im_df = agg_utils.load_fault_im_df(cur_source, im_db_ffp)
@@ -94,7 +97,7 @@ def gen_tf_records(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
         )
 
-        examples = serialize_examples(cur_input_df, cur_im_df)
+        examples = serialize(cur_input_df, cur_im_df)
 
         if ix == 0:
             print(f"Writing feature details")
@@ -141,7 +144,6 @@ def main(
     }
 
     # Split events/sources into train/validation data
-    train_dir, val_dir = None, None
     if val_prop is not None and val_prop > 0.0:
         train_dir, val_dir = (output_dir / "train"), (output_dir / "val")
         train_dir.mkdir()

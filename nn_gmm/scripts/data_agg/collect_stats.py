@@ -1,8 +1,5 @@
 """Script for collectiong stats required for preprocessing, such as min, max,
 mean and standard deviation.
-
-This script is pretty slow and not really ideal, however given that this
-will only be required in-frequently it will do for now.
 """
 import glob
 import time
@@ -24,19 +21,22 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
     raw_dataset = tf.data.TFRecordDataset(list(data_files))
 
     def _parse_fn(example_proto):
-        parsed = tf.io.parse_single_example(example_proto, feature_description)
+        # parsed = tf.io.parse_single_example(example_proto, feature_description)
+        parsed = tf.io.parse_example(example_proto, feature_description)
         return parsed
 
-    parsed_dataset = raw_dataset.map(_parse_fn)
+    parsed_dataset = raw_dataset.batch(5000).map(_parse_fn)
 
-    def _get_stats(cur_state, item):
-        cur_state["count"] += 1
-        for key in item.keys():
-            cur_state["min"][key] = cur_state["min"][key] if cur_state["min"][key] > item[
-                key] else item[key]
-            cur_state["max"][key] = cur_state["min"][key] if cur_state["min"][key] < item[
-                key] else item[key]
-            cur_state["sum"][key] += item[key]
+    def _get_stats(cur_state, items):
+        # tf.print(tf.reduce_min(item["rake"]))
+        cur_state["count"] += tf.size(items["id"])
+        for key in items.keys():
+            if key != "id":
+                cur_min = tf.reduce_min(items[key])
+                cur_max = tf.reduce_max(items[key])
+                cur_state["min"][key] = cur_state["min"][key] if cur_state["min"][key] < cur_min else cur_min
+                cur_state["max"][key] = cur_state["max"][key] if cur_state["max"][key] > cur_max else cur_max
+                cur_state["sum"][key] += tf.reduce_sum(items[key])
 
         return cur_state
 
@@ -44,10 +44,11 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
     std_initial_state = {}
     for item in parsed_dataset.take(1):
         for key in item.keys():
-            initial_state["min"][key] = -99999.0
-            initial_state["max"][key] = 99999.0
-            initial_state["sum"][key] = 0.0
-            std_initial_state[key] = 0.0
+            if key != "id":
+                initial_state["min"][key] = 99999.0
+                initial_state["max"][key] = -99999.0
+                initial_state["sum"][key] = 0.0
+                std_initial_state[key] = 0.0
 
     start_time = time.time()
     stats = parsed_dataset.prefetch(tf.data.experimental.AUTOTUNE).reduce(initial_state,
@@ -62,10 +63,11 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
     stats_df = stats_df.applymap(lambda t: t.numpy())
     stats_df["mean"] = stats_df["sum"] / count
 
-    def _get_sigma_sum(cur_state, item):
-        for key in item.keys():
-            cur_state[key] += tf.math.pow(item[key] - stats_df.loc[key, "mean"],
-                                          tf.constant(2, dtype=tf.float32))
+    def _get_sigma_sum(cur_state, items):
+        for key in items.keys():
+            if key != "id":
+                cur_state[key] += tf.reduce_sum(tf.math.pow(items[key] - stats_df.loc[key, "mean"],
+                                              tf.constant(2, dtype=tf.float32)))
 
         return cur_state
 

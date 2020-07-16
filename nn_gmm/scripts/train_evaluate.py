@@ -1,3 +1,4 @@
+from typing import Dict
 import os
 
 import tensorflow as tf
@@ -5,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 import nn_gmm
+
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -19,89 +21,106 @@ if gpus:
         # Memory growth must be set before GPUs have been initialized
         print(e)
 
+def convert_to_pre_fn(config: Dict, stats_df: pd.DataFrame):
+    for key, item in config.items():
+        if item is None:
+            continue
+        elif item == "standard":
+            config[key] = nn_gmm.get_standard_scaling_fn(stats_df.loc[key, "mean"], stats_df.loc[key, "std"])
+        elif item == "min_max":
+            config[key] = nn_gmm.get_min_max_scaling_fn(stats_df.loc[key, "min"], stats_df.loc[key, "max"])
+        else:
+            raise ValueError(f"{item} is not a valid preprocessing config value")
+
+    return config
+
+
 INPUT_CONFIG = {
-    "train_data_dir": "/Users/Clus/code/work/tmp/nn_gmm/data",
-    "val_data_dir": "/Users/Clus/code/work/tmp/nn_gmm/data/val_ds",
-    # "base_output_dir": "/home/cbs51/code/nn_gmm/results/test",
-    "base_output_dir": "/Users/Clus/code/work/nn_gmm/results/test",
+    "train_data_dir": "/nesi/nobackup/nesi00213/nn_gmm/data/sample_files/train",
+    "val_data_dir": "/nesi/nobackup/nesi00213/nn_gmm/data/sample_files/val",
+    "base_output_dir": "/home/cbs51/code/nn_gmm/results/test",
     "output_dir": None,
     "feature_config": {
         "active_shallow": None,
-        "dip": None,
-        "lat": None,
-        "lon": None,
-        "mag": None,
-        "rake": None,
+        "dip": "standard",
+        "lat": "min_max",
+        "lon": "min_max",
+        "mag": "standard",
+        "rake": "standard",
         "volcanic": None,
-        "vs30": None,
-        "width": None,
-        "z1p0": None,
-        "z2p5": None,
-        "ztor": None,
+        "vs30": "standard",
+        "width": "standard",
+        "z1p0": "standard",
+        "z2p5": "standard",
+        "ztor": "standard",
+        "rrup": "standard",
+        "rx": "standard",
+        "rjb": "standard",
+        "ry": "standard",
     },
     "im_config": {
-        "AI": None,
-        "CAV": None,
-        "Ds575": None,
-        "Ds595": None,
-        "MMI": None,
-        "PGA": None,
-        "PGV": None,
-        "pSA_0.01": None,
-        "pSA_0.02": None,
-        "pSA_0.03": None,
-        "pSA_0.04": None,
-        "pSA_0.05": None,
-        "pSA_0.075": None,
-        "pSA_0.1": None,
-        "pSA_0.12": None,
-        "pSA_0.15": None,
-        "pSA_0.17": None,
-        "pSA_0.2": None,
-        "pSA_0.25": None,
-        "pSA_0.3": None,
-        "pSA_0.4": None,
-        "pSA_0.5": None,
-        "pSA_0.6": None,
-        "pSA_0.7": None,
-        "pSA_0.75": None,
-        "pSA_0.8": None,
-        "pSA_0.9": None,
-        "pSA_1.0": None,
-        "pSA_1.25": None,
-        "pSA_1.5": None,
-        "pSA_10.0": None,
-        "pSA_2.0": None,
-        "pSA_2.5": None,
-        "pSA_3.0": None,
-        "pSA_4.0": None,
-        "pSA_5.0": None,
-        "pSA_6.0": None,
-        "pSA_7.5": None,
+        "AI": "standard",
+        "CAV": "standard",
+        "Ds575": "standard",
+        "Ds595": "standard",
+        "MMI": "standard",
+        "PGA": "standard",
+        "PGV": "standard",
+        "pSA_0.01": "standard",
+        "pSA_0.02": "standard",
+        "pSA_0.03": "standard",
+        "pSA_0.04": "standard",
+        "pSA_0.05": "standard",
+        "pSA_0.075": "standard",
+        "pSA_0.1": "standard",
+        "pSA_0.12": "standard",
+        "pSA_0.15": "standard",
+        "pSA_0.17": "standard",
+        "pSA_0.2": "standard",
+        "pSA_0.25": "standard",
+        "pSA_0.3": "standard",
+        "pSA_0.4": "standard",
+        "pSA_0.5": "standard",
+        "pSA_0.6": "standard",
+        "pSA_0.7": "standard",
+        "pSA_0.75": "standard",
+        "pSA_0.8": "standard",
+        "pSA_0.9": "standard",
+        "pSA_1.0": "standard",
+        "pSA_1.25": "standard",
+        "pSA_1.5": "standard",
+        "pSA_10.0": "standard",
+        "pSA_2.0": "standard",
+        "pSA_2.5": "standard",
+        "pSA_3.0": "standard",
+        "pSA_4.0": "standard",
+        "pSA_5.0": "standard",
+        "pSA_6.0": "standard",
+        "pSA_7.5": "standard",
     },
 }
+stats_df = pd.read_csv(os.path.join(INPUT_CONFIG["train_data_dir"], "stats.csv"), index_col="feature")
+INPUT_CONFIG["feature_config"] = convert_to_pre_fn(INPUT_CONFIG["feature_config"], stats_df)
+INPUT_CONFIG["im_config"] = convert_to_pre_fn(INPUT_CONFIG["im_config"], stats_df)
 
 # Config
-TRAIN_CONFIG = {
+CONFIG = {
     "model_config": {
         "hidden_layer_config": {"dropout": 0.25},
-        # "hidden_layer_func": hidden_layers.selu_dropout,
         "hidden_layer_func": nn_gmm.relu_dropout,
         "units": [128, 128],
     },
     "training_config": {
-        "batch_size": 1024,
-        "n_epochs": 1,
-        # "optimizer": tf.keras.optimizers.Adam(learning_rate=1e-5),
+        "batch_size": 1000,
+        "n_epochs": 10,
         "optimizer": "Adam",
-        # "loss": "MSE",
         "loss": nn_gmm.MargNLLLoss(38),
     },
 }
 
 if __name__ == "__main__":
     train_result, output_dir = nn_gmm.train(
-        INPUT_CONFIG, TRAIN_CONFIG, model_fn=nn_gmm.create_gaussian_model, verbose=1
+        INPUT_CONFIG, CONFIG, model_fn=nn_gmm.create_gaussian_model, verbose=1
     )
 
     # Plotting doesn't work yet
