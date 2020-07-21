@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 
-from nn_gmm import agg_utils
+import nn_gmm
 
 def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
@@ -63,13 +63,13 @@ def gen_tf_records(
     """
     for ix, cur_source in enumerate(sources):
         print(f"Processing {ix + 1}/{sources.size}")
-        cur_im_df = agg_utils.load_fault_im_df(cur_source, im_db_ffp)
+        cur_im_df = nn_gmm.load_fault_im_df(cur_source, im_db_ffp)
         if cur_im_df is None:
             print(f"No IM data found for source {cur_source}, skipping.")
             continue
         cur_im_df.sort_index(inplace=True)
 
-        cur_input_df = agg_utils.create_sample_comb(cur_im_df)
+        cur_input_df = nn_gmm.create_sample_comb(cur_im_df)
         cur_input_df = pd.merge(
             cur_input_df, source_df, how="inner", left_on="source", right_index=True
         )
@@ -89,7 +89,7 @@ def gen_tf_records(
         cur_input_df.sort_index(inplace=True)
         cur_input_df = cur_input_df.drop(columns=["source", "site", "rtvz"])
         # cur_input_df = cur_input_df.drop(columns=["source", "site"])
-        cur_input_df = agg_utils.apply_one_hot_enc(
+        cur_input_df = nn_gmm.apply_one_hot_enc(
             cur_input_df, "tect_type", tect_type_one_hot_dict
         )
 
@@ -132,7 +132,7 @@ def main(
     # Load site-source params
     print("Loading site-source params")
     # site_source_df = None
-    site_source_df = agg_utils.load_site_source_df(
+    site_source_df = nn_gmm.load_site_source_df(
         site_df, site_source_ffp, n_procs=n_procs
     )
 

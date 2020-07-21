@@ -22,31 +22,6 @@ class GenericObjJSONEncoder(json.JSONEncoder):
             return str(obj)
 
 
-def sel_rand_locations(df: pd.DataFrame, n_locs: int):
-    """Selects a set of random locations from the
-    specified dataframe
-
-    Parameters
-    ----------
-    df: dataframe
-        Contains the locations from which to select
-        Must have the columns lon & lat
-    n_locs: int
-        Number of locations to select
-
-    Returns
-    -------
-    dataframe
-        with the selected locations
-        columns: [lon, lat]
-    """
-    locations = np.unique(df.loc[:, ("lon", "lat")].values, axis=0)
-    return pd.DataFrame(
-        data=locations[np.random.randint(0, locations.shape[0], n_locs), :],
-        columns=["lon", "lat"],
-    )
-
-
 def get_station_lookup(X: pd.DataFrame):
     """Creates a station - id lookup dataframe"""
     X = X.loc[:, ["lon", "lat"]].copy()

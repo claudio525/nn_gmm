@@ -65,14 +65,6 @@ def load_fault_im_df(cur_fault: str, im_db_ffp: str):
             return None
 
 
-def apply_one_hot_enc(df: pd.DataFrame, col: str, enc_dict: Dict):
-    for key, value in enc_dict.items():
-        df[value] = np.zeros(df.shape[0], dtype=int)
-        df.loc[df[col] == key, value] = 1
-
-    return df.drop(columns=[col])
-
-
 def create_sample_comb(im_df: pd.DataFrame):
     """Generates the site-source combinations
     for which there is IM data available

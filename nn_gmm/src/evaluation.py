@@ -65,16 +65,6 @@ def evaluate(
         X_val, pre_process=False, result_df_index=X_val.index.values.astype(str)
     )
 
-    # # Compute residuals
-    # res_train = y_train_est - training_result.y_train
-    # res_val = y_val_est - training_result.y_val
-    #
-    # ln_res_train = (y_train_est / training_result.y_train).apply(np.log)
-    # ln_res_val = (y_val_est / training_result.y_val).apply(np.log)
-    #
-    # rel_res_train = res_train / training_result.y_train
-    # rel_res_val = res_val / training_result.y_val
-
     return EvaluationResult(
         training_result, mean_train_est, std_train_est, mean_val_est, std_val_est
     )

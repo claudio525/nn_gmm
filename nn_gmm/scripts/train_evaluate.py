@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict
 import os
 
@@ -21,14 +22,15 @@ if gpus:
         # Memory growth must be set before GPUs have been initialized
         print(e)
 
-def convert_to_pre_fn(config: Dict, stats_df: pd.DataFrame):
+
+def convert_input_config(config: Dict, stats_df: pd.DataFrame):
     for key, item in config.items():
         if item is None:
             continue
         elif item == "standard":
-            config[key] = nn_gmm.get_standard_scaling_fn(stats_df.loc[key, "mean"], stats_df.loc[key, "std"])
+            config[key] = (item, stats_df.loc[key, "mean"], stats_df.loc[key, "std"])
         elif item == "min_max":
-            config[key] = nn_gmm.get_min_max_scaling_fn(stats_df.loc[key, "min"], stats_df.loc[key, "max"])
+            config[key] = (item, stats_df.loc[key, "min"], stats_df.loc[key, "max"])
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
@@ -59,49 +61,53 @@ INPUT_CONFIG = {
         "ry": "standard",
     },
     "im_config": {
-        "AI": "standard",
-        "CAV": "standard",
-        "Ds575": "standard",
-        "Ds595": "standard",
-        "MMI": "standard",
-        "PGA": "standard",
-        "PGV": "standard",
-        "pSA_0.01": "standard",
-        "pSA_0.02": "standard",
-        "pSA_0.03": "standard",
-        "pSA_0.04": "standard",
-        "pSA_0.05": "standard",
-        "pSA_0.075": "standard",
-        "pSA_0.1": "standard",
-        "pSA_0.12": "standard",
-        "pSA_0.15": "standard",
-        "pSA_0.17": "standard",
-        "pSA_0.2": "standard",
-        "pSA_0.25": "standard",
-        "pSA_0.3": "standard",
-        "pSA_0.4": "standard",
-        "pSA_0.5": "standard",
-        "pSA_0.6": "standard",
-        "pSA_0.7": "standard",
-        "pSA_0.75": "standard",
-        "pSA_0.8": "standard",
-        "pSA_0.9": "standard",
-        "pSA_1.0": "standard",
-        "pSA_1.25": "standard",
-        "pSA_1.5": "standard",
-        "pSA_10.0": "standard",
-        "pSA_2.0": "standard",
-        "pSA_2.5": "standard",
-        "pSA_3.0": "standard",
-        "pSA_4.0": "standard",
-        "pSA_5.0": "standard",
-        "pSA_6.0": "standard",
-        "pSA_7.5": "standard",
+        "AI": None,
+        "CAV": None,
+        "Ds575": None,
+        "Ds595": None,
+        "MMI": None,
+        "PGA": None,
+        "PGV": None,
+        "pSA_0.01": None,
+        "pSA_0.02": None,
+        "pSA_0.03": None,
+        "pSA_0.04": None,
+        "pSA_0.05": None,
+        "pSA_0.075": None,
+        "pSA_0.1": None,
+        "pSA_0.12": None,
+        "pSA_0.15": None,
+        "pSA_0.17": None,
+        "pSA_0.2": None,
+        "pSA_0.25": None,
+        "pSA_0.3": None,
+        "pSA_0.4": None,
+        "pSA_0.5": None,
+        "pSA_0.6": None,
+        "pSA_0.7": None,
+        "pSA_0.75": None,
+        "pSA_0.8": None,
+        "pSA_0.9": None,
+        "pSA_1.0": None,
+        "pSA_1.25": None,
+        "pSA_1.5": None,
+        "pSA_10.0": None,
+        "pSA_2.0": None,
+        "pSA_2.5": None,
+        "pSA_3.0": None,
+        "pSA_4.0": None,
+        "pSA_5.0": None,
+        "pSA_6.0": None,
+        "pSA_7.5": None,
     },
 }
-stats_df = pd.read_csv(os.path.join(INPUT_CONFIG["train_data_dir"], "stats.csv"), index_col="feature")
-INPUT_CONFIG["feature_config"] = convert_to_pre_fn(INPUT_CONFIG["feature_config"], stats_df)
-INPUT_CONFIG["im_config"] = convert_to_pre_fn(INPUT_CONFIG["im_config"], stats_df)
+stats_df = pd.read_csv(
+    os.path.join(INPUT_CONFIG["train_data_dir"], "stats.csv"), index_col="feature"
+)
+INPUT_CONFIG["feature_config"] = convert_input_config(
+    INPUT_CONFIG["feature_config"], stats_df
+)
+INPUT_CONFIG["im_config"] = convert_input_config(INPUT_CONFIG["im_config"], stats_df)
 
 # Config
 CONFIG = {
@@ -113,23 +119,23 @@ CONFIG = {
     "training_config": {
         "batch_size": 10000,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 10,
+        "n_epochs": 25,
         "optimizer": "Adam",
         "loss": nn_gmm.MargNLLLoss(38),
     },
 }
 
 if __name__ == "__main__":
-    train_result, output_dir = nn_gmm.train(
+    train_result, output_dir, *_ = nn_gmm.train(
         INPUT_CONFIG, CONFIG, model_fn=nn_gmm.create_gaussian_model, verbose=1
     )
 
-    # Plotting doesn't work yet
-    exit()
-
-    train_result.save(os.path.join(output_dir, "train_results.pickle"))
-    eval_result = nn_gmm.evaluate(train_result, train_data, val_data)
-    eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
+    # # Plotting doesn't work yet
+    # exit()
+    #
+    # train_result.save(os.path.join(output_dir, "train_results.pickle"))
+    # eval_result = nn_gmm.evaluate(train_result, train_data, val_data)
+    # eval_result.save(os.path.join(output_dir, "eval_results.pickle"))
 
     # # Residual plots
     # plot_gen = nn_gmm.EvalPlotGen(eval_result)
@@ -143,10 +149,16 @@ if __name__ == "__main__":
     # plot_gen.create_comb_res_maps(plot_items_ffp, n_procs=4)
     # plot_gen.create_IM_res_maps(plot_items_ffp, n_procs=4)
 
+    # Load model
+    model = nn_gmm.GMM.load(train_result.best_model_dir)
+
+    # Get locations
+    train_dir = Path(INPUT_CONFIG["train_data_dir"])
+    feature_details = nn_gmm.load_feature_details(train_dir)
+    sel_loc_df = nn_gmm.sel_rand_locations(train_dir, feature_details, 1000)
+
     # IM vs rrup/mag... plots
-    sel_loc_df = nn_gmm.sel_rand_locations(train_data[0], 1000)
-    # sel_loc_df = None
-    im_plot_gen = nn_gmm.IMvsPlotGen(nn_gmm.GMM.load(train_result.best_model_dir))
+    im_plot_gen = nn_gmm.IMvsPlotGen(model)
     im_plot_gen.gen_plots(
         np.asarray(
             [
