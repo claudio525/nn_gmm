@@ -1,5 +1,5 @@
 import pickle
-from typing import Dict
+from typing import Dict, Union
 from pathlib import Path
 
 import pandas as pd
@@ -11,11 +11,11 @@ def load_dataset(
     data_dir: Path,
     feature_details: Dict,
     batch_size: int,
-    shuffle_buffer: int = 1_000_000,
+    shuffle_buffer: Union[int, None] = 1_000_000,
     n_open_files: int = 32,
+    block_size: int = 256,
 ):
-    """
-    Performs the loading and parsing of a tensorflow dataset from
+    """Performs the loading and parsing of a tensorflow dataset from
     the .tfrecord files in the given directory
 
     Parameters
@@ -38,6 +38,12 @@ def load_dataset(
     n_open_files: int, optional
         How many .tfrecord files to read concurrently using the interleave
         function (https://www.tensorflow.org/api_docs/python/tf/data/Dataset#interleave)
+    block_size: int, optional
+        Determines how many records are loaded from a .tfrecord file in one
+        interleave cylce
+        Default value should be fine, increasing it will make load times faster,
+        however if the shuffle buffer is not appropriately sized then this may
+        result in badly shuffled data
 
     Returns
     -------
@@ -66,7 +72,7 @@ def load_dataset(
         lambda f: tf.data.TFRecordDataset(f),
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
         cycle_length=n_open_files,
-        block_length=1,
+        block_length=block_size,
         deterministic=False,
     )
 
