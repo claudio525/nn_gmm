@@ -1,8 +1,9 @@
 import pickle
 import json
+import glob
 import os
 import datetime
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Callable
 from pathlib import Path
 
 import numpy as np
@@ -10,135 +11,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras as keras
+import tensorflow_probability as tfp
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 
 from . import hidden_layers
 from . import utils
-
-EXAMPLE_INPUT_CONFIG = {
-    "sample_db_ffp": "/Users/Clus/code/work/nn_gmm/data/sample_dbs/v18p6.h5",
-    "base_output_dir": "/Users/Clus/code/work/nn_gmm/results/test",
-    "output_dir": None,
-    "ignore_features": ["rtvz"],
-    "categorial_features": ["tect_type"],
-    "std_scale_features": [
-        "vs30",
-        "z1p0",
-        "z2p5",
-        "dip",
-        "rake",
-        "width",
-        "ztor",
-        "mag",
-        "rjb",
-        "rrup",
-        "rx",
-        "ry",
-    ],
-    "min_max_scale_features": ["lat", "lon"],
-}
-
-# Config
-EXAMPLE_TRAIN_CONFIG = {
-    "model_config": {
-        "hidden_layer_config": {"dropout": 0.25},
-        "hidden_layer_func": hidden_layers.relu_BN_dropout,
-        "units": [60, 60, 60],
-    },
-    "training_config": {"val_size": 0.1, "batch_size": 32, "n_epochs": 5},
-}
-
-
-def load_clean_samples(
-    sample_db_ffp: str,
-    ignore_features: List[str] = None,
-    categorial_features: List[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
-    """
-    Loads the data from the sample database, drops unwanted features
-    and performs one-hot encoding for the categorial features
-
-    Parameters
-    ----------
-    sample_db_ffp: str
-        File path to the samples db
-    ignore_features: list of strings
-        Names of the features to ignore
-    categorial_features: list of strings
-        Names of the features to one-hot encode
-
-    Returns
-    -------
-    X: pd.DataFrame
-    y: pd.DataFrame
-    cat_columns: list of strings
-        Names of all the one-hot-encoded
-        categorical columns
-    station_lookup: dataframe
-        Station location lookup
-        index = station name, columns = [lat, lon]
-    """
-    # Load the data
-    with pd.HDFStore(sample_db_ffp, mode="r") as store:
-        X = store["X"]
-        y = store["y"]
-
-    station_lookup = utils.get_station_lookup(X)
-
-    # Drop the ignored features columns
-    if ignore_features is not None:
-        X = X.drop(columns=ignore_features)
-
-    # One hot encoding of categorial features
-    cat_columns = None
-    if categorial_features is not None:
-        if np.isin(categorial_features, X.columns):
-            X = pd.get_dummies(X, columns=categorial_features)
-
-            # Get all the new one-hot encoded categorial columns\
-            cat_columns = [
-                cur_col
-                for cur_col in X.columns.values.astype(str)
-                if any(
-                    [
-                        cur_col.startswith(cat_feature)
-                        for cat_feature in categorial_features
-                    ]
-                )
-            ]
-
-    return X, y, cat_columns, station_lookup
-
-
-def create_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
-    """
-    Creates a functional keras model from the model config
-
-    Parameters
-    ----------
-    model_config: dictionary
-        Model config,
-    n_inputs
-    n_outputs
-
-    Returns
-    -------
-    keras.Model
-    """
-    hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config["hidden_layer_config"]
-    units = model_config["units"]
-
-    input = keras.Input(n_inputs)
-
-    x = hidden_layer_func(input, units[0], **hidden_layer_config)
-    for unit in units[1:]:
-        x = hidden_layer_func(x, unit, **hidden_layer_config)
-
-    outputs = keras.layers.Dense(units=n_outputs, activation=None)(x)
-
-    return keras.Model(inputs=input, outputs=outputs)
+from . import data_processing
+from . import data
+from . import model
 
 
 def create_run_id() -> str:
@@ -153,28 +34,12 @@ class TrainingResult:
         input_config: Dict,
         training_config: Dict,
         output_dir: str,
-        X: pd.DataFrame,
-        y: pd.DataFrame,
-        station_lookup: pd.DataFrame,
-        X_train: pd.DataFrame,
-        y_train: pd.DataFrame,
-        X_val: pd.DataFrame,
-        y_val: pd.DataFrame,
         best_model_dir: str,
     ):
 
         self.input_config = input_config
         self.training_config = training_config
         self.output_dir = output_dir
-
-        self.X = X
-        self.y = y
-        self.station_lookup = station_lookup
-
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
 
         self.best_model_dir = best_model_dir
 
@@ -183,8 +48,33 @@ class TrainingResult:
             pickle.dump(self, f)
 
 
+def load_datasets(
+    train_dir: Path, batch_size: int, val_dir: Path = None, shuffle_buffer: int = None
+):
+    """Loads the training and validation (if specified) datasets
+    from the .tfrecord files in the given directories"""
+    with (train_dir / "feature_details.pickle").open("rb") as f:
+        feature_details = pickle.load(f)
+
+    train_ds = data.load_dataset(
+        train_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer
+    )
+    val_ds = (
+        data.load_dataset(
+            val_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer
+        )
+        if val_dir is not None
+        else None
+    )
+
+    return train_ds, val_ds
+
+
 def train(
-    input_config: Dict, train_config: Dict, verbose: int = 2
+    input_config: Dict,
+    config: Dict,
+    model_fn: Callable = model.create_reg_model,
+    verbose: int = 2,
 ) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
@@ -193,9 +83,13 @@ def train(
     ----------
     input_config: dictionary
         For an example see EXAMPLE_INPUT_CONFIG
-    train_config: dictionary
+    config: dictionary
         For an example see EXAMPLE_TRAIN_CONFIG
-    verbose: int
+    model_fn: callabel, optional
+        Function that returns a keras model to train,
+        must take 3 inputs: model_config, n_inputs, n_outputs
+        Defaults to "create_reg_model"
+    verbose: int, optional
         Model fitting verbosity for details, see
         https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
 
@@ -208,8 +102,8 @@ def train(
     )
 
     # Load configs
-    model_config = train_config["model_config"]
-    training_config = train_config["training_config"]
+    model_config = config["model_config"]
+    training_config = config["training_config"]
     batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
 
     # Create the output directory
@@ -230,111 +124,67 @@ def train(
         json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        json.dump(train_config, f, cls=utils.GenericObjJSONEncoder)
+        json.dump(config, f, cls=utils.GenericObjJSONEncoder)
 
-    # Load & clean the data
-    print(f"Loading samples")
-    X, y, cat_columns, station_lookup = load_clean_samples(
-        input_config["sample_db_ffp"],
-        input_config["ignore_features"],
-        input_config["categorial_features"],
-    )
-    # X, y = X.iloc[:10000, :], y.iloc[:10000, :]
-
-    # Split into train and validation set
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=training_config["val_size"]
-    )
-    n_train, n_val = X_train.shape[0], X_val.shape[0]
-    n_features, n_outputs = X_train.shape[1], y_train.shape[1]
-
-    # Preprocessing of features
-    # Pretty sure this error message does not apply here
-    # https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
-    with pd.option_context("mode.chained_assignment", None):
-        std_scale_features = input_config["std_scale_features"]
-        std_scaler = preprocessing.StandardScaler()
-        if std_scale_features is not None and len(std_scale_features) > 0:
-            X_train.loc[:, std_scale_features] = std_scaler.fit_transform(
-                X_train.loc[:, std_scale_features].values
-            )
-            X_val.loc[:, std_scale_features] = std_scaler.transform(
-                X_val.loc[:, std_scale_features].values
-            )
-
-        min_max_features = input_config["min_max_scale_features"]
-        min_max_scaler = preprocessing.MinMaxScaler()
-        if min_max_features is not None and len(min_max_features) > 0:
-            X_train.loc[:, min_max_features] = min_max_scaler.fit_transform(
-                X_train.loc[:, min_max_features].values
-            )
-            X_val.loc[:, min_max_features] = min_max_scaler.transform(
-                X_val.loc[:, min_max_features].values
-            )
-
-    # Preprocessing of the outputs, log transform & standardise
-    assert np.all(y_train.columns == y_val.columns)
-    std_scaler_y = preprocessing.StandardScaler()
-    y_train = pd.DataFrame(
-        index=y_train.index,
-        columns=y_train.columns,
-        data=std_scaler_y.fit_transform(np.log(y_train.values)),
-    )
-    y_val = pd.DataFrame(
-        index=y_val.index,
-        columns=y_val.columns,
-        data=std_scaler_y.transform(np.log(y_val.values)),
+    train_ds, val_ds = load_datasets(
+        Path(input_config["train_data_dir"]),
+        training_config["batch_size"],
+        val_dir=Path(input_config["val_data_dir"])
+        if input_config["val_data_dir"] is not None
+        else None,
+        shuffle_buffer=training_config["shuffle_buffer_size"],
     )
 
-    # Create the train & validation datasets
-    train_dataset = tf.data.Dataset.from_tensor_slices((X_train.values, y_train.values))
-    train_dataset = train_dataset.shuffle(n_train).batch(batch_size).prefetch(50)
-
-    val_dataset = tf.data.Dataset.from_tensor_slices((X_val.values, y_val.values))
-    val_dataset = val_dataset.batch(batch_size).prefetch(50)
+    feature_config = data_processing.convert_to_transform_fn(
+        input_config["feature_config"].copy()
+    )
+    im_config = data_processing.convert_to_transform_fn(
+        input_config["im_config"].copy()
+    )
+    n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
+    train_ds = data_processing.preprocess_ds(train_ds, feature_config, im_config)
+    val_ds = (
+        val_ds
+        if val_ds is None
+        else data_processing.preprocess_ds(val_ds, feature_config, im_config)
+    )
 
     # Create the model
     print(f"Creating model")
-    model = create_model(model_config, n_features, n_outputs)
-    model.compile(optimizer="Adam", loss=training_config["loss"])
+    model = model_fn(model_config, n_features, n_outputs)
+    model.compile(
+        optimizer=training_config["optimizer"],
+        loss=training_config["loss"],
+        run_eagerly=False,
+    )
 
     # Model architecture summary
     model.summary()
 
     # Callbacks
     model_dir = output_dir / "best_model"
+    model_dir.mkdir()
     callbacks = [
         # Saves the best model (based on the validation loss)
         keras.callbacks.ModelCheckpoint(
             str(model_dir), monitor="val_loss", save_best_only=True
-        )
+        ),
+        # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
+
+    print(f"Preparing datasets")
+    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
     # Train
     print(f"Training...")
     history = model.fit(
-        train_dataset,
+        train_ds,
         epochs=n_epochs,
-        validation_data=val_dataset,
+        validation_data=val_ds,
         callbacks=callbacks,
         verbose=verbose,
     )
-
-    # Save the feature & output scalers
-    with open(model_dir / "preprocessing.pickle", "wb") as f:
-        pickle.dump(
-            {
-                "std_scaler": std_scaler,
-                "min_max_scaler": min_max_scaler,
-                "std_scaler_y": std_scaler_y,
-                "cat_columns": cat_columns,
-            },
-            f,
-        )
-
-    # Save the order of the features and output
-    np.save(model_dir / "features.npy", X_train.columns.values.astype(str))
-    np.save(model_dir / "outputs.npy", y_train.columns.values.astype(str))
 
     # Save the input (for the model)
     with open(model_dir / "input_config.json", "w") as f:
@@ -358,18 +208,6 @@ def train(
     plt.close()
 
     return (
-        TrainingResult(
-            input_config,
-            training_config,
-            output_dir,
-            X,
-            y,
-            station_lookup,
-            X_train,
-            y_train,
-            X_val,
-            y_val,
-            model_dir,
-        ),
+        TrainingResult(input_config, training_config, output_dir, model_dir),
         output_dir,
     )
