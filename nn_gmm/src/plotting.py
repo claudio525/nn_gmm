@@ -14,6 +14,8 @@ from visualization.gmt.plotting import plot_multiple
 from .evaluation import EvaluationResult
 from .model import GMM
 from .utils import get_station_from_id
+from . import data
+
 
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
@@ -92,6 +94,7 @@ def create_multi_hist(
 
 
 class IMvsPlotGen:
+    """Computes IM vs features (such as Mw, Rrup, vs30) plots"""
 
     CONST_DEFAULT_VALUES = pd.Series(
         data={
@@ -114,13 +117,33 @@ class IMvsPlotGen:
     def __init__(self, model: GMM):
         self.model = model
 
-    def get_B10_values(
+    def get_B13_values(
         self,
         im: str,
         feature_key: str,
-        feature_range: np.ndarray,
+        feature_values: np.ndarray,
         const_values: pd.Series,
     ) -> Union[pd.DataFrame, None]:
+        """Computes the IM values using the Bradley 2013 GMPE model,
+        with one feature being varied and all others being kept constant
+
+        Parameters
+        ----------
+        im: str
+            The IM of interest
+        feature_key: str, key
+            The feature to vary
+        feature_values: numpy array of floats
+            The feature values at which to compute the IM value
+        const_values: series
+            The constant feature values to use
+
+        Returns
+        -------
+        dataframe
+            index: varied feature values
+            columns: mu and sigma
+        """
         if im.lower() not in ["pga", "pgv"] and not im.lower().startswith("psa"):
             return None
 
@@ -135,7 +158,7 @@ class IMvsPlotGen:
                 ztor=const_values.ztor,
             )
 
-            for cur_rrup in feature_range:
+            for cur_rrup in feature_values:
                 cur_site = classdef.Site(
                     rrup=cur_rrup,
                     rjb=cur_rrup,
@@ -155,7 +178,11 @@ class IMvsPlotGen:
 
                 im_values.append(cur_mean)
                 im_sigmas.append(cur_sigma)
-            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+            return pd.DataFrame(
+                index=feature_values,
+                columns=["mu", "sigma"],
+                data=np.asarray([im_values, im_sigmas]).T,
+            )
 
         elif feature_key == "mag":
             site = classdef.Site(
@@ -168,7 +195,7 @@ class IMvsPlotGen:
                 vs30measured=False,
             )
 
-            for cur_mag in feature_range:
+            for cur_mag in feature_values:
                 cur_fault = classdef.Fault(
                     Mw=cur_mag,
                     rake=const_values.rake,
@@ -176,7 +203,9 @@ class IMvsPlotGen:
                     ztor=const_values.ztor,
                 )
 
-                emp_result = emp_factory.compute_gmm(cur_fault, site, classdef.GMM.Br_10, im, [period])
+                emp_result = emp_factory.compute_gmm(
+                    cur_fault, site, classdef.GMM.Br_10, im, [period]
+                )
                 if period == 0:
                     cur_mean, (cur_sigma, _, __) = emp_result
                 else:
@@ -184,8 +213,12 @@ class IMvsPlotGen:
 
                 im_values.append(cur_mean)
                 im_sigmas.append(cur_sigma)
-            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
-        
+            return pd.DataFrame(
+                index=feature_values,
+                columns=["mu", "sigma"],
+                data=np.asarray([im_values, im_sigmas]).T,
+            )
+
         elif feature_key == "vs30":
             fault = classdef.Fault(
                 Mw=const_values.mag,
@@ -194,7 +227,7 @@ class IMvsPlotGen:
                 ztor=const_values.ztor,
             )
 
-            for cur_vs30 in feature_range:
+            for cur_vs30 in feature_values:
                 cur_site = classdef.Site(
                     rrup=const_values.rrup,
                     rjb=const_values.rjb,
@@ -202,7 +235,7 @@ class IMvsPlotGen:
                     hw=True,
                     rtvz=0,
                     vs30=cur_vs30,
-                    vs30measured=True, # not sure about this parameter
+                    vs30measured=True,  # not sure about this parameter
                 )
                 emp_result = emp_factory.compute_gmm(
                     fault, cur_site, classdef.GMM.Br_10, im, [period]
@@ -214,15 +247,43 @@ class IMvsPlotGen:
 
                 im_values.append(cur_mean)
                 im_sigmas.append(cur_sigma)
-            return pd.DataFrame(index=feature_range,columns=['mu', 'sigma'],data=np.asarray([im_values,im_sigmas]).T)
+            return pd.DataFrame(
+                index=feature_values,
+                columns=["mu", "sigma"],
+                data=np.asarray([im_values, im_sigmas]).T,
+            )
 
-    def get_est_values(
+    def get_est_site_values(
         self,
         feature_key: str,
         feature_values: np.ndarray,
         const_values: pd.Series,
         locations: pd.DataFrame = None,
-    ):
+    ) -> Tuple[pd.DataFrame, Tuple[pd.DataFrame, pd.DataFrame]]:
+        """Computes the estimated mean & std using the
+        given NN model, varied along one feature at each of the
+        given locations
+
+        Parameters
+        ----------
+        feature_key: str, key
+            The feature to vary
+        feature_values: numpy array of floats
+            The feature values at which to compute the IM value
+        const_values: series
+            The constant feature values to use
+        locations: dataframe
+            Locations of interest,
+            required columsn [lon, lat]
+
+        Returns
+        -------
+        feature_df: dataframe
+            The feature dataframe used
+        mean_est_df: dataframe
+        std_est_df: dataframe
+            The mean and std datadrames estimations
+        """
         if locations is not None:
             feature_df = pd.DataFrame(
                 data=np.concatenate(
@@ -252,8 +313,12 @@ class IMvsPlotGen:
 
         # Run estimation
         mean_est_df, std_est_df = self.model.predict(feature_df, pre_process=True)
-        mean_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
-        std_est_df[["lon", "lat", feature_key]] = feature_df[["lon", "lat", feature_key]]
+        mean_est_df[["lon", "lat", feature_key]] = feature_df[
+            ["lon", "lat", feature_key]
+        ]
+        std_est_df[["lon", "lat", feature_key]] = feature_df[
+            ["lon", "lat", feature_key]
+        ]
         return feature_df, (mean_est_df, std_est_df)
 
     def gen_plot(
@@ -266,11 +331,33 @@ class IMvsPlotGen:
         emp_df: pd.Series = None,
         output_ffp: Union[str, Path] = None,
     ):
+        """Generates an IM vs. feature plot
+
+        Parameters
+        ----------
+        im: str
+            IM of interest
+        feature_key: str
+            The feature that was varied
+        feature_df: dataframe
+            The feature values that were used for estimation
+        mean_est_df: dataframe
+            The estimated mean values
+        locations: dataframe, optional
+            The locations at which the model was evaluated
+        emp_df: dataframe, optional
+
+        output_ffp:
+
+        Returns
+        -------
+
+        """
         output_ffp = output_ffp if isinstance(output_ffp, Path) else Path(output_ffp)
 
         # Create the plot
         # fig = plt.figure(figsize=(18, 13.5))
-        fig = plt.figure(figsize=(7,5.5))
+        fig = plt.figure(figsize=(7, 5.5))
 
         if locations is None:
             plt.plot(feature_df[feature_key], mean_est_df[im], marker="x")
@@ -296,7 +383,7 @@ class IMvsPlotGen:
                 feature_means[im],
                 linewidth=0.75,
                 c="k",
-                label="Mean NN",
+                label="Mean of Sites - NN",
             )
             plt.plot(
                 feature_means.index.values,
@@ -304,7 +391,7 @@ class IMvsPlotGen:
                 linestyle="--",
                 c="k",
                 linewidth=0.75,
-                label="Std NN",
+                label="Std of Sites - NN",
             )
             plt.plot(
                 feature_means.index.values,
@@ -314,36 +401,15 @@ class IMvsPlotGen:
                 linewidth=0.75,
             )
 
-        # #mpirical plots
         if emp_df is not None:
-            # mean prediction
-            plt.plot(
-                emp_df.index.values,
-                emp_df['mu'].values,
-                c="r",
-                label="Mean emp.",
-            )
-            # +- sigma 
-            plt.plot(
-                emp_df.index.values,
-                emp_df['mu'].values*np.exp(emp_df['sigma'].values),
-                c="r",
-                linestyle="--",
-                label="Std emp.",
-            )
-            plt.plot(
-                emp_df.index.values,
-                emp_df['mu'].values*np.exp(-emp_df['sigma'].values),
-                c="r",
-                linestyle="--",
-            )
+            self.add_emp(emp_df)
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
         plt.yscale("log")
-        plt.grid(linestyle='--', linewidth=0.25)
+        plt.grid(linestyle="--", linewidth=0.25)
         plt.legend()
-        plt.title('{} {}'.format(im, feature_key))
+        plt.title("{} {}".format(im, feature_key))
 
         if output_ffp is not None:
             if not output_ffp.parent.is_dir():
@@ -355,38 +421,223 @@ class IMvsPlotGen:
 
         return fig
 
+    def gen_mean_plot(
+        self,
+        im: str,
+        feature_key: str,
+        feature_df: pd.DataFrame,
+        mean_est_df: pd.DataFrame,
+        std_est_df: pd.DataFrame,
+        emp_df: pd.Series = None,
+        output_ffp: Union[str, Path] = None,
+    ):
+        """Very similar to gen_plot, except that it takes the
+        mean of the means & stds at each location and plots those
+
+        This is not ideal, mainly exists for the presentation
+        """
+        # fig = plt.figure(figsize=(18, 13.5))
+        fig = plt.figure(figsize=(7, 5.5))
+
+        x = feature_df[feature_key].unique()
+        mean = mean_est_df.groupby(feature_key).mean()[im]
+        std = std_est_df.groupby(feature_key).mean()[im]
+        plt.plot(x, mean, c="k", linewidth=0.75, label="Mean NN")
+        plt.plot(
+            x, mean * np.exp(std), c="k", linewidth=0.75, linestyle="--", label="Std NN"
+        )
+        plt.plot(x, mean * np.exp(-std), c="k", linewidth=0.75, linestyle="--")
+
+        # Empirical plots
+        if emp_df is not None:
+            self.add_emp(emp_df)
+
+        plt.xlabel(feature_key)
+        plt.ylabel(im)
+        plt.yscale("log")
+        plt.grid(linestyle="--", linewidth=0.25)
+        plt.legend()
+        plt.title("{} {}".format(im, feature_key))
+
+        if output_ffp is not None:
+            if not output_ffp.parent.is_dir():
+                output_ffp.parent.mkdir(parents=True)
+            plt.savefig(output_ffp, dpi=300)
+            plt.close()
+        else:
+            plt.show()
+
+        return fig
+
+    def add_emp(self, emp_df: pd.Series):
+        """Adds the empirical data to the
+        current plot
+
+        Parameters
+        ----------
+        emp_df: dataframe
+            The empirical GMM estimates, expects
+            the columns [mu, sigma]
+        """
+        # mean prediction
+        plt.plot(
+            emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
+        )
+        # +- sigma
+        plt.plot(
+            emp_df.index.values,
+            emp_df["mu"].values * np.exp(emp_df["sigma"].values),
+            c="r",
+            linestyle="--",
+            label="Std Bradley 2013",
+        )
+        plt.plot(
+            emp_df.index.values,
+            emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
+            c="r",
+            linestyle="--",
+        )
+
     def gen_plots(
         self,
         ims: np.ndarray,
         feature_dict: Dict[str, np.ndarray],
         output_dir: Union[Path, None],
         locations: pd.DataFrame = None,
+        mean: bool = False,
     ):
+        """Generates plots for each IM
+
+        Parameters
+        ----------
+        See gen_plot
+        """
         if not output_dir.is_dir():
             output_dir.mkdir(parents=True)
 
         for cur_feature, cur_feature_values in feature_dict.items():
-            cur_feature_df, (cur_mean_est_df, cur_std_est_df) = self.get_est_values(
+            cur_feature_df, (
+                cur_mean_est_df,
+                cur_std_est_df,
+            ) = self.get_est_site_values(
                 cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
             )
 
             for cur_im in ims:
-                cur_emp_df = self.get_B10_values(
+                cur_emp_df = self.get_B13_values(
                     cur_im, cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES
                 )
-                self.gen_plot(
-                    cur_im,
-                    cur_feature,
-                    cur_feature_df,
-                    cur_mean_est_df,
-                    locations,
-                    emp_df=cur_emp_df,
-                    output_ffp=output_dir
-                    / f"{cur_im.replace('.', 'p')}_{cur_feature}.png",
-                )
+
+                if not mean:
+                    self.gen_plot(
+                        cur_im,
+                        cur_feature,
+                        cur_feature_df,
+                        cur_mean_est_df,
+                        locations,
+                        emp_df=cur_emp_df,
+                        output_ffp=output_dir
+                        / f"{cur_im.replace('.', 'p')}_{cur_feature}.png",
+                    )
+                else:
+                    self.gen_mean_plot(
+                        cur_im,
+                        cur_feature,
+                        cur_feature_df,
+                        cur_mean_est_df,
+                        cur_std_est_df,
+                        emp_df=cur_emp_df,
+                        output_ffp=output_dir
+                        / f"{cur_im.replace('.', 'p')}_{cur_feature}.png",
+                    )
 
 
-class EvalPlotGen:
+class SpatialPlotGen:
+
+    DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
+        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
+        "options": {
+            "xyz-grid-search": "12m",
+            "xyz-grid-automask": "12k",
+            "xyz-cpt": "hot",
+            "xyz-transparency": "30",
+            "xyz-size": "1k",
+            "xyz-cpt-min": "0",
+            "xyz-cpt-max": "0.6",
+        },
+    }
+
+    def __init__(self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path):
+        self.plot_items_ffp = plot_items_ffp
+
+        self.model = model
+
+        self.data_dirs = data_dirs
+        self.output_dir = output_dir
+
+        self._estimates = {}
+
+    def _get_event_estimates(self, event: str):
+        if event in self._estimates.keys():
+            return self._estimates[event]
+        else:
+            # Find the .tfrecord file
+            record_ffp, feature_details = find_record_ffp(self.data_dirs, event)
+
+            # Load the data
+            df = data.load_tfrecord(str(record_ffp), feature_details)
+
+            # Get the estimates
+            mean_est, std_est = self.model.predict(df.loc[:, self.model.features])
+
+            self._estimates[event] = (df, mean_est, std_est)
+            return df, mean_est, std_est
+
+    def gen_event_map(self, event: str, im: str):
+        event_out_dir = self.output_dir / event
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        df, mean_est, _ = self._get_event_estimates(event)
+
+        data_df = mean_est.copy()
+        data_df = pd.merge(data_df, df.loc[:, ["lat", "lon"]], left_index=True, right_index=True, how="inner")
+        assert data_df.shape[0] == mean_est.shape[0]
+
+        data_df["station"] = get_station_from_id(data_df.index.values.astype(str))
+
+        # Calculate the mean across all realisations at each station
+        agg_df = data_df.groupby("station").mean()
+
+        plot_csv_ffp = event_out_dir / f"{im}_mean"
+        plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp))
+
+        plot_multiple(self.plot_items_ffp, self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, in_ffps=[str(plot_csv_ffp)])
+
+        return
+
+
+
+def find_record_ffp(data_dirs: List[Path], event: str):
+    results = []
+    for cur_dir in data_dirs:
+        cur_r = list(cur_dir.glob(f"{event}.tfrecord"))
+
+        if len(cur_r) > 0:
+            cur_feature_details = data.load_feature_details(cur_dir)
+            results.append((cur_r[0], cur_feature_details))
+
+    if len(results) == 0:
+        raise ValueError(
+            f"No tfrecord file could be found for the specified event: {event}"
+        )
+
+    assert len(results) == 1, "More than one tfrecord file found"
+
+    return results[0]
+
+
+class SpatialPlotGenOld:
 
     DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
         "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
@@ -497,60 +748,6 @@ class EvalPlotGen:
             ]
         )
 
-    def create_IM_res_hist(
-        self, im: str, output_ffp: str = None, xlim_n_std: float = None
-    ):
-        """Creates a ln residual for the specified IM"""
-        output_ffp = (
-            output_ffp
-            if output_ffp is not None
-            else os.path.join(self.output_dir, self.LN_RES_IM_FNAME_TEMPLATE.format(im))
-        )
-        return create_IM_res_hist(
-            output_ffp, self.train_res_df, im, self.val_res_df, xlim_n_std=xlim_n_std
-        )
-
-    def create_IM_res_hists(
-        self,
-        ims: Iterable[str] = None,
-        output_dir: str = None,
-        xlim_n_std: float = None,
-    ):
-        """Creates a residual histogram for each IM type"""
-        ims = ims if ims is not None else self.ims
-        output_dir = output_dir if output_dir is not None else self.output_dir
-
-        print("Creating ln residual histograms for each IM")
-        for im in ims:
-            self.create_IM_res_hist(
-                im,
-                os.path.join(output_dir, self.LN_RES_IM_FNAME_TEMPLATE.format(im)),
-                xlim_n_std=xlim_n_std,
-            )
-
-    def create_comb_res_hist(
-        self,
-        ims: Iterable[str] = None,
-        output_ffp: str = None,
-        xlim_n_std: float = None,
-    ):
-        """Creates a residual histogram across all the specified
-        IM types (defaults to all)"""
-        output_ffp = (
-            output_ffp
-            if output_ffp is not None
-            else os.path.join(self.output_dir, "ln_res.png")
-        )
-        ims = ims if ims is not None else self.ims
-
-        return create_res_hist(
-            output_ffp,
-            self.train_res_df,
-            ims,
-            val_df=self.val_res_df,
-            xlim_n_std=xlim_n_std,
-        )
-
     def create_comb_res_maps(
         self,
         plot_items_ffp: str,
@@ -641,44 +838,6 @@ class EvalPlotGen:
         )
 
 
-def create_IM_res_hist(
-    output_ffp: str,
-    train_df: pd.DataFrame,
-    im: str,
-    val_df: pd.DataFrame = None,
-    xlim_n_std: float = None,
-):
-    im_mean, im_std = f"{im}_mean", f"{im}_std"
-
-    fig = plt.figure(figsize=(12, 6))
-    ax1, ax2 = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
-
-    # Plot mean and std histogram
-    for cur_key, ax in zip([im_mean, im_std], [ax1, ax2]):
-        # Filter out data points that are not withing the specified limits
-        # Added to prevent outliers extending x-axis to far
-        if xlim_n_std is not None:
-            min_x, max_x = __get_min_max_x(train_df.loc[:, cur_key].values, xlim_n_std)
-            train_mask = (train_df[cur_key].values > min_x) & (
-                train_df[cur_key].values < max_x
-            )
-
-            sns.distplot(train_df.loc[train_mask, cur_key], kde=False, ax=ax)
-            if val_df is not None:
-                val_mask = (val_df[cur_key].values > min_x) & (
-                    val_df[cur_key].values < max_x
-                )
-                sns.distplot(val_df.loc[val_mask, cur_key], kde=False, ax=ax)
-        else:
-            sns.distplot(train_df[cur_key], kde=False, ax=ax)
-            if val_df is not None:
-                sns.distplot(val_df[cur_key], kde=False, ax=ax)
-
-    fig.tight_layout()
-    fig.savefig(output_ffp)
-    plt.close()
-
-
 def __get_min_max_x(data: np.ndarray, xlim_n_std: float):
     std_lim = np.nanstd(data) * xlim_n_std
     min_x = -std_lim if -std_lim > np.nanmin(data) else np.nanmin(data)
@@ -687,57 +846,9 @@ def __get_min_max_x(data: np.ndarray, xlim_n_std: float):
     return min_x, max_x
 
 
-def create_res_hist(
-    output_ffp: str,
-    train_df: pd.DataFrame,
-    ims: Iterable[str],
-    val_df: pd.DataFrame = None,
-    xlim_n_std: float = None,
+def gen_spatial_nruptures_csv(
+    output_dir: str, eval_result: EvaluationResult, station_lookup: pd.DataFrame
 ):
-    """Creates a residual histogram plot across IMs, should probably
-    be combined with create_IM_res_hist.."""
-    fig = plt.figure(figsize=(12, 6))
-    ax1, ax2 = fig.add_subplot(1, 2, 1), fig.add_subplot(1, 2, 2)
-
-    for cur_temp, ax, cur_label in zip(
-        [IM_MEAN_KEY, IM_STD_KEY],
-        [ax1, ax2],
-        [r"$ln \frac{\hat{\mu}}{\mu}$", r"$ln \frac{\hat{\sigma}}{\sigma}$"],
-    ):
-        cur_keys = [cur_temp.format(im) for im in ims]
-        cur_train_data = train_df.loc[:, cur_keys].values.ravel()
-        cur_val_data = (
-            None if val_df is None else val_df.loc[:, cur_keys].values.ravel()
-        )
-
-        # Filter out data points that are not within the specified limits
-        # Added to prevent outliers extending x-axis to far
-        if xlim_n_std is not None:
-            min_x, max_x = __get_min_max_x(cur_train_data, xlim_n_std)
-            train_mask = (cur_train_data > min_x) & (cur_train_data < max_x)
-
-            sns.distplot(cur_train_data[train_mask], kde=False, ax=ax)
-            if val_df is not None:
-                val_mask = (cur_val_data > min_x) & (cur_val_data < max_x)
-                sns.distplot(cur_val_data[val_mask], kde=False, ax=ax)
-        else:
-            sns.distplot(cur_train_data, kde=False, ax=ax)
-            if val_df is not None:
-                sns.distplot(cur_val_data, kde=False, ax=ax)
-
-        ax.set_xlabel(cur_label)
-
-    fig.suptitle("Residuals across all IMs")
-
-    fig.tight_layout()
-    fig.savefig(output_ffp)
-    plt.close()
-
-
-
-
-
-def gen_spatial_nruptures_csv(output_dir: str, eval_result: EvaluationResult, station_lookup: pd.DataFrame):
     csv_files = []
     for cur_df, prefix in zip(
         [eval_result.y_train_est, eval_result.y_val_est, eval_result.training_result.X],
