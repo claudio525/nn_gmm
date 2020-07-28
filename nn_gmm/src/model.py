@@ -34,7 +34,8 @@ class GMM:
 
         if pre_process:
             # Deal with the categorial features
-            X = data_processing.apply_one_hot_enc(X, "tect_type", TECT_TYPE_ONE_HOT_DICT)
+            if "tect_type" in X.columns:
+                X = data_processing.apply_one_hot_enc(X, "tect_type", TECT_TYPE_ONE_HOT_DICT)
 
             # All other pre-processing
             X = data_processing.preprocess_df(X, feature_config)
@@ -46,7 +47,8 @@ class GMM:
         # Run estimation
         y_est = self.model.predict(X.loc[:, self.features].values.astype(float))
 
-        # Conver to dataframes
+        # Convert to dataframes
+        result_df_index = result_df_index if result_df_index is not None else X.index.values
         mean_df = pd.DataFrame(
             data=np.exp(y_est[:, : self.outputs.size]),
             columns=self.outputs,

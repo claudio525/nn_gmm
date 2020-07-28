@@ -50,7 +50,6 @@ def get_min_max_scaling_fn(
     -------
     tf.function or function
     """
-
     def min_max_fn(data):
         return ((data - data_min) / (data_max - data_min)) * (
             target_max - target_min

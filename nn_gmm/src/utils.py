@@ -35,4 +35,4 @@ def get_station_lookup(X: pd.DataFrame):
 
 def get_station_from_id(ids: np.ndarray) -> List[str]:
     """Computes the stations from station_rupture ids"""
-    return [cur_split[0] for cur_split in np.char.split(ids, "_")]
+    return [cur_split[-1] for cur_split in np.char.split(ids, "_")]

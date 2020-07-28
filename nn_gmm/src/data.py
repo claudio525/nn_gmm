@@ -11,6 +11,7 @@ def load_dataset(
     data_dir: Path,
     feature_details: Dict,
     batch_size: int,
+    file_filter: str = "*.tfrecord",
     shuffle_buffer: Union[int, None] = 1_000_000,
     n_open_files: int = 32,
     block_size: int = 256,
@@ -29,6 +30,9 @@ def load_dataset(
     batch_size: int
         Batch size, has to be done at this step as parsing of batches is
         much more efficient when using batches compared to single entries
+    file_filter: str, optional
+        The file filter to use when searching the
+        specified directory for records
     shuffle_buffer: int, optional
         Size of the shuffle buffer (in number of entries) to use,
         defaults to 1 Million
@@ -67,7 +71,7 @@ def load_dataset(
     # 4) Batch
     # 5) Parse each batch
     ds = tf.data.Dataset.list_files(
-        str(data_dir / "*.tfrecord"), shuffle=True
+        str(data_dir / file_filter), shuffle=True
     ).interleave(
         lambda f: tf.data.TFRecordDataset(f),
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
@@ -84,6 +88,26 @@ def load_dataset(
     )
 
     return ds
+
+def load_tfrecord(record_ffp: str, feature_details: Dict):
+    ds = tf.data.TFRecordDataset(filenames=[record_ffp])
+
+    def _parse_fn(example_proto):
+        parsed = tf.io.parse_example(example_proto, feature_details)
+        return parsed
+
+    # Slight hack, just want to parse the whole record in one go,
+    # not sure how to do this without batching...
+    ds = ds.batch(10000).map(_parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    dfs = [pd.DataFrame.from_dict(cur_data)  for cur_data in ds.as_numpy_iterator()]
+    df = pd.concat(dfs)
+
+    df.id = df.id.str.decode("UTF-8")
+    df = df.set_index("id")
+
+    return df
+
 
 
 def sel_rand_locations(
@@ -115,6 +139,6 @@ def sel_rand_locations(
     )
 
 
-def load_feature_details(train_dir: Path):
-    with (train_dir / "feature_details.pickle").open("rb") as f:
+def load_feature_details(data_dir: Path):
+    with (data_dir / "feature_details.pickle").open("rb") as f:
         return pickle.load(f)
