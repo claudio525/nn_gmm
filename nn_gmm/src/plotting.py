@@ -17,7 +17,6 @@ from .utils import get_station_from_id
 from . import data
 
 
-
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
 
@@ -567,7 +566,9 @@ class SpatialPlotGen:
         },
     }
 
-    def __init__(self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path):
+    def __init__(
+        self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
+    ):
         self.plot_items_ffp = plot_items_ffp
 
         self.model = model
@@ -593,7 +594,31 @@ class SpatialPlotGen:
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
 
-    def gen_event_map(self, event: str, im: str):
+    def plot_event_maps(self, event: str, ims: List[str], suffix: str = "rel_agg", n_procs: int = 4):
+        csv_ffps = []
+        for im in ims:
+            csv_ffps.append(self.gen_event_map_data(event, im, suffix=suffix))
+
+        # Generate the plots
+        plot_multiple(
+            self.plot_items_ffp,
+            self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            in_ffps=csv_ffps,
+            n_procs=n_procs
+        )
+
+    def plot_event_map(self, event: str, im: str, suffix: str = "rel_agg"):
+        # Create the data
+        plot_csv_ffp = self.gen_event_map_data(event, im, suffix=suffix)
+
+        # Generate the plot
+        plot_multiple(
+            self.plot_items_ffp,
+            self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            in_ffps=[str(plot_csv_ffp)],
+        )
+
+    def gen_event_map_data(self, event: str, im: str, suffix: str = "rel_agg"):
         event_out_dir = self.output_dir / event
         if not event_out_dir.is_dir():
             event_out_dir.mkdir(parents=True)
@@ -601,24 +626,39 @@ class SpatialPlotGen:
         df, mean_est, _ = self._get_event_estimates(event)
 
         data_df = mean_est.copy()
-        data_df = pd.merge(data_df, df.loc[:, ["lat", "lon"]], left_index=True, right_index=True, how="inner")
+        data_df = pd.merge(
+            data_df,
+            df.loc[:, ["lat", "lon"]],
+            left_index=True,
+            right_index=True,
+            how="inner",
+        )
         assert data_df.shape[0] == mean_est.shape[0]
 
         data_df["station"] = get_station_from_id(data_df.index.values.astype(str))
 
-        # Calculate the mean across all realisations at each station
+        # Aggregate across realisation at each station
         agg_df = data_df.groupby("station").mean()
 
-        plot_csv_ffp = event_out_dir / f"{im}_mean"
-        plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp))
+        im_name = im.replace(".", "p")
+        gmt_options = get_gmt_options_dict(
+            options={
+                **{"title": f"{im_name}_{event}", "xyz-cpt-labels": f"{im}"},
+                # **compute_GMT_std_ticks(agg_df[im], n_std=2),
+            }
+        )
 
-        plot_multiple(self.plot_items_ffp, self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, in_ffps=[str(plot_csv_ffp)])
+        plot_csv_ffp = event_out_dir / f"{im_name}_{suffix}"
+        plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
 
-        return
-
+        return plot_csv_ffp
 
 
 def find_record_ffp(data_dirs: List[Path], event: str):
+    """Finds the tfrecord file for the given event in
+    the specified directories, raises ValueError if no
+    file is found
+    """
     results = []
     for cur_dir in data_dirs:
         cur_r = list(cur_dir.glob(f"{event}.tfrecord"))
