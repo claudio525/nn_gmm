@@ -190,6 +190,10 @@ def train(
     with open(model_dir / "input_config.json", "w") as f:
         json.dump(input_config, f)
 
+    # Save the model and training config
+    with open(model_dir / "config.json", "w") as f:
+        json.dump({key: str(value) for key, value in config.items()}, f)
+
     # Save the loss
     loss_df = pd.DataFrame.from_dict(history.history)
     loss_df.to_csv(os.path.join(output_dir, "loss.csv"))

@@ -553,6 +553,23 @@ class IMvsPlotGen:
 
 class SpatialPlotGen:
 
+    DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
+        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
+        "options": {
+            "xyz-grid-search": "12m",
+            "xyz-grid-automask": "12k",
+            "xyz-cpt": "polar",
+            "xyz-cpt-bg": "0/0/80",
+            "xyz-cpt-fg": "80/0/0",
+            "xyz-transparency": "30",
+            "xyz-size": "1k",
+            "xyz-cpt-inc": "0.125",
+            "xyz-cpt-tick": "0.25",
+            "xyz-cpt-min": "-1.0",
+            "xyz-cpt-max": "1.0",
+        },
+    }
+
     DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
         "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
         "options": {
@@ -594,22 +611,41 @@ class SpatialPlotGen:
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
 
-    def plot_event_maps(self, event: str, ims: List[str], suffix: str = "rel_agg", n_procs: int = 4):
-        csv_ffps = []
+    def plot_event_maps(
+        self,
+        event: str,
+        ims: List[str],
+        data_type: str = "est_mean",
+        cb_options: Dict[str, Dict] = None,
+        suffix: str = "",
+        n_procs: int = 4,
+    ):
+        csv_ffps, result_cb_option = [], {}
         for im in ims:
-            csv_ffps.append(self.gen_event_map_data(event, im, suffix=suffix))
+            cur_csv, cur_cb_options = self.gen_event_map_data(
+                event, im, data_type=data_type, cb_options=cb_options, suffix=suffix
+            )
+            csv_ffps.append(cur_csv)
+            result_cb_option[im] = cur_cb_options
 
         # Generate the plots
+        gmt_options = self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS if "res" in data_type else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
         plot_multiple(
             self.plot_items_ffp,
-            self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            gmt_options,
             in_ffps=csv_ffps,
-            n_procs=n_procs
+            n_procs=n_procs,
         )
 
-    def plot_event_map(self, event: str, im: str, suffix: str = "rel_agg"):
+        return result_cb_option
+
+    def plot_event_map(
+        self, event: str, im: str, data_type: str = "est_mean", suffix: str = ""
+    ):
         # Create the data
-        plot_csv_ffp = self.gen_event_map_data(event, im, suffix=suffix)
+        plot_csv_ffp = self.gen_event_map_data(
+            event, im, data_type=data_type, suffix=suffix
+        )
 
         # Generate the plot
         plot_multiple(
@@ -618,21 +654,67 @@ class SpatialPlotGen:
             in_ffps=[str(plot_csv_ffp)],
         )
 
-    def gen_event_map_data(self, event: str, im: str, suffix: str = "rel_agg"):
+    def gen_event_map_data(
+        self,
+        event: str,
+        im: str,
+        data_type: str = "est_mean",
+        cb_options: Dict = None,
+        suffix: str = "",
+    ):
+        """
+        Generates event based map data
+
+        Realisations are aggregated at each station using the mean
+
+        Parameters
+        ----------
+        event: str
+            Event of interest
+        im: str
+            IM of interest
+        data_type: str, optional
+            The type of data to generate, has to be one of:
+            "est_mean": Estimated mean from the NN GMM
+            "est_std": Estimated std from the NN GMM
+            "sim": Simulation IM values
+            "res_mean": Residual between simulation IMs and
+                estimated mean value from the NN GMM
+        cb_options
+        suffix
+
+        Returns
+        -------
+
+        """
         event_out_dir = self.output_dir / event
         if not event_out_dir.is_dir():
             event_out_dir.mkdir(parents=True)
 
-        df, mean_est, _ = self._get_event_estimates(event)
+        sim_df, mean_est, std_est = self._get_event_estimates(event)
+        assert np.all(mean_est.index.values == sim_df.index.values)
 
-        data_df = mean_est.copy()
+        non_negative = True
+        if data_type.lower() == "sim":
+            data_df = sim_df[im].apply(np.exp).to_frame()
+        elif data_type.lower() == "est_mean":
+            data_df = mean_est.copy()
+        elif data_type.lower() == "est_std":
+            data_df = std_est.copy()
+        elif data_type.lower() == "res_mean":
+            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
+            non_negative, cb_options = False, {im: {}}
+        else:
+            raise ValueError(f"Invalid data_type: {data_type}")
+
         data_df = pd.merge(
             data_df,
-            df.loc[:, ["lat", "lon"]],
+            sim_df.loc[:, ["lat", "lon"]],
             left_index=True,
             right_index=True,
             how="inner",
         )
+
         assert data_df.shape[0] == mean_est.shape[0]
 
         data_df["station"] = get_station_from_id(data_df.index.values.astype(str))
@@ -641,17 +723,26 @@ class SpatialPlotGen:
         agg_df = data_df.groupby("station").mean()
 
         im_name = im.replace(".", "p")
+        cb_options = (
+            compute_GMT_std_ticks(agg_df[im], n_std=2, non_negative=non_negative)
+            if cb_options is None
+            else cb_options[im]
+        )
         gmt_options = get_gmt_options_dict(
             options={
-                **{"title": f"{im_name}_{event}", "xyz-cpt-labels": f"{im}"},
-                # **compute_GMT_std_ticks(agg_df[im], n_std=2),
+                **{
+                    "title": f"{im_name}-{event}-{data_type}",
+                    "xyz-cpt-labels": f"{im}",
+                },
+                **cb_options,
             }
         )
 
-        plot_csv_ffp = event_out_dir / f"{im_name}_{suffix}"
+        suffix = suffix if len(suffix) == 0 else f"_{suffix}"
+        plot_csv_ffp = event_out_dir / f"{im_name}_{data_type}{suffix}"
         plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
 
-        return plot_csv_ffp
+        return plot_csv_ffp, cb_options
 
 
 def find_record_ffp(data_dirs: List[Path], event: str):
@@ -675,436 +766,6 @@ def find_record_ffp(data_dirs: List[Path], event: str):
     assert len(results) == 1, "More than one tfrecord file found"
 
     return results[0]
-
-
-class SpatialPlotGenOld:
-
-    DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "polar",
-            "xyz-cpt-bg": "0/0/80",
-            "xyz-cpt-fg": "80/0/0",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-inc": "0.25",
-            "xyz-cpt-tick": "0.5",
-            "xyz-cpt-min": "-2.0",
-            "xyz-cpt-max": "2.0",
-        },
-    }
-
-    DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "hot",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-min": "0",
-            "xyz-cpt-max": "0.6",
-        },
-    }
-
-    LN_RES_IM_FNAME_TEMPLATE = "ln_res_{}.png"
-
-    def __init__(self, eval_result: EvaluationResult, output_dir: str = None):
-        """Constructor for Visualisation"""
-        self.eval_result = eval_result
-        self.train_result = eval_result.training_result
-        self.station_lookup = self.train_result.station_lookup
-
-        self.output_dir = (
-            output_dir
-            if output_dir is not None
-            else os.path.join(eval_result.training_result.output_dir, "visualisation")
-        )
-
-        if not os.path.isdir(self.output_dir):
-            os.mkdir(self.output_dir)
-
-        self.train_res_df = eval_result.ln_res_train
-        self.val_res_df = eval_result.ln_res_val
-
-        self.ims = self._get_IMs()
-
-        # Spatial csv files for GMT plotting
-        # Don't use these variables directly, use the properties instead (lazy loading)
-        self._comb_res_csv_files, self._im_res_csv_files = None, None
-        self._im_sigma_csv_files = None
-        self._n_ruptures_csv_files = None
-
-    @property
-    def comb_res_csv_files(self):
-        """The combined (i.e. sum of all IMs for a given sample) residual csv files"""
-        if self._comb_res_csv_files is None:
-            print(f"Computing spatial residual data")
-            self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
-                self.output_dir, self.eval_result, self.ims, self.station_lookup
-            )
-        return self._comb_res_csv_files
-
-    @property
-    def im_res_csv_files(self):
-        """The IM residual csv files, one for each IM"""
-        if self._im_res_csv_files is None:
-            print(f"Computing spatial residual data")
-            self._comb_res_csv_files, self._im_res_csv_files = gen_spatial_data_res_csv(
-                self.output_dir, self.eval_result, self.ims, self.station_lookup
-            )
-        return self._im_res_csv_files
-
-    @property
-    def im_sigma_csv_files(self):
-        if self._im_sigma_csv_files is None:
-            print(f"Computing spatial sigma data")
-            self._im_sigma_csv_files = gen_spatial_sigma_csv(
-                self.output_dir, self.eval_result, self.ims, self.station_lookup
-            )
-
-        return self._im_sigma_csv_files
-
-    @property
-    def n_ruptures_csv_files(self):
-        if self._n_ruptures_csv_files is None:
-            print(f"Computing spatial n_ruptures data")
-            self._n_ruptures_csv_files = gen_spatial_nruptures_csv(
-                self.output_dir, self.eval_result, self.station_lookup
-            )
-
-        return self._n_ruptures_csv_files
-
-    def _get_IMs(self):
-        """Get the different IMs predicted"""
-        return np.unique(
-            [
-                col.split("_")[0]
-                if not col.startswith("pSA")
-                else "_".join(col.split("_")[0:2])
-                for col in self.train_res_df.columns
-            ]
-        )
-
-    def create_comb_res_maps(
-        self,
-        plot_items_ffp: str,
-        gen_options_dict: Dict = None,
-        n_procs: int = 4,
-        no_clobber: bool = True,
-    ):
-        """Creates the residual maps for the combined IMs (mean)
-        Requires GMT to be setup
-        """
-        gen_options_dict = (
-            gen_options_dict
-            if gen_options_dict is not None
-            else self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
-        )
-
-        return plot_multiple(
-            plot_items_ffp,
-            gen_options_dict,
-            in_ffps=self.comb_res_csv_files,
-            n_procs=n_procs,
-            no_clobber=no_clobber,
-        )
-
-    def create_IM_res_maps(
-        self,
-        plot_items_ffp: str,
-        gen_options_dict: Dict = None,
-        n_procs: int = 4,
-        no_clobber: bool = True,
-    ):
-        """Creates a residual map for each IM
-        Requires GMT to be setup"""
-        gen_options_dict = (
-            gen_options_dict
-            if gen_options_dict is not None
-            else self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
-        )
-
-        return plot_multiple(
-            plot_items_ffp,
-            gen_options_dict,
-            in_ffps=self.im_res_csv_files,
-            n_procs=n_procs,
-            no_clobber=no_clobber,
-        )
-
-    def create_sigma_maps(
-        self,
-        plot_items_ffp: str,
-        gen_options_dict: Dict = None,
-        n_procs: int = 4,
-        no_clobber: bool = True,
-    ):
-        gen_options_dict = (
-            gen_options_dict
-            if gen_options_dict is not None
-            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
-        )
-
-        plot_multiple(
-            plot_items_ffp,
-            gen_options_dict,
-            in_ffps=self.im_sigma_csv_files,
-            n_procs=n_procs,
-            no_clobber=no_clobber,
-        )
-
-    def create_nruptures_maps(
-        self,
-        plot_items_ffp: str,
-        gen_options_dict: Dict = None,
-        n_procs: int = 4,
-        no_clobber: bool = True,
-    ):
-        gen_options_dict = (
-            gen_options_dict
-            if gen_options_dict is not None
-            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
-        )
-
-        plot_multiple(
-            plot_items_ffp,
-            gen_options_dict,
-            in_ffps=self.n_ruptures_csv_files,
-            n_procs=n_procs,
-            no_clobber=no_clobber,
-        )
-
-
-def __get_min_max_x(data: np.ndarray, xlim_n_std: float):
-    std_lim = np.nanstd(data) * xlim_n_std
-    min_x = -std_lim if -std_lim > np.nanmin(data) else np.nanmin(data)
-    max_x = std_lim if std_lim < np.nanmax(data) else np.nanmax(data)
-
-    return min_x, max_x
-
-
-def gen_spatial_nruptures_csv(
-    output_dir: str, eval_result: EvaluationResult, station_lookup: pd.DataFrame
-):
-    csv_files = []
-    for cur_df, prefix in zip(
-        [eval_result.y_train_est, eval_result.y_val_est, eval_result.training_result.X],
-        ["train", "val", "all"],
-    ):
-        cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
-
-        cur_loc_count = cur_df.groupby("station").count().iloc[:, 0]
-        cur_loc_count.name = "n_ruptures"
-
-        cur_loc_count = pd.merge(
-            cur_loc_count, station_lookup, how="left", left_index=True, right_index=True
-        )
-
-        gmt_options = get_gmt_options_dict(
-            options={
-                **{"title": f"{prefix}_n_ruptures", "xyz-cpt-labels": f"n_ruptures"},
-                **compute_GMT_std_ticks(cur_loc_count["n_ruptures"], n_std=2),
-            }
-        )
-        csv_files.append(
-            _gmt_save(
-                cur_loc_count,
-                "n_ruptures",
-                os.path.join(output_dir, f"{prefix}_n_ruptures"),
-                gmt_options=gmt_options,
-            )
-        )
-
-    return csv_files
-
-
-def gen_spatial_sigma_csv(
-    output_dir: str,
-    eval_result: EvaluationResult,
-    ims: Iterable[str],
-    station_lookup: pd.DataFrame,
-    agg_func: Callable = np.nanmean,
-):
-    """Generates the spatial sigma data for GMT plotting
-
-    Parameters
-    ----------
-    output_dir: str
-    eval_result: EvaluationResult
-    ims: iterable of strings
-        IMs of interest
-    station_lookup: dataframe
-        Station location lookup
-        index = station name, columns = [lat, lon]
-    agg_func: callable
-        The aggregation function to use to
-        aggregate the data at each location
-        Make sure this function can handle nan
-        values..
-    """
-    csv_files = []
-    for cur_df, prefix in zip(
-        [eval_result.y_train_est, eval_result.y_val_est], ["train", "val"]
-    ):
-        cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
-
-        cur_loc_sigma = cur_df.groupby("station").agg(agg_func)
-
-        cur_loc_sigma = pd.merge(
-            cur_loc_sigma, station_lookup, how="left", left_index=True, right_index=True
-        )
-
-        for im in ims:
-            gmt_options = get_gmt_options_dict(
-                options={
-                    **{"title": f"{prefix}_{im}_std", "xyz-cpt-labels": f"{im}_std"},
-                    **compute_GMT_std_ticks(cur_loc_sigma[f"{im}_std"], n_std=3),
-                }
-            )
-            csv_files.append(
-                _gmt_save(
-                    cur_loc_sigma,
-                    f"{im}_std",
-                    os.path.join(output_dir, f"{prefix}_{im.replace('.', 'p')}_std"),
-                    gmt_options=gmt_options,
-                )
-            )
-
-        return csv_files
-
-
-def gen_spatial_data_res_csv(
-    output_dir: str,
-    eval_result: EvaluationResult,
-    ims: Iterable[str],
-    station_lookup: pd.DataFrame,
-    agg_func: Callable = np.nanmean,
-):
-    """Generates the spatial residual data for GMT plotting
-
-    For the combined residual, the individual IM residuals
-    are averaged (mean).
-
-    Parameters
-    ----------
-    output_dir: str
-    eval_result: EvaluationResult
-    ims: iterable of strings
-        IMs of interest
-    station_lookup: dataframe
-        Station location lookup
-        index = station name, columns = [lat, lon]
-    agg_func: callable
-        The aggregation function to use to
-        aggregate the data at each location
-        Make sure this function can handle nan
-        values..
-
-    Returns
-    ----------
-    combined_csv_files: list of strings
-        File paths of the csv file for the combined
-        IM residuals
-    im_csv_files: list of strings
-        File paths of the csv files for the individual
-        IM type residuals
-    """
-    combined_csv_files, im_csv_files = [], []
-    for cur_df, prefix in zip(
-        [eval_result.ln_res_train, eval_result.ln_res_val], ["train", "val"]
-    ):
-        cur_df = cur_df.copy()
-
-        # Add location data
-        cur_df["station"] = get_station_from_id(cur_df.index.values.astype(str))
-
-        # Sum across all IMs
-        cur_df["ln_res_mu"] = np.nanmean(
-            cur_df.loc[:, [f"{im}_mean" for im in ims]], axis=1
-        )
-        cur_df["ln_res_sigma"] = np.nanmean(
-            cur_df.loc[:, [f"{im}_std" for im in ims]], axis=1
-        )
-
-        cur_loc_res = cur_df.groupby("station").agg(agg_func)
-        cur_loc_res = pd.merge(
-            cur_loc_res, station_lookup, how="left", left_index=True, right_index=True
-        )
-
-        # Deal with any nan values,
-        # these arise from the model predicting negative standard deviations
-        cur_loc_res.values[cur_loc_res.isna()] = 100
-
-        cur_loc_res.to_csv(os.path.join(output_dir, "loc_ln_res.csv"))
-
-        # Create the csv & option files for summed up residuals across all IMs
-        cur_output_ffp = os.path.join(output_dir, f"{prefix}_loc_ln_res_mu")
-        combined_csv_files.append(
-            _gmt_save(
-                cur_loc_res,
-                "ln_res_mu",
-                cur_output_ffp,
-                gmt_options=get_gmt_options_dict(
-                    options={
-                        "title": f"{prefix}_ln_res_mu",
-                        "xyz-cpt-labels": "ln_res_mu",
-                    }
-                ),
-            )
-        )
-
-        cur_output_ffp = os.path.join(output_dir, f"{prefix}_loc_ln_res_sigma")
-        combined_csv_files.append(
-            _gmt_save(
-                cur_loc_res,
-                "ln_res_sigma",
-                cur_output_ffp,
-                gmt_options=get_gmt_options_dict(
-                    options={
-                        "title": f"{prefix}_ln_res_sigma",
-                        "xyz-cpt-labels": "ln_res_sigma",
-                    }
-                ),
-            )
-        )
-
-        # Create the csv & option files for each IM type
-        for im in ims:
-            im_csv_files.append(
-                _gmt_save(
-                    cur_loc_res,
-                    f"{im}_mean",
-                    os.path.join(
-                        output_dir, f"{prefix}_loc_{im.replace('.', 'p')}_ln_res_mu"
-                    ),
-                    get_gmt_options_dict(
-                        options={
-                            "title": f"{prefix}_{im}_ln_res_mu",
-                            "xyz-cpt-labels": f"{im}_ln_res_mu",
-                        }
-                    ),
-                )
-            )
-            im_csv_files.append(
-                _gmt_save(
-                    cur_loc_res,
-                    f"{im}_std",
-                    os.path.join(
-                        output_dir, f"{prefix}_loc_{im.replace('.', 'p')}_ln_res_sigma"
-                    ),
-                    get_gmt_options_dict(
-                        options={
-                            "title": f"{prefix}_{im}_ln_res_sigma",
-                            "xyz-cpt-labels": f"{im}_ln_res_sigma",
-                        }
-                    ),
-                )
-            )
-
-    return combined_csv_files, im_csv_files
 
 
 def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = None):
@@ -1153,7 +814,10 @@ def get_gmt_options_dict(flags: List[str] = None, options: Dict[str, Any] = None
 
 
 def compute_GMT_std_ticks(
-    data_series: pd.Series, n_std: float = 2, center: float = None
+    data_series: pd.Series,
+    n_std: float = 2,
+    center: float = None,
+    non_negative: bool = True,
 ):
     options = {}
 
@@ -1169,11 +833,14 @@ def compute_GMT_std_ticks(
     cpt_max = round(float(cpt_max), n_dec_points)
     center = round(float(center), n_dec_points)
 
-    tick_inc = float(round(((cpt_max - center) / 4), n_dec_points))
+    tick_inc = float(
+        round(((cpt_max - center + (1 * 10 ** (-n_dec_points - 4))) / 4), n_dec_points)
+    )
     cpt_max = round(center + (tick_inc * 4), n_dec_points)
+    cpt_min = round(center - (4 * tick_inc), n_dec_points)
 
     options["xyz-cpt-max"] = cpt_max
-    options["xyz-cpt-min"] = round(center - (4 * tick_inc), n_dec_points)
+    options["xyz-cpt-min"] = max(0, cpt_min) if non_negative else cpt_min
     options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
 
     return options
