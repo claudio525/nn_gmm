@@ -401,7 +401,7 @@ class IMvsPlotGen:
             )
 
         if emp_df is not None:
-            self.add_emp(emp_df)
+            add_emp(emp_df)
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
@@ -449,7 +449,7 @@ class IMvsPlotGen:
 
         # Empirical plots
         if emp_df is not None:
-            self.add_emp(emp_df)
+            add_emp(emp_df)
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
@@ -467,35 +467,6 @@ class IMvsPlotGen:
             plt.show()
 
         return fig
-
-    def add_emp(self, emp_df: pd.Series):
-        """Adds the empirical data to the
-        current plot
-
-        Parameters
-        ----------
-        emp_df: dataframe
-            The empirical GMM estimates, expects
-            the columns [mu, sigma]
-        """
-        # mean prediction
-        plt.plot(
-            emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
-        )
-        # +- sigma
-        plt.plot(
-            emp_df.index.values,
-            emp_df["mu"].values * np.exp(emp_df["sigma"].values),
-            c="r",
-            linestyle="--",
-            label="Std Bradley 2013",
-        )
-        plt.plot(
-            emp_df.index.values,
-            emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
-            c="r",
-            linestyle="--",
-        )
 
     def gen_plots(
         self,
@@ -551,7 +522,7 @@ class IMvsPlotGen:
                     )
 
 
-class SpatialPlotGen:
+class EventPlotGen:
 
     DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
         "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
@@ -596,6 +567,7 @@ class SpatialPlotGen:
         self._estimates = {}
 
     def _get_event_estimates(self, event: str):
+        """Get estimates for the specified event"""
         if event in self._estimates.keys():
             return self._estimates[event]
         else:
@@ -611,7 +583,65 @@ class SpatialPlotGen:
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
 
-    def plot_event_maps(
+    def gen_IM_feature_plots(self, events: Union[str, List[str]], ims: List[str], feature_key: str):
+        """Generates IM vs feature plots for the specified IMs and events"""
+        events = [events] if isinstance(events, str) else events
+
+        for event in events:
+            for im in ims:
+                self.gen_IM_feature_plot(event, im, feature_key)
+
+    def gen_IM_feature_plot(self, event: str, im: str, feature_key: str):
+        """Generates a IM vs feature plot for the specified IM and event"""
+        event_out_dir = self.output_dir / event
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        sim_df, mean_df, std_df = self._get_event_estimates(event)
+        assert np.all(sim_df.index == mean_df.index)
+
+        fig = plt.figure(figsize=(18, 13.5))
+        # fig = plt.figure(figsize=(7, 5.5))
+
+        x, sim_y = sim_df[feature_key], sim_df[im].apply(np.exp)
+        plt.scatter(x, sim_y, label="Simulation", s=1.0)
+        plt.scatter(x, mean_df[im], label="Estimated", s=1.0)
+
+        plt.xlabel(feature_key)
+        plt.ylabel(im)
+        plt.yscale("log")
+        plt.grid(linestyle="--", linewidth=0.25)
+        plt.title("{} {} {}".format(event, im, feature_key))
+        plt.legend()
+        set_plot_lims(x, [sim_y, mean_df[im]])
+
+        output_ffp = self.output_dir / event / f"{event}_{im}_{feature_key}.png"
+        plt.savefig(output_ffp)
+        plt.close()
+
+    def plot_spatial_events_maps(
+        self,
+        events: List[str],
+        ims: List[str],
+        data_type: str = "est_mean",
+        cb_options: Dict[str, Dict] = None,
+        suffix: str = "",
+        n_procs: int = 4,
+    ):
+        """Plots spatial maps for the specified IMs and events
+        See gen_event_map_data for parameter details
+        """
+        for event in events:
+            self.plot_spatial_event_maps(
+                event,
+                ims,
+                data_type=data_type,
+                cb_options=cb_options,
+                suffix=suffix,
+                n_procs=n_procs,
+            )
+
+    def plot_spatial_event_maps(
         self,
         event: str,
         ims: List[str],
@@ -620,6 +650,9 @@ class SpatialPlotGen:
         suffix: str = "",
         n_procs: int = 4,
     ):
+        """Plots spatial maps for the specified IMs and event
+        See gen_event_map_data for parameter details
+        """
         csv_ffps, result_cb_option = [], {}
         for im in ims:
             cur_csv, cur_cb_options = self.gen_event_map_data(
@@ -629,19 +662,23 @@ class SpatialPlotGen:
             result_cb_option[im] = cur_cb_options
 
         # Generate the plots
-        gmt_options = self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS if "res" in data_type else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        gmt_options = (
+            self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            if "res" in data_type
+            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        )
         plot_multiple(
-            self.plot_items_ffp,
-            gmt_options,
-            in_ffps=csv_ffps,
-            n_procs=n_procs,
+            self.plot_items_ffp, gmt_options, in_ffps=csv_ffps, n_procs=n_procs
         )
 
         return result_cb_option
 
-    def plot_event_map(
+    def plot_spatial_event_map(
         self, event: str, im: str, data_type: str = "est_mean", suffix: str = ""
     ):
+        """plots spatial maps for the specified IM and event
+        See gen_event_map_data for parameter details
+        """
         # Create the data
         plot_csv_ffp = self.gen_event_map_data(
             event, im, data_type=data_type, suffix=suffix
@@ -662,8 +699,7 @@ class SpatialPlotGen:
         cb_options: Dict = None,
         suffix: str = "",
     ):
-        """
-        Generates event based map data
+        """Generates event based map data
 
         Realisations are aggregated at each station using the mean
 
@@ -680,12 +716,20 @@ class SpatialPlotGen:
             "sim": Simulation IM values
             "res_mean": Residual between simulation IMs and
                 estimated mean value from the NN GMM
-        cb_options
-        suffix
+        cb_options: Dict, optional
+            GMT colourbar options, if not given then
+            these will be calculated based on the current data
+            Useful when wanting two plots with the
+            same colourbar scale
+        suffix: str, optional
+            Filename suffix
 
         Returns
         -------
-
+        str
+            Path to the data csv
+        dict
+            The colourbar options used
         """
         event_out_dir = self.output_dir / event
         if not event_out_dir.is_dir():
@@ -844,3 +888,50 @@ def compute_GMT_std_ticks(
     options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
 
     return options
+
+
+def add_emp(emp_df: pd.Series, label: str = "Bradley 2013"):
+    """Adds the empirical data to the
+    current plot
+
+    Parameters
+    ----------
+    emp_df: dataframe
+        The empirical GMM estimates, expects
+        the columns [mu, sigma]
+    """
+    # mean prediction
+    plt.plot(
+        emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
+    )
+    # +- sigma
+    plt.plot(
+        emp_df.index.values,
+        emp_df["mu"].values * np.exp(emp_df["sigma"].values),
+        c="r",
+        linestyle="--",
+        label=f"Std {label}",
+    )
+    plt.plot(
+        emp_df.index.values,
+        emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
+        c="r",
+        linestyle="--",
+        label=f"Mean {label}",
+    )
+
+
+def set_plot_lims(
+    x: Union[np.ndarray, List[np.ndarray]], y: Union[np.ndarray, List[np.ndarray]]
+):
+    x = x if isinstance(x, list) else [x]
+    y = y if isinstance(y, list) else [y]
+
+    x_min = np.min([cur_x.min() for cur_x in x])
+    y_min = np.min([cur_y.min() for cur_y in y])
+
+    x_max = np.max([cur_x.max() for cur_x in x])
+    y_max = np.max([cur_y.max() for cur_y in y])
+
+    plt.xlim((x_min, x_max))
+    plt.ylim((y_min, y_max))
