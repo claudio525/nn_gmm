@@ -17,15 +17,29 @@ def get_fault_data(sources_dir: str, fault_name: str):
     info_file = glob.glob(os.path.join(sources_dir, fault_name, "Srf", "*.info"))[0]
 
     with h5py.File(info_file, "r") as f:
+        tect_type = (
+            f.attrs["tect_type"] if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW"
+        )
         return (
             fault_name,
             [
                 np.mean(f.attrs["dip"]),
                 np.mean(f.attrs["rake"]),
-                np.mean(f.attrs["width"]),
-                np.mean(f.attrs["dtop"]) if f.attrs["type"] > 1 else f.attrs["hdepth"],
+                np.mean(f.attrs["strike"]),
+                np.mean(f.attrs["dtop"]),
+                np.mean(f.attrs["dbottom"]),
+                np.min(f.attrs["dtop"]),  # Ztor
+                np.max(f.attrs["dtop"]),  # Zbot
                 f.attrs["mag"],
-                f.attrs["tect_type"] if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW",
+                tect_type,
+                f.attrs["hdepth"],
+                f.attrs["hlon"],
+                f.attrs["hlat"],
+                # f.attrs["dhyp"],
+                # f.attrs["shyp"],
+                np.mean(f.attrs["width"]),
+                np.mean(f.attrs["length"]),
+                f.attrs["type"] == 1,
             ],
         )
 
@@ -52,7 +66,27 @@ def main(sources_dir: str, output_ffp: str, n_procs: int = 4):
     # Combine and create a dataframe
     fault_src_dict = {name: src_attrs for name, src_attrs in fault_src_data}
     src_df = pd.DataFrame.from_dict(
-        fault_src_dict, orient="index", columns=["dip", "rake", "width", "ztor", "mag", "tect_type"]
+        fault_src_dict,
+        orient="index",
+        columns=[
+            "dip",
+            "rake",
+            "strike",
+            "dtop",
+            "dbottom",
+            "ztor",
+            "zbot",
+            "mag",
+            "tect_type",
+            "hdepth",
+            "hlon",
+            "hlat",
+            # "dhyp",
+            # "shyp",
+            "width",
+            "length",
+            "is_point_source"
+        ],
     )
 
     # Write dataframe

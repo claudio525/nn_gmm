@@ -486,9 +486,9 @@ class IMvsPlotGen:
             output_dir.mkdir(parents=True)
 
         for cur_feature, cur_feature_values in feature_dict.items():
-            cur_feature_df, (
-                cur_mean_est_df,
-                cur_std_est_df,
+            (
+                cur_feature_df,
+                (cur_mean_est_df, cur_std_est_df,),
             ) = self.get_est_site_values(
                 cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
             )
@@ -583,7 +583,9 @@ class EventPlotGen:
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
 
-    def gen_IM_feature_plots(self, events: Union[str, List[str]], ims: List[str], feature_key: str):
+    def gen_IM_feature_plots(
+        self, events: Union[str, List[str]], ims: List[str], feature_key: str
+    ):
         """Generates IM vs feature plots for the specified IMs and events"""
         events = [events] if isinstance(events, str) else events
 
@@ -606,6 +608,41 @@ class EventPlotGen:
         x, sim_y = sim_df[feature_key], sim_df[im].apply(np.exp)
         plt.scatter(x, sim_y, label="Simulation", s=1.0)
         plt.scatter(x, mean_df[im], label="Estimated", s=1.0)
+
+        # Aggregate at each unique value of the feature of interest
+        mean_df[feature_key] = sim_df[feature_key]
+        std_df[feature_key] = sim_df[feature_key]
+
+        bin_edges = np.linspace(x.min() - 1e-5, x.max(), 50)
+        bin_indices = np.digitize(sim_df[feature_key].values, bin_edges, right=True)
+
+        # Get center points of the bins (there might be a better way of doing this
+        bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
+
+        mean_df["bin_ix"], std_df["bin_ix"] = bin_indices, bin_indices
+        bin_mean_mean = mean_df.groupby("bin_ix").mean()[im]
+        bin_mean_std = std_df.groupby("bin_ix").mean()[im]
+        plt.plot(bin_centers[bin_mean_mean.index - 1], bin_mean_mean, c="k", marker="o", ms=1.5, linewidth=1.25,
+                 label="Bin mean of estimated means")
+        plt.plot(
+            bin_centers[bin_mean_std.index - 1],
+            bin_mean_mean * np.exp(bin_mean_std),
+            linestyle="--",
+            c="k",
+            marker="o",
+            ms=1.75,
+            linewidth=1.25,
+            label="Bin mean of estiamted stds"
+        )
+        plt.plot(
+            bin_centers[bin_mean_std.index - 1],
+            bin_mean_mean * np.exp(-bin_mean_std),
+            linestyle="--",
+            c="k",
+            marker="o",
+            ms=1.75,
+            linewidth=1.25,
+        )
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
