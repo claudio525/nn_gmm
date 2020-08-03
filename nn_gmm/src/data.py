@@ -1,5 +1,5 @@
 import pickle
-from typing import Dict, Union
+from typing import Dict, Union, List
 from pathlib import Path
 
 import pandas as pd
@@ -8,7 +8,7 @@ import tensorflow as tf
 
 
 def load_dataset(
-    data_dir: Path,
+    data_dirs: Union[Path, List[Path]],
     feature_details: Dict,
     batch_size: int,
     file_filter: str = "*.tfrecord",
@@ -21,7 +21,7 @@ def load_dataset(
 
     Parameters
     ----------
-    data_dir: Path
+    data_dirs: Path, list of Path
         Directory that contains the .tfrecord files to use
     feature_details: dictionary
         Specifies how to parse the data,
@@ -70,9 +70,8 @@ def load_dataset(
     # as samples are removed
     # 4) Batch
     # 5) Parse each batch
-    ds = tf.data.Dataset.list_files(
-        str(data_dir / file_filter), shuffle=True
-    ).interleave(
+    file_patterns = [str(cur_dir / file_filter) for cur_dir in data_dirs] if len(data_dirs) > 1 else str(data_dirs[0] / file_filter)
+    ds = tf.data.Dataset.list_files(file_patterns, shuffle=True).interleave(
         lambda f: tf.data.TFRecordDataset(f),
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
         cycle_length=n_open_files,
@@ -89,6 +88,7 @@ def load_dataset(
 
     return ds
 
+
 def load_tfrecord(record_ffp: str, feature_details: Dict):
     ds = tf.data.TFRecordDataset(filenames=[record_ffp])
 
@@ -98,16 +98,17 @@ def load_tfrecord(record_ffp: str, feature_details: Dict):
 
     # Slight hack, just want to parse the whole record in one go,
     # not sure how to do this without batching...
-    ds = ds.batch(10000).map(_parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    ds = ds.batch(10000).map(
+        _parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    )
 
-    dfs = [pd.DataFrame.from_dict(cur_data)  for cur_data in ds.as_numpy_iterator()]
+    dfs = [pd.DataFrame.from_dict(cur_data) for cur_data in ds.as_numpy_iterator()]
     df = pd.concat(dfs)
 
     df.id = df.id.str.decode("UTF-8")
     df = df.set_index("id")
 
     return df
-
 
 
 def sel_rand_locations(

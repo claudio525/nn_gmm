@@ -6,9 +6,50 @@ from typing import Dict
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from scipy import interpolate
 from sklearn.model_selection import train_test_split
 
 import nn_gmm
+
+IMs = np.asarray(['AI',
+ 'CAV',
+ 'Ds575',
+ 'Ds595',
+ 'MMI',
+ 'PGA',
+ 'PGV',
+ 'pSA_0.01',
+ 'pSA_0.02',
+ 'pSA_0.03',
+ 'pSA_0.04',
+ 'pSA_0.05',
+ 'pSA_0.075',
+ 'pSA_0.1',
+ 'pSA_0.12',
+ 'pSA_0.15',
+ 'pSA_0.17',
+ 'pSA_0.2',
+ 'pSA_0.25',
+ 'pSA_0.3',
+ 'pSA_0.4',
+ 'pSA_0.5',
+ 'pSA_0.6',
+ 'pSA_0.7',
+ 'pSA_0.75',
+ 'pSA_0.8',
+ 'pSA_0.9',
+ 'pSA_1.0',
+ 'pSA_1.25',
+ 'pSA_1.5',
+ 'pSA_2.0',
+ 'pSA_2.5',
+ 'pSA_3.0',
+ 'pSA_4.0',
+ 'pSA_5.0',
+ 'pSA_6.0',
+ 'pSA_7.5',
+ 'pSA_10.0'])
+
 
 def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
@@ -48,6 +89,32 @@ def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame):
 
     return ser_examples
 
+
+def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims):
+    """Selects the pSA periods of interest if available in the specified
+    IM dataframe, otherwise interpolates to get the desired range of
+    pSA periods"""
+    if np.all(np.isin(target_ims, im_df.columns)):
+        return im_df
+
+    ims = im_df.columns.values.astype(str)
+    pSA_mask = np.char.startswith(ims, "pSA_")
+    pSA_periods = np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1].astype(float)
+
+    target_mask = np.char.startswith(target_ims, "pSA_")
+    target_periods = np.sort(np.stack(np.char.split(IMs[target_mask], "_"))[:, 1].astype(float))
+
+    # Interpolate
+    assert np.all(np.sort(pSA_periods) == pSA_periods)
+    f = interpolate.interp1d(np.log(pSA_periods), im_df.loc[:, ims[pSA_mask]].values,
+                             kind="linear", bounds_error=True)
+    target_values = f(np.log(target_periods))
+
+    pSA_df = pd.DataFrame(columns=np.char.add("pSA_", target_periods.astype(str)), data=target_values, index=im_df.index)
+    result_df = pd.merge(im_df.loc[:, ims[~pSA_mask]], pSA_df, left_index=True, right_index=True, how="inner")
+
+    assert result_df.shape[0] == im_df.shape[0]
+    return result_df
 
 def gen_tf_records(
     sources: np.ndarray,
@@ -93,11 +160,12 @@ def gen_tf_records(
             cur_input_df, "tect_type", tect_type_one_hot_dict
         )
 
+        cur_im_df = interpolate_pSA_periods(cur_im_df, IMs)
+
         assert np.all(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
         )
-
-        examples = serialize(cur_input_df, cur_im_df)
+        examples = serialize(cur_input_df, cur_im_df[IMs])
 
         if ix == 0:
             print(f"Writing feature details")
@@ -113,6 +181,8 @@ def gen_tf_records(
         with tf.io.TFRecordWriter(str(output_dir / f"{cur_source}.tfrecord")) as writer:
             for example in examples:
                 writer.write(example)
+
+
 
 def main(
     site_params_ffp: str,
