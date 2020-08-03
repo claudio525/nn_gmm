@@ -209,9 +209,6 @@ def main(
     # Load source params
     print("Loading source params")
     source_df = pd.read_csv(source_params_ffp, index_col="fault")
-    tect_type_one_hot_dict = {
-        cur_type: cur_type.lower() for cur_type in np.unique(source_df.tect_type)
-    }
 
     # Split events/sources into train/validation data
     if val_prop is not None and val_prop > 0.0:
@@ -231,7 +228,7 @@ def main(
             site_source_df,
             im_db_ffp,
             train_dir,
-            tect_type_one_hot_dict,
+            nn_gmm.TECT_TYPE_ONE_HOT_DICT,
         )
         gen_tf_records(
             val_sources,
@@ -240,7 +237,7 @@ def main(
             site_source_df,
             im_db_ffp,
             val_dir,
-            tect_type_one_hot_dict,
+            nn_gmm.TECT_TYPE_ONE_HOT_DICT,
         )
     else:
         gen_tf_records(
@@ -250,7 +247,7 @@ def main(
             site_source_df,
             im_db_ffp,
             output_dir,
-            tect_type_one_hot_dict,
+            nn_gmm.TECT_TYPE_ONE_HOT_DICT,
         )
 
 

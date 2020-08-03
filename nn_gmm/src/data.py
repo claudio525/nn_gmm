@@ -70,7 +70,11 @@ def load_dataset(
     # as samples are removed
     # 4) Batch
     # 5) Parse each batch
-    file_patterns = [str(cur_dir / file_filter) for cur_dir in data_dirs] if len(data_dirs) > 1 else str(data_dirs[0] / file_filter)
+    file_patterns = (
+        [str(cur_dir / file_filter) for cur_dir in data_dirs]
+        if isinstance(data_dirs, list)
+        else str(data_dirs / file_filter)
+    )
     ds = tf.data.Dataset.list_files(file_patterns, shuffle=True).interleave(
         lambda f: tf.data.TFRecordDataset(f),
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
