@@ -108,10 +108,7 @@ def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
 
 def convert_to_transform_fn(config: Dict, tf_fn: bool = True):
     """Converts the items in the input config to callable
-    tensorflow functions for pre-processing
-
-    Note: This function is only for the training workflow (i.e. when
-    using tf.data.Dataset, NOT for predictions
+    (tensorflow) functions for pre-processing
     """
     for key, item in config.items():
         if item is None:

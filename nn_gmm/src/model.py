@@ -9,6 +9,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow import keras
 
+from . import data
 from . import data_processing
 
 TECT_TYPE_ONE_HOT_DICT = {"ACTIVE_SHALLOW": "active_shallow", "VOLCANIC": "volcanic"}
@@ -18,9 +19,18 @@ class GMM:
     def __init__(self, model: keras.Model, input_config: Dict):
         self.model = model
         self.input_config = input_config
+        self.feature_config = input_config["feature_config"]
+        self.im_config = input_config["im_config"]
 
-        self.features = np.asarray(list(input_config["feature_config"].keys()))
-        self.outputs = np.asarray(list(input_config["im_config"].keys()))
+        self.feature_config_prcd = data_processing.convert_to_transform_fn(
+            self.feature_config.copy(), tf_fn=False
+        )
+
+        # Don't currently support pre-processing of outputs (IMs)
+        assert np.all([val is None for val in self.im_config.values()])
+
+        self.features = np.asarray(list(self.feature_config.keys()))
+        self.outputs = np.asarray(list(self.im_config.keys()))
 
     def predict(
         self,
@@ -28,17 +38,7 @@ class GMM:
         pre_process: bool = True,
         result_df_index: np.ndarray = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        feature_config = data_processing.convert_to_transform_fn(
-            self.input_config["feature_config"].copy(), tf_fn=False
-        )
-
-        if pre_process:
-            # Deal with the categorial features
-            if "tect_type" in X.columns:
-                X = data_processing.apply_one_hot_enc(X, "tect_type", TECT_TYPE_ONE_HOT_DICT)
-
-            # All other pre-processing
-            X = data_processing.preprocess_df(X, feature_config)
+        X = self._pre_process(X) if pre_process else X
 
         # Ensure that all the required features exist
         if not np.all(np.isin(self.features, X.columns.values.astype(str))):
@@ -48,7 +48,9 @@ class GMM:
         y_est = self.model.predict(X.loc[:, self.features].values.astype(float))
 
         # Convert to dataframes
-        result_df_index = result_df_index if result_df_index is not None else X.index.values
+        result_df_index = (
+            result_df_index if result_df_index is not None else X.index.values
+        )
         mean_df = pd.DataFrame(
             data=np.exp(y_est[:, : self.outputs.size]),
             columns=self.outputs,
@@ -61,6 +63,73 @@ class GMM:
         )
 
         return mean_df, std_df
+
+    def predict_dirs(
+        self,
+        data_dirs: List[Path],
+        batch_size: int = 500_000,
+        ims: List[str] = None,
+        features: List[str] = []
+    ):
+        """
+        Performs prediction using the tfrecord files in the specified directories
+
+        Should mainly be used when getting predictions for the training or validation dataset
+
+        Parameters
+        ----------
+        data_dirs: list of Path
+            Directories from which to read the tfrecord files
+        batch_size: int, optional
+            How many records to predict in a single batch, larger will be
+            faster, however requires more memory
+        ims: list of strings
+        features: list of strings
+            The IMs and features to keep. Unless the computer used has a large
+            amount of memory, keeping all is probably not the greates idea
+
+        Returns
+        -------
+        sim_df: dataframe
+            The simulation IM values and the features (specified in features argument)
+
+        """
+        # Get feature details, have to be same across all directories anyways
+        with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
+            feature_details = pickle.load(f)
+
+        ds = data.load_dataset(
+            data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
+        )
+
+        sim_dfs, mean_dfs, std_dfs = [], [], []
+        for cur_data in ds.as_numpy_iterator():
+            cur_df = pd.DataFrame.from_dict(cur_data)
+            cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
+            cur_mean_df, cur_std_df = self.predict(cur_df, pre_process=True)
+
+            # Only keep some IMs (to reduce size of resulting data)
+            if ims is not None:
+                cur_mean_df, cur_std_df = cur_mean_df[ims], cur_std_df[ims]
+                sim_dfs.append(cur_df[ims + features])
+
+            mean_dfs.append(cur_mean_df)
+            std_dfs.append(cur_std_df)
+
+        mean_df, std_df = pd.concat(mean_dfs), pd.concat(std_dfs)
+        return pd.concat(sim_dfs), mean_df, std_df
+
+    def _pre_process(self, X: pd.DataFrame):
+        # Deal with the categorial features
+        if "tect_type" in X.columns:
+            X = data_processing.apply_one_hot_enc(
+                X, "tect_type", TECT_TYPE_ONE_HOT_DICT
+            )
+
+        # All other pre-processing
+        X = data_processing.preprocess_df(X, self.feature_config_prcd)
+
+        return X
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):

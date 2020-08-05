@@ -1,4 +1,3 @@
-import os
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
 
@@ -11,9 +10,9 @@ import seaborn as sns
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple
-from .evaluation import EvaluationResult
+
 from .model import GMM
-from .utils import get_station_from_id
+from .utils import get_station_from_id, get_station_lookup
 from . import data
 
 
@@ -60,6 +59,36 @@ MARKERS = [
     10,
     11,
 ]
+
+DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
+    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
+    "options": {
+        "xyz-grid-search": "12m",
+        "xyz-grid-automask": "12k",
+        "xyz-cpt": "polar",
+        "xyz-cpt-bg": "0/0/80",
+        "xyz-cpt-fg": "80/0/0",
+        "xyz-transparency": "30",
+        "xyz-size": "1k",
+        "xyz-cpt-inc": "0.125",
+        "xyz-cpt-tick": "0.25",
+        "xyz-cpt-min": "-1.0",
+        "xyz-cpt-max": "1.0",
+    },
+}
+
+DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
+    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
+    "options": {
+        "xyz-grid-search": "12m",
+        "xyz-grid-automask": "12k",
+        "xyz-cpt": "hot",
+        "xyz-transparency": "30",
+        "xyz-size": "1k",
+        "xyz-cpt-min": "0",
+        "xyz-cpt-max": "0.6",
+    },
+}
 
 
 def multi_fig(
@@ -490,7 +519,7 @@ class IMvsPlotGen:
                 cur_feature_df,
                 (cur_mean_est_df, cur_std_est_df,),
             ) = self.get_est_site_values(
-                cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
+                cur_feature, cur_feature_values, CONST_DEFAULT_VALUES, locations
             )
 
             for cur_im in ims:
@@ -522,38 +551,7 @@ class IMvsPlotGen:
                     )
 
 
-class EventPlotGen:
-
-    DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "polar",
-            "xyz-cpt-bg": "0/0/80",
-            "xyz-cpt-fg": "80/0/0",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-inc": "0.125",
-            "xyz-cpt-tick": "0.25",
-            "xyz-cpt-min": "-1.0",
-            "xyz-cpt-max": "1.0",
-        },
-    }
-
-    DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "hot",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-min": "0",
-            "xyz-cpt-max": "0.6",
-        },
-    }
-
+class PlotGen:
     def __init__(
         self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
     ):
@@ -566,7 +564,9 @@ class EventPlotGen:
 
         self._estimates = {}
 
-    def _get_event_estimates(self, event: str):
+    def _get_event_estimates(
+        self, event: str,
+    ):
         """Get estimates for the specified event"""
         if event in self._estimates.keys():
             return self._estimates[event]
@@ -582,6 +582,104 @@ class EventPlotGen:
 
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
+
+
+class AggPlotGen(PlotGen):
+    def __init__(
+        self,
+        plot_items_ffp: str,
+        model: GMM,
+        ims: List[str],
+        data_dirs: List[Path],
+        output_dir: Path,
+    ):
+        super().__init__(plot_items_ffp, model, data_dirs, output_dir)
+        self._ims = ims
+
+        self._sim_df, self._mean_df, self._std_df = self._get_estimates()
+
+        self._sim_df["station"] = get_station_from_id(
+            self._sim_df.index.values.astype(str)
+        )
+        self._mean_df["station"] = get_station_from_id(
+            self._mean_df.index.values.astype(str)
+        )
+        self._std_df["station"] = get_station_from_id(
+            self._std_df.index.values.astype(str)
+        )
+
+        if not self.output_dir.is_dir():
+            self.output_dir.mkdir()
+
+    def _get_estimates(self):
+        return self.model.predict_dirs(
+            self.data_dirs, pre_process=True, ims=self._ims, features=["lat", "lon"]
+        )
+
+    def _get_event_estimates(self, event: str):
+        raise NotImplementedError()
+
+    def plot_spatial_res_maps(self, plot_type: str = "res_mean", n_procs: int = 4):
+        assert np.all(self._sim_df.index == self._mean_df.index)
+
+        data_df, non_negative = None, True
+        if plot_type == "res_mean":
+            data_df = (
+                self._mean_df[self._ims] / self._sim_df[self._ims].apply(np.exp)
+            ).apply(np.log)
+
+        data_df["station"] = self._mean_df.station
+        data_df = data_df.groupby("station").mean()
+
+        # Add lat & lon
+        station_df = get_station_lookup(self._sim_df)
+        data_df = pd.merge(
+            data_df,
+            station_df,
+            left_on="station",
+            right_index=True,
+            how="inner",
+            validate="one_to_one",
+        )
+
+        csv_files = []
+        for im in self._ims:
+            im_name = im.replace(".", "p")
+            cb_options = compute_GMT_std_ticks(
+                data_df[im], n_std=2, non_negative=non_negative
+            )
+            gmt_options = get_gmt_options_dict(
+                options={
+                    **{"title": f"{im_name}-{plot_type}", "xyz-cpt-labels": f"{im}",},
+                    **cb_options,
+                }
+            )
+
+            plot_csv_ffp = self.output_dir / f"{im_name}"
+            plot_csv_ffp = _gmt_save(
+                data_df, im, str(plot_csv_ffp), gmt_options=gmt_options
+            )
+
+            csv_files.append(plot_csv_ffp)
+
+        # Generate the plot
+        plot_multiple(
+            self.plot_items_ffp,
+            DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            in_ffps=csv_files,
+            n_procs=n_procs
+        )
+
+        return csv_files
+
+
+class EventPlotGen(PlotGen):
+    """Class for generating even specific plots"""
+
+    def __init__(
+        self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
+    ):
+        super().__init__(plot_items_ffp, model, data_dirs, output_dir)
 
     def gen_IM_feature_plots(
         self, events: Union[str, List[str]], ims: List[str], feature_key: str
@@ -622,8 +720,15 @@ class EventPlotGen:
         mean_df["bin_ix"], std_df["bin_ix"] = bin_indices, bin_indices
         bin_mean_mean = mean_df.groupby("bin_ix").mean()[im]
         bin_mean_std = std_df.groupby("bin_ix").mean()[im]
-        plt.plot(bin_centers[bin_mean_mean.index - 1], bin_mean_mean, c="k", marker="o", ms=1.5, linewidth=1.25,
-                 label="Bin mean of estimated means")
+        plt.plot(
+            bin_centers[bin_mean_mean.index - 1],
+            bin_mean_mean,
+            c="k",
+            marker="o",
+            ms=1.5,
+            linewidth=1.25,
+            label="Bin mean of estimated means",
+        )
         plt.plot(
             bin_centers[bin_mean_std.index - 1],
             bin_mean_mean * np.exp(bin_mean_std),
@@ -632,7 +737,7 @@ class EventPlotGen:
             marker="o",
             ms=1.75,
             linewidth=1.25,
-            label="Bin mean of estiamted stds"
+            label="Bin mean of estiamted stds",
         )
         plt.plot(
             bin_centers[bin_mean_std.index - 1],
@@ -700,9 +805,9 @@ class EventPlotGen:
 
         # Generate the plots
         gmt_options = (
-            self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
             if "res" in data_type
-            else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS
         )
         plot_multiple(
             self.plot_items_ffp, gmt_options, in_ffps=csv_ffps, n_procs=n_procs
@@ -724,7 +829,7 @@ class EventPlotGen:
         # Generate the plot
         plot_multiple(
             self.plot_items_ffp,
-            self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=[str(plot_csv_ffp)],
         )
 
