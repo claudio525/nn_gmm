@@ -519,7 +519,7 @@ class IMvsPlotGen:
                 cur_feature_df,
                 (cur_mean_est_df, cur_std_est_df,),
             ) = self.get_est_site_values(
-                cur_feature, cur_feature_values, CONST_DEFAULT_VALUES, locations
+                cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
             )
 
             for cur_im in ims:
@@ -585,6 +585,8 @@ class PlotGen:
 
 
 class AggPlotGen(PlotGen):
+    """Class for generating aggregate plots"""
+
     def __init__(
         self,
         plot_items_ffp: str,
@@ -609,24 +611,42 @@ class AggPlotGen(PlotGen):
         )
 
         if not self.output_dir.is_dir():
-            self.output_dir.mkdir()
+            self.output_dir.mkdir(parents=True)
 
     def _get_estimates(self):
         return self.model.predict_dirs(
-            self.data_dirs, pre_process=True, ims=self._ims, features=["lat", "lon"]
+            self.data_dirs, ims=self._ims, features=["lat", "lon"]
         )
 
     def _get_event_estimates(self, event: str):
         raise NotImplementedError()
 
-    def plot_spatial_res_maps(self, plot_type: str = "res_mean", n_procs: int = 4):
+    def plot_spatial_agg_maps(self, plot_type: str = "res_mean", n_procs: int = 4):
+        """Generates spatial aggregate maps (i.e. the data is aggregated
+        at each station across all realisations of all events
+
+        Parameters
+        ----------
+        plot_type: str
+            "res_mean": Residual between simulation IMs and
+            estimated mean value from the NN GMM
+        n_procs: int, optional
+            Number of processes to use for plotting
+
+        Returns
+        -------
+        list of strings:
+            The csv file paths for each plot
+        """
         assert np.all(self._sim_df.index == self._mean_df.index)
+        is_res_plot = "res" in plot_type
 
         data_df, non_negative = None, True
         if plot_type == "res_mean":
             data_df = (
                 self._mean_df[self._ims] / self._sim_df[self._ims].apply(np.exp)
             ).apply(np.log)
+            non_negative = False
 
         data_df["station"] = self._mean_df.station
         data_df = data_df.groupby("station").mean()
@@ -642,10 +662,11 @@ class AggPlotGen(PlotGen):
             validate="one_to_one",
         )
 
+        print(f"Generating csv files for {len(self._ims)} IMs")
         csv_files = []
         for im in self._ims:
             im_name = im.replace(".", "p")
-            cb_options = compute_GMT_std_ticks(
+            cb_options = {} if is_res_plot else compute_GMT_std_ticks(
                 data_df[im], n_std=2, non_negative=non_negative
             )
             gmt_options = get_gmt_options_dict(
@@ -663,8 +684,11 @@ class AggPlotGen(PlotGen):
             csv_files.append(plot_csv_ffp)
 
         # Generate the plot
+        print(f"Plotting")
         plot_multiple(
             self.plot_items_ffp,
+            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            if "res" in plot_type else
             DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=csv_files,
             n_procs=n_procs

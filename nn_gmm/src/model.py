@@ -106,7 +106,7 @@ class GMM:
         for cur_data in ds.as_numpy_iterator():
             cur_df = pd.DataFrame.from_dict(cur_data)
             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
-            cur_mean_df, cur_std_df = self.predict(cur_df, pre_process=True)
+            cur_mean_df, cur_std_df = self.predict(cur_df.copy(), pre_process=True)
 
             # Only keep some IMs (to reduce size of resulting data)
             if ims is not None:
