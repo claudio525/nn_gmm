@@ -116,16 +116,13 @@ def load_tfrecord(record_ffp: str, feature_details: Dict):
 
 
 def sel_rand_locations(
-    data_dir: Path, feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
+    data_dirs: List[Path], feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
 ):
     """Selects a set of random locations from the
     specified dataframe
 
     Parameters
     ----------
-    ds: tensorflow dataset
-        Tensorflow dataset from which to select locations,
-        assumes that samples are already shuffled
     n_locs: int
         Number of locations to select
 
@@ -135,7 +132,7 @@ def sel_rand_locations(
         with the selected locations
         columns: [lon, lat]
     """
-    ds = load_dataset(data_dir, feature_details, n_locs, shuffle_buffer=shuffle_buffer)
+    ds = load_dataset(data_dirs, feature_details, n_locs, shuffle_buffer=shuffle_buffer)
     data_dict = next(ds.take(1).as_numpy_iterator())
 
     return pd.DataFrame(

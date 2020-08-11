@@ -131,8 +131,12 @@ class IMvsPlotGen:
             "z2p5": 1.3,
             "dip": 60,
             "rake": 45,
+            "strike": 177,
+            "length": 18.9,
             "width": 18.2775,
             "ztor": 0,
+            "dbottom": 16.8,
+            "is_point_source": 0,
             "mag": 7.0,
             "rjb": 91,
             "rrup": 91,
@@ -644,7 +648,7 @@ class AggPlotGen(PlotGen):
         data_df, non_negative = None, True
         if plot_type == "res_mean":
             data_df = (
-                self._mean_df[self._ims] / self._sim_df[self._ims].apply(np.exp)
+                self._mean_df[self._ims].apply(np.log) / self._sim_df[self._ims]
             ).apply(np.log)
             non_negative = False
 
@@ -666,8 +670,12 @@ class AggPlotGen(PlotGen):
         csv_files = []
         for im in self._ims:
             im_name = im.replace(".", "p")
-            cb_options = {} if is_res_plot else compute_GMT_std_ticks(
-                data_df[im], n_std=2, non_negative=non_negative
+            cb_options = (
+                {}
+                if is_res_plot
+                else compute_GMT_std_ticks(
+                    data_df[im], n_std=2, non_negative=non_negative
+                )
             )
             gmt_options = get_gmt_options_dict(
                 options={
@@ -688,10 +696,10 @@ class AggPlotGen(PlotGen):
         plot_multiple(
             self.plot_items_ffp,
             DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
-            if "res" in plot_type else
-            DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            if "res" in plot_type
+            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=csv_files,
-            n_procs=n_procs
+            n_procs=n_procs,
         )
 
         return csv_files
@@ -912,7 +920,7 @@ class EventPlotGen(PlotGen):
         elif data_type.lower() == "est_std":
             data_df = std_est.copy()
         elif data_type.lower() == "res_mean":
-            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
+            data_df = (mean_est[im].apply(np.log) / sim_df[im]).apply(np.log).to_frame()
             non_negative, cb_options = False, {im: {}}
         else:
             raise ValueError(f"Invalid data_type: {data_type}")

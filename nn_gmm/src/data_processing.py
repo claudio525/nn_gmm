@@ -77,6 +77,10 @@ def get_inv_min_max_scaling_fn(
 
 def preprocess_df(df: pd.DataFrame, config: Dict):
     for name, func in config.items():
+        if name not in df.columns:
+            print(f"Ignoring feature {name} as this is not in the dataframe!")
+            continue
+
         df[name] = func(df[name].values) if func is not None else df[name]
 
     return df

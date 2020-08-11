@@ -217,6 +217,6 @@ def to_path(input: Union[str, List[str]] = None):
     if isinstance(input, str):
         return Path(input)
     elif isinstance(input, List):
-        return [Path(cur_input) for cur_input in input]
+        return [Path(cur_input) if isinstance(cur_input, str) else cur_input for cur_input in input]
 
-    return None
+    return input

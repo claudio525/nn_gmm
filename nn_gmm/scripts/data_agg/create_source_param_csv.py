@@ -29,7 +29,7 @@ def get_fault_data(sources_dir: str, fault_name: str):
                 np.mean(f.attrs["dtop"]),
                 np.mean(f.attrs["dbottom"]),
                 np.min(f.attrs["dtop"]),  # Ztor
-                np.max(f.attrs["dtop"]),  # Zbot
+                np.max(f.attrs["dbot"]),  # Zbot
                 f.attrs["mag"],
                 tect_type,
                 f.attrs["hdepth"],
