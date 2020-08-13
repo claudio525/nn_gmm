@@ -27,7 +27,7 @@ def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
 def get_min_max_scaling_fn(
     data_min: float,
     data_max: float,
-    target_min: float = 0.0,
+    target_min: float = -1.0,
     target_max: float = 1.0,
     tf_fn: bool = True,
 ):
@@ -61,7 +61,7 @@ def get_min_max_scaling_fn(
 def get_inv_min_max_scaling_fn(
     data_min: float,
     data_max: float,
-    target_min: float = 0.0,
+    target_min: float = -1.0,
     target_max: float = 1.0,
     tf_fn: bool = True,
 ):

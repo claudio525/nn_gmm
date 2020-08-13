@@ -1,3 +1,4 @@
+import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
 
@@ -9,16 +10,14 @@ import seaborn as sns
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
-from visualization.gmt.plotting import plot_multiple
+from visualization.gmt.plotting import plot_multiple, plot_single
 
 from .model import GMM
-from .utils import get_station_from_id, get_station_lookup
+from .utils import get_station_from_id, get_station_lookup, to_path
 from . import data
-
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
-
 
 MARKERS = [
     ".",
@@ -602,7 +601,9 @@ class AggPlotGen(PlotGen):
         super().__init__(plot_items_ffp, model, data_dirs, output_dir)
         self._ims = ims
 
+        print(f"Getting estimates for the specified IMs")
         self._sim_df, self._mean_df, self._std_df = self._get_estimates()
+        assert np.all(self._sim_df.index == self._mean_df.index)
 
         self._sim_df["station"] = get_station_from_id(
             self._sim_df.index.values.astype(str)
@@ -642,13 +643,12 @@ class AggPlotGen(PlotGen):
         list of strings:
             The csv file paths for each plot
         """
-        assert np.all(self._sim_df.index == self._mean_df.index)
         is_res_plot = "res" in plot_type
 
         data_df, non_negative = None, True
         if plot_type == "res_mean":
             data_df = (
-                self._mean_df[self._ims].apply(np.log) / self._sim_df[self._ims]
+                self._mean_df[self._ims] / self._sim_df[self._ims].apply(np.exp)
             ).apply(np.log)
             non_negative = False
 
@@ -798,22 +798,29 @@ class EventPlotGen(PlotGen):
         events: List[str],
         ims: List[str],
         data_type: str = "est_mean",
-        cb_options: Dict[str, Dict] = None,
+        events_cb_options: Dict[str, Dict[str, Dict]] = None,
         suffix: str = "",
         n_procs: int = 4,
     ):
         """Plots spatial maps for the specified IMs and events
         See gen_event_map_data for parameter details
         """
+        result_cb_options = {}
         for event in events:
-            self.plot_spatial_event_maps(
+            print(f"Plotting spatial event maps for {event}")
+            cur_cb_options = self.plot_spatial_event_maps(
                 event,
                 ims,
                 data_type=data_type,
-                cb_options=cb_options,
+                cb_options=events_cb_options.get(event)
+                if events_cb_options is not None
+                else None,
                 suffix=suffix,
                 n_procs=n_procs,
             )
+            result_cb_options[event] = cur_cb_options
+
+        return result_cb_options
 
     def plot_spatial_event_maps(
         self,
@@ -920,7 +927,7 @@ class EventPlotGen(PlotGen):
         elif data_type.lower() == "est_std":
             data_df = std_est.copy()
         elif data_type.lower() == "res_mean":
-            data_df = (mean_est[im].apply(np.log) / sim_df[im]).apply(np.log).to_frame()
+            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
             non_negative, cb_options = False, {im: {}}
         else:
             raise ValueError(f"Invalid data_type: {data_type}")
@@ -939,6 +946,13 @@ class EventPlotGen(PlotGen):
 
         # Aggregate across realisation at each station
         agg_df = data_df.groupby("station").mean()
+
+        assert np.all(~agg_df[im].isna())
+        # # Temporary fix for log residual issue (e.g. ln(-0.0001/0.0001))
+        # nan_mask = agg_df[im].isna()
+        # if np.any(nan_mask):
+        #     agg_df[im].loc[nan_mask] = 10
+        #     print(f"{im} - The stations {agg_df.loc[nan_mask].index.values} had nan residual values")
 
         im_name = im.replace(".", "p")
         cb_options = (
@@ -961,6 +975,60 @@ class EventPlotGen(PlotGen):
         plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
 
         return plot_csv_ffp, cb_options
+
+
+def plot_n_records_map(
+    data_dirs: List[Union[Path, str]],
+    plot_items_ffp: Union[Path, str],
+    output_ffp: str,
+    title: str = "Number-of-records",
+):
+    data_dirs, plot_items_ffp = to_path(data_dirs), to_path(plot_items_ffp)
+
+    ds = data.load_dataset(
+        data_dirs,
+        data.load_feature_details(data_dirs[0]),
+        5_000_000,
+        shuffle_buffer=None,
+        block_size=1024,
+    )
+
+    dfs = []
+    for cur_batch in ds.as_numpy_iterator():
+        cur_df = pd.DataFrame.from_dict(
+            {key: cur_batch[key] for key in ["id", "lat", "lon"]}
+        )
+        cur_df["id"] = cur_df.id.str.decode("UTF-8")
+        cur_df.set_index("id", inplace=True)
+
+        dfs.append(cur_df)
+
+    df = pd.concat(dfs)
+    df["station"] = get_station_from_id(df.index.values.astype(str))
+
+    station_lookup_df = get_station_lookup(df)
+
+    n_records_df = df.groupby("station").count()
+    n_records_df["count"] = n_records_df["lat"]
+    n_records_df.drop(columns=["lat", "lon"], inplace=True)
+
+    n_records_df = pd.merge(
+        n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
+    )
+
+    cb_options = compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
+    gmt_options = get_gmt_options_dict(
+        options={
+            **{"title": title, "xyz-cpt-labels": "n_records"},
+            **cb_options,
+        }
+    )
+    csv_ffp = _gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        plot_single(plot_items_ffp, csv_ffp, DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
+
+    return
 
 
 def find_record_ffp(data_dirs: List[Path], event: str):

@@ -1,6 +1,4 @@
 """Creates a source attribute csv file for a given Cybershake sources directory
-Note: This is all done at the fault level, i.e. assumes all attributes retrieved
-are the same across all realisation (Todo: need to check this..)
 """
 import os
 import glob
@@ -14,34 +12,36 @@ import numpy as np
 
 def get_fault_data(sources_dir: str, fault_name: str):
     # Get the first info file
-    info_file = glob.glob(os.path.join(sources_dir, fault_name, "Srf", "*.info"))[0]
+    info_files = glob.glob(os.path.join(sources_dir, fault_name, "Srf", "*.info"))
 
-    with h5py.File(info_file, "r") as f:
-        tect_type = (
-            f.attrs["tect_type"] if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW"
-        )
-        return (
-            fault_name,
-            [
-                np.mean(f.attrs["dip"]),
-                np.mean(f.attrs["rake"]),
-                np.mean(f.attrs["strike"]),
-                np.mean(f.attrs["dtop"]),
-                np.mean(f.attrs["dbottom"]),
-                np.min(f.attrs["dtop"]),  # Ztor
-                np.max(f.attrs["dbot"]),  # Zbot
-                f.attrs["mag"],
-                tect_type,
-                f.attrs["hdepth"],
-                f.attrs["hlon"],
-                f.attrs["hlat"],
-                # f.attrs["dhyp"],
-                # f.attrs["shyp"],
-                np.mean(f.attrs["width"]),
-                np.mean(f.attrs["length"]),
-                f.attrs["type"] == 1,
-            ],
-        )
+    data_dirs, rel_names = [], []
+    for info_file in info_files:
+        rel_names.append(os.path.basename(info_file).split(".")[0])
+
+        with h5py.File(info_file, "r") as f:
+            tect_type = (
+                f.attrs["tect_type"] if "tect_type" in f.attrs.keys() else "ACTIVE_SHALLOW"
+            )
+            data_dirs.append({
+                    "dip": np.mean(f.attrs["dip"]),
+                    "rake": np.mean(f.attrs["rake"]),
+                    "strike": np.mean(f.attrs["strike"]),
+                    "dtop": np.mean(f.attrs["dtop"]),
+                    "dbottom": np.mean(f.attrs["dbottom"]),
+                    "ztor": np.min(f.attrs["dtop"]),  # Ztor
+                    "zbot": np.max(f.attrs["dbottom"]),  # Zbot
+                    "mag": f.attrs["mag"],
+                    "tect_type": tect_type,
+                    "hdepth": f.attrs["hdepth"],
+                    "hlon": f.attrs["hlon"],
+                    "hlat": f.attrs["hlat"],
+                    "dhyp": np.max(f.attrs["dhyp"]),
+                    "shyp": np.max(f.attrs["shyp"]),
+                    "width": np.mean(f.attrs["width"]),
+                    "length": np.mean(f.attrs["length"]),
+                    "is_point_source": f.attrs["type"] == 1})
+
+    return pd.DataFrame.from_records(data_dirs, index=rel_names)
 
 
 def main(sources_dir: str, output_ffp: str, n_procs: int = 4):
@@ -54,43 +54,19 @@ def main(sources_dir: str, output_ffp: str, n_procs: int = 4):
 
     # Collect data for each fault
     if n_procs == 1:
-        fault_src_data = [
+        rel_dfs = [
             get_fault_data(sources_dir, cur_fault) for cur_fault in faults
         ]
     else:
         with mp.Pool(processes=n_procs) as p:
-            fault_src_data = p.starmap(
+            rel_dfs = p.starmap(
                 get_fault_data, [(sources_dir, cur_fault) for cur_fault in faults]
             )
 
-    # Combine and create a dataframe
-    fault_src_dict = {name: src_attrs for name, src_attrs in fault_src_data}
-    src_df = pd.DataFrame.from_dict(
-        fault_src_dict,
-        orient="index",
-        columns=[
-            "dip",
-            "rake",
-            "strike",
-            "dtop",
-            "dbottom",
-            "ztor",
-            "zbot",
-            "mag",
-            "tect_type",
-            "hdepth",
-            "hlon",
-            "hlat",
-            # "dhyp",
-            # "shyp",
-            "width",
-            "length",
-            "is_point_source"
-        ],
-    )
+    src_df = pd.concat(rel_dfs)
 
     # Write dataframe
-    src_df.to_csv(output_ffp, index=True, index_label="fault")
+    src_df.to_csv(output_ffp, index=True, index_label="realisation")
 
 
 if __name__ == "__main__":

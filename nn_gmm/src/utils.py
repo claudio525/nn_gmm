@@ -1,5 +1,6 @@
 import json
-from typing import Any, List
+from pathlib import Path
+from typing import Any, List, Union
 
 import numpy as np
 import pandas as pd
@@ -36,3 +37,12 @@ def get_station_lookup(X: pd.DataFrame):
 def get_station_from_id(ids: np.ndarray) -> List[str]:
     """Computes the stations from station_rupture ids"""
     return [cur_split[-1] for cur_split in np.char.split(ids, "_")]
+
+
+def to_path(input: Union[str, List[str], List[Path]] = None):
+    if isinstance(input, str):
+        return Path(input)
+    elif isinstance(input, List):
+        return [Path(cur_input) if isinstance(cur_input, str) else cur_input for cur_input in input]
+
+    return input

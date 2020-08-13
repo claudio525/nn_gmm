@@ -125,9 +125,9 @@ def train(
         json.dump(config, f, cls=utils.GenericObjJSONEncoder)
 
     train_ds, val_ds = load_datasets(
-        to_path(input_config["train_data_dirs"]),
+        utils.to_path(input_config["train_data_dirs"]),
         training_config["batch_size"],
-        val_dirs=to_path(input_config["val_data_dirs"]),
+        val_dirs=utils.to_path(input_config["val_data_dirs"]),
         shuffle_buffer_size=training_config["shuffle_buffer_size"],
     )
 
@@ -196,8 +196,8 @@ def train(
 
     # Create loss plot
     plt.figure()
-    plt.plot(history.epoch, loss_df.loss, label="Loss")
-    plt.plot(history.epoch, loss_df.val_loss, label="Validation loss")
+    plt.plot(history.epoch, loss_df.loss, label=f"Loss - {loss_df.loss.min():.4f}")
+    plt.plot(history.epoch, loss_df.val_loss, label=f"Validation loss - {loss_df.val_loss.min():.4f}")
 
     plt.ylabel(training_config["loss"])
     plt.xlabel("Epoch")
@@ -213,10 +213,3 @@ def train(
     )
 
 
-def to_path(input: Union[str, List[str]] = None):
-    if isinstance(input, str):
-        return Path(input)
-    elif isinstance(input, List):
-        return [Path(cur_input) if isinstance(cur_input, str) else cur_input for cur_input in input]
-
-    return input

@@ -100,7 +100,7 @@ class GMM:
 
         ds = data.load_dataset(
             data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
-        )
+        ).prefetch(tf.data.experimental.AUTOTUNE)
 
         sim_dfs, mean_dfs, std_dfs = [], [], []
         for cur_data in ds.as_numpy_iterator():

@@ -1,0 +1,11 @@
+#"train_rep_events": ['3369048', '3468980', '2626467', 'Tuakana10', 'MS05', 'Wairau']
+"train_rep_events": ['Tuakana10', 'MS05', 'Wairau', 'AlpineF2K']
+#"val_rep_events": ['2937330', '3366544', '3367749', 'Orakonui', 'TuhuaS01', 'HopeConway']
+"val_rep_events": ['Orakonui', 'TuhuaS01', 'HopeConway']
+"ims_plotting": [
+  "Ds595",
+  "PGA",
+  "pSA_0.5",
+  "pSA_5.0",
+  "pSA_10.0",
+]
