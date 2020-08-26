@@ -1,6 +1,7 @@
 import time
 import multiprocessing as mp
-from typing import Dict
+from pathlib import Path
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -8,14 +9,14 @@ import pandas as pd
 from .utils import pandas_isin
 
 
-def load_site_source_df(site_df: pd.DataFrame, site_source_ffp: str, n_procs: int = 4):
+def load_site_source_df(site_df: pd.DataFrame, site_source_ffps: List[Path], n_procs: int = 4):
     """Loads the site-source parameters into a dictionary
 
     Parameters
     ----------
     site_df: pd.DataFrame
         The site params
-    site_source_ffp: str
+    site_source_ffps: list of Path
         File path to the site-source DB
     n_procs: int
 
@@ -29,40 +30,47 @@ def load_site_source_df(site_df: pd.DataFrame, site_source_ffp: str, n_procs: in
     if n_procs == 1:
         results = []
         for station in site_df.index.values:
-            results.append(__load_site_df(station, site_source_ffp))
+            results.append(__load_site_df(station, site_source_ffps))
     else:
         with mp.Pool(processes=n_procs) as p:
             results = p.starmap(
                 __load_site_df,
-                [(station, site_source_ffp) for station in site_df.index.values],
+                [(station, site_source_ffps) for station in site_df.index.values],
             )
 
     return pd.concat(results)
 
 
-def __load_site_df(cur_site, site_source_ffp):
+def __load_site_df(cur_site: str, site_source_ffps: List[Path]):
     """MP helper function"""
-    with pd.HDFStore(site_source_ffp, "r") as db:
-        try:
-            df = db[f"/distances/station_{cur_site}"]
-        except KeyError:
-            return None
+    dfs = []
+    for cur_site_source_ffp in site_source_ffps:
+        with pd.HDFStore(cur_site_source_ffp, "r") as db:
+            try:
+                cur_df = db[f"/distances/station_{cur_site}"]
+            except KeyError:
+                continue
 
-        faults = db["faults"].loc[df.fault_id].fault_name.values
-        df.index = [f"{cur_fault}_{cur_site}" for cur_fault in faults]
-        df["source"] = faults
-        df["site"] = cur_site
+            faults = db["faults"].loc[cur_df.fault_id].fault_name.values
+            cur_df.index = [f"{cur_fault}_{cur_site}" for cur_fault in faults]
+            cur_df["source"] = faults
+            cur_df["site"] = cur_site
 
-    return df
+            dfs.append(cur_df)
+
+    return None if len(dfs) == 0 else pd.concat(dfs)
 
 
-def load_fault_im_df(cur_fault: str, im_db_ffp: str):
+def load_fault_im_df(cur_fault: str, im_db_ffps: List[Path]):
     """Loads the IM dataframe for the specified fault"""
-    with pd.HDFStore(im_db_ffp, "r") as store:
-        try:
-            return store[cur_fault]
-        except KeyError:
-            return None
+    for im_db_ffp in im_db_ffps:
+        with pd.HDFStore(im_db_ffp, "r") as store:
+            try:
+                return store[cur_fault]
+            except KeyError:
+                continue
+
+    return None
 
 
 def create_sample_comb(im_df: pd.DataFrame):
@@ -71,12 +79,7 @@ def create_sample_comb(im_df: pd.DataFrame):
 
     Parameters
     ----------
-    im_dict: Dict
-        Dictionary
-        Keys are the fault names
-        Values are the IM dataframes, with the station
-            as index and the columns of the format "IM_mean"/"IM_std"
-            for each IM
+    im_df: dataframe
 
     Returns
     -------
@@ -87,6 +90,7 @@ def create_sample_comb(im_df: pd.DataFrame):
 
     sample_combs = pd.DataFrame(index=im_df.index)
     sample_combs["source"] = split_ids[:, 0]
+    sample_combs["realisation"] = np.where(split_ids[:, 0] != split_ids[:, 1], np.char.add(split_ids[:, 0], np.char.add("_", split_ids[:, 1])), split_ids[:, 0])
     sample_combs["site"] = split_ids[:, 2]
 
     return sample_combs

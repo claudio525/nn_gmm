@@ -94,6 +94,7 @@ def load_dataset(
 
 
 def load_tfrecord(record_ffp: str, feature_details: Dict):
+    """Loads a single tfrecord file as a dataframe"""
     ds = tf.data.TFRecordDataset(filenames=[record_ffp])
 
     def _parse_fn(example_proto):

@@ -86,7 +86,7 @@ def preprocess_df(df: pd.DataFrame, config: Dict):
     return df
 
 
-def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
+def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict = None):
     """Performs pre-processing on the specified tf.data.Dataset
     using the functions in the feature & IM config
 
@@ -99,11 +99,14 @@ def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
         for name, func in feature_config.items():
             features.append(func(item[name]) if func is not None else item[name])
 
-        target_values = []
-        for name, func in im_config.items():
-            target_values.append(func(item[name]) if func is not None else item[name])
+        if im_config is not None:
+            target_values = []
+            for name, func in im_config.items():
+                target_values.append(func(item[name]) if func is not None else item[name])
 
-        return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
+            return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
+
+        return tf.stack(features, axis=1)
 
     return ds.map(
         tf.function(_apply_pre_config), num_parallel_calls=tf.data.experimental.AUTOTUNE

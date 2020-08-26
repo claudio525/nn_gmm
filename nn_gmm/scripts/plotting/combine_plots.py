@@ -1,22 +1,15 @@
+#!/usr/bin/env python3
+"""Script for creating combined plots of two different model results"""
 import multiprocessing as mp
 import argparse
 from pathlib import Path
 from PIL import Image
 
+import nn_gmm
 
 def process_img(img_ffp_1: Path, img_ffp_2: Path, output_ffp: Path):
     assert img_ffp_1.name == img_ffp_2.name
-
-    cur_img_1 = Image.open(img_ffp_1)
-    cur_img_2 = Image.open(img_ffp_2)
-
-    width = cur_img_1.size[0] + cur_img_2.size[0]
-
-    new_im = Image.new("RGB", (width, cur_img_1.size[1]))
-    new_im.paste(cur_img_1, (0, 0))
-    new_im.paste(cur_img_2, (cur_img_1.size[0], 0))
-
-    new_im.save(output_ffp)
+    nn_gmm.combine_imgs(img_ffp_1, img_ffp_2, output_ffp)
 
 
 def main(dir_1: Path, dir_2: Path, output_dir: Path, n_procs: int = 8):
@@ -33,7 +26,7 @@ def main(dir_1: Path, dir_2: Path, output_dir: Path, n_procs: int = 8):
 
     with mp.Pool(processes=n_procs) as pool:
         pool.starmap(
-            process_img,
+            nn_gmm.combine_imgs,
             [
                 (dir_1 / cur_name, dir_2 / cur_name, output_dir / cur_name)
                 for cur_name in common_names

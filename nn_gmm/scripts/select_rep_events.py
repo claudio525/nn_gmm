@@ -24,14 +24,10 @@ def get_closest_event_ind(mag_array, mag_values):
 
 source_params_dir = Path("/home/cbs51/dev/work/data/nn_gmm/source_params")
 train_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/train",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/train",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/train",
+    "/home/cbs51/dev/work/data/nn_gmm/sample_files/train",
 ]
 val_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/val",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/val",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/val",
+    "/home/cbs51/dev/work/data/nn_gmm/sample_files/val",
 ]
 
 percentiles = [10, 25, 45, 57, 75, 92]
@@ -44,8 +40,6 @@ events_df = pd.concat(list(event_dfs_dict.values()))
 
 train_events = get_event_ids(train_dirs)
 val_events = get_event_ids(val_dirs)
-
-
 
 percentile_values = np.percentile(events_df.mag, percentiles)
 

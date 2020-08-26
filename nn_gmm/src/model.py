@@ -67,7 +67,7 @@ class GMM:
     def predict_dirs(
         self,
         data_dirs: List[Path],
-        batch_size: int = 500_000,
+        batch_size: int = 1_000_000,
         ims: List[str] = None,
         features: List[str] = []
     ):
@@ -103,7 +103,8 @@ class GMM:
         ).prefetch(tf.data.experimental.AUTOTUNE)
 
         sim_dfs, mean_dfs, std_dfs = [], [], []
-        for cur_data in ds.as_numpy_iterator():
+        for ix, cur_data in enumerate(ds.as_numpy_iterator()):
+            print(f"Processing batch - {ix + 1}")
             cur_df = pd.DataFrame.from_dict(cur_data)
             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
             cur_mean_df, cur_std_df = self.predict(cur_df.copy(), pre_process=True)

@@ -13,7 +13,7 @@ import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple, plot_single
 
 from .model import GMM
-from .utils import get_station_from_id, get_station_lookup, to_path
+from .utils import get_station_from_id, get_station_lookup, to_path, to_list
 from . import data
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
@@ -87,6 +87,13 @@ DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
         "xyz-cpt-min": "0",
         "xyz-cpt-max": "0.6",
     },
+}
+
+PLOT_TYPE_OPTIONS_MAPPING = {
+    "sim": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    "est_mean": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    "est_std": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
 }
 
 
@@ -861,7 +868,7 @@ class EventPlotGen(PlotGen):
         See gen_event_map_data for parameter details
         """
         # Create the data
-        plot_csv_ffp = self.gen_event_map_data(
+        plot_csv_ffp, cb_options = self.gen_event_map_data(
             event, im, data_type=data_type, suffix=suffix
         )
 
@@ -871,6 +878,58 @@ class EventPlotGen(PlotGen):
             DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=[str(plot_csv_ffp)],
         )
+
+        return cb_options
+
+    def _get_event_data(
+        self, event: str, im: str, data_type: str = "est_mean", cb_options: Dict = None,
+    ):
+        """Gets the data for the speicified event, IMs and data type
+        See gen_event_map_data for parameter details
+        """
+        sim_df, mean_est, std_est = self._get_event_estimates(event)
+        assert np.all(mean_est.index.values == sim_df.index.values)
+
+        n_std = 2.5
+        sim_df["station"] = get_station_from_id(sim_df.index.values.astype(str))
+        if "res" not in data_type:
+            if data_type == "sim" or data_type == "est_mean":
+                sim_im_df = sim_df[im].apply(np.exp).to_frame()
+                data_df = (
+                    mean_est.copy() if data_type == "est_mean" else sim_im_df.copy()
+                )
+
+                sim_im_df["station"] = sim_df.station
+                cb_df = sim_im_df.groupby("station").mean()
+            elif data_type.lower() == "est_std":
+                data_df = std_est.copy()
+                cb_df = sim_df.loc[:, [im, "station"]].groupby("station").std()
+                n_std = 3.0
+            else:
+                raise ValueError(f"Invalid data_type: {data_type}")
+
+            cb_options = (
+                compute_GMT_std_ticks(cb_df[im], n_std=n_std, non_negative=True)
+                if cb_options is None
+                else cb_options[im]
+            )
+        elif data_type.lower() == "res_mean":
+            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
+            cb_options = {}
+        else:
+            raise ValueError(f"Invalid data_type: {data_type}")
+
+        data_df = pd.merge(
+            data_df,
+            sim_df.loc[:, ["lat", "lon", "station"]],
+            left_index=True,
+            right_index=True,
+            how="inner",
+        )
+
+        assert data_df.shape[0] == mean_est.shape[0]
+
+        return data_df, cb_options
 
     def gen_event_map_data(
         self,
@@ -898,10 +957,12 @@ class EventPlotGen(PlotGen):
             "res_mean": Residual between simulation IMs and
                 estimated mean value from the NN GMM
         cb_options: Dict, optional
-            GMT colourbar options, if not given then
-            these will be calculated based on the current data
+            GMT colour-bar options, if not given then
+            these will be calculated based on the simulation data
+            as this is consistent across models
             Useful when wanting two plots with the
-            same colourbar scale
+            same colour-bar scale
+
         suffix: str, optional
             Filename suffix
 
@@ -910,56 +971,20 @@ class EventPlotGen(PlotGen):
         str
             Path to the data csv
         dict
-            The colourbar options used
+            The colour-bar options used
         """
+        data_type = data_type.lower()
         event_out_dir = self.output_dir / event
         if not event_out_dir.is_dir():
             event_out_dir.mkdir(parents=True)
 
-        sim_df, mean_est, std_est = self._get_event_estimates(event)
-        assert np.all(mean_est.index.values == sim_df.index.values)
-
-        non_negative = True
-        if data_type.lower() == "sim":
-            data_df = sim_df[im].apply(np.exp).to_frame()
-        elif data_type.lower() == "est_mean":
-            data_df = mean_est.copy()
-        elif data_type.lower() == "est_std":
-            data_df = std_est.copy()
-        elif data_type.lower() == "res_mean":
-            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
-            non_negative, cb_options = False, {im: {}}
-        else:
-            raise ValueError(f"Invalid data_type: {data_type}")
-
-        data_df = pd.merge(
-            data_df,
-            sim_df.loc[:, ["lat", "lon"]],
-            left_index=True,
-            right_index=True,
-            how="inner",
-        )
-
-        assert data_df.shape[0] == mean_est.shape[0]
-
-        data_df["station"] = get_station_from_id(data_df.index.values.astype(str))
+        data_df, cb_options = self._get_event_data(event, im, data_type, cb_options)
 
         # Aggregate across realisation at each station
         agg_df = data_df.groupby("station").mean()
-
         assert np.all(~agg_df[im].isna())
-        # # Temporary fix for log residual issue (e.g. ln(-0.0001/0.0001))
-        # nan_mask = agg_df[im].isna()
-        # if np.any(nan_mask):
-        #     agg_df[im].loc[nan_mask] = 10
-        #     print(f"{im} - The stations {agg_df.loc[nan_mask].index.values} had nan residual values")
 
         im_name = im.replace(".", "p")
-        cb_options = (
-            compute_GMT_std_ticks(agg_df[im], n_std=2, non_negative=non_negative)
-            if cb_options is None
-            else cb_options[im]
-        )
         gmt_options = get_gmt_options_dict(
             options={
                 **{
@@ -976,6 +1001,80 @@ class EventPlotGen(PlotGen):
 
         return plot_csv_ffp, cb_options
 
+    def plot_realisation_maps(
+        self,
+        events: Union[str, List[str]],
+        ims: Union[str, List[str]],
+        data_types: Union[str, List[str]] = "est_mean",
+        n_procs: int = 8,
+        n_rels: int = None,
+    ):
+        # Generate the required data files
+        for cur_data_type in to_list(data_types):
+            plot_csv_ffps = []
+            for cur_event in to_list(events):
+                for cur_im in to_list(ims):
+                        cur_plot_csv_ffps, cb_options = self.gen_rel_map_data(
+                            cur_event, cur_im, data_type=cur_data_type, n_rels=n_rels
+                        )
+                        plot_csv_ffps.extend(cur_plot_csv_ffps)
+
+            plot_multiple(
+                self.plot_items_ffp,
+                PLOT_TYPE_OPTIONS_MAPPING[cur_data_type],
+                in_ffps=plot_csv_ffps,
+                n_procs=n_procs,
+            )
+
+        return
+
+    def gen_rel_map_data(
+        self,
+        event: str,
+        im: str,
+        data_type: str = "est_mean",
+        cb_options: Dict = None,
+        n_rels: int = None,
+    ):
+        """Generates map data for all realisation for the specified event (and IM)"""
+        data_type = data_type.lower()
+        event_out_dir = self.output_dir / event / "realisations"
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        data_df, cb_options = self._get_event_data(event, im, data_type, cb_options)
+
+        data_df["rel"] = np.stack(np.char.split(data_df.index.values.astype(str), "_"))[
+            :, 1
+        ]
+
+        # Only plot specified number of realisation
+        rels = np.unique(data_df.rel)
+        if n_rels is not None:
+            rels = rels[: min(n_rels, len(rels))]
+
+        plot_csv_ffps = []
+        for cur_rel in rels:
+            im_name = im.replace(".", "p")
+            gmt_options = get_gmt_options_dict(
+                options={
+                    **{
+                        "title": f"{im_name}-{event}-{cur_rel}-{data_type}",
+                        "xyz-cpt-labels": f"{im}",
+                    },
+                    **cb_options,
+                }
+            )
+            cur_plot_csv_ffp = _gmt_save(
+                data_df.loc[data_df.rel == cur_rel],
+                im,
+                str(event_out_dir / f"{im_name}_{data_type}_{cur_rel}"),
+                gmt_options=gmt_options,
+            )
+            plot_csv_ffps.append(cur_plot_csv_ffp)
+
+        return plot_csv_ffps, cb_options
+
 
 def plot_n_records_map(
     data_dirs: List[Union[Path, str]],
@@ -983,6 +1082,7 @@ def plot_n_records_map(
     output_ffp: str,
     title: str = "Number-of-records",
 ):
+    """Generates a spatial map that shows number of records at each station"""
     data_dirs, plot_items_ffp = to_path(data_dirs), to_path(plot_items_ffp)
 
     ds = data.load_dataset(
@@ -1018,10 +1118,7 @@ def plot_n_records_map(
 
     cb_options = compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
     gmt_options = get_gmt_options_dict(
-        options={
-            **{"title": title, "xyz-cpt-labels": "n_records"},
-            **cb_options,
-        }
+        options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
     )
     csv_ffp = _gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
 
@@ -1177,3 +1274,5 @@ def set_plot_lims(
 
     plt.xlim((x_min, x_max))
     plt.ylim((y_min, y_max))
+
+

@@ -8,14 +8,10 @@ plot_items_ffp = (
 )
 
 train_data_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/train",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/train",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/train",
+    "/home/cbs51/dev/work/data/nn_gmm/sample_files/train",
 ]
 val_data_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/val",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/val",
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/val",
+    "/home/cbs51/dev/work/data/nn_gmm/sample_files/val",
 ]
 data_dirs = train_data_dirs + val_data_dirs
 output_dir = Path("/home/claudy/dev/work/data/nn_gmm/results/keep/n_records")

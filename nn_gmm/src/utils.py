@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any, List, Union
+from PIL import Image
 
 import numpy as np
 import pandas as pd
@@ -43,6 +44,29 @@ def to_path(input: Union[str, List[str], List[Path]] = None):
     if isinstance(input, str):
         return Path(input)
     elif isinstance(input, List):
-        return [Path(cur_input) if isinstance(cur_input, str) else cur_input for cur_input in input]
+        return [
+            Path(cur_input) if isinstance(cur_input, str) else cur_input
+            for cur_input in input
+        ]
 
     return input
+
+def to_list(input: Union[Any, List[Any]]):
+    return input if isinstance(input, list) else [input]
+
+
+def load_dfs(df_ffps: List[Union[str, Path]], **kwargs):
+    return pd.concat([pd.read_csv(df_fp, **kwargs) for df_fp in df_ffps])
+
+
+def combine_imgs(img_ffp_1: Path, img_ffp_2: Path, output_ffp: Path):
+    cur_img_1 = Image.open(img_ffp_1)
+    cur_img_2 = Image.open(img_ffp_2)
+
+    width = cur_img_1.size[0] + cur_img_2.size[0]
+
+    new_im = Image.new("RGB", (width, cur_img_1.size[1]))
+    new_im.paste(cur_img_1, (0, 0))
+    new_im.paste(cur_img_2, (cur_img_1.size[0], 0))
+
+    new_im.save(output_ffp)

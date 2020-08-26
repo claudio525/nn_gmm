@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import argparse
@@ -9,43 +10,57 @@ matplotlib.use("Agg")
 
 import yaml
 import numpy as np
+import tensorflow as tf
 
 import nn_gmm
+
+# Grow the GPU memory usage as needed
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices("GPU")
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
+
 
 PLOTTING_CONFIG = {
     "ims": None,
     "model_dir": None,
     # Input/Output
-    "train_data_dirs": [
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/train",
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/train",
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/train",
-    ],
-    "val_data_dirs": [
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/cybershake_v20p4/val",
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p5p8/val",
-        "/home/cbs51/dev/work/data/nn_gmm/sample_files/validation_v20p6p0/val",
-    ],
+    "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/sample_files/train",],
+    "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/sample_files/val",],
     "output_dir": None,
-    # Generic IM vs feature plots
+    # Plot type flags
     "gen_generic_IM_plots": False,
+    "gen_event_plots": True,
+    "gen_rel_plots": True,
+    "gen_agg_plots_train": False,
+    "gen_agg_plots_val": True,
+    # Generic IM vs feature plots
     "im_plots_feature_dict": {
         "rrup": np.arange(10, 210, 10),
         "mag": np.arange(4, 8.1, 0.1),
     },
     # Event based plots
-    "gen_event_plots": True,
-    "event_plot_types": ["sim", "est_mean", "est_std"],
+    "event_plot_types": ["sim", "est_mean", "est_std", "res_mean"],
     # "event_plot_types": ["res_mean"],
     "train_rep_events": None,
     "val_rep_events": None,
+    # Realisation plots
+    "rel_plot_types": ["sim", "est_mean", "est_std", "res_mean"],
+    "train_rel_rep_events": ["AlpineF2K"],
+    "val_rel_rep_events": ["HopeConway"],
+    "n_rels": 20,
     # Aggregate based plots
-    "gen_agg_plots_train": False,
-    "gen_agg_plots_val": False,
     "agg_plot_types": ["res_mean"],
     # Other
-    "plot_items_ffp": "/home/claudy/dev/work/code/visualization/visualization/gmt/plot_items.py",
-    "n_procs": 8,
+    "plot_items_ffp": "/home/cbs51/dev/work/code/visualization/visualization/gmt/plot_items.py",
+    "n_procs": 16,
 }
 
 
@@ -101,6 +116,13 @@ def create_plots(config):
             config,
         )
 
+    if config["gen_rel_plots"]:
+        print("Generating realisation basd plots")
+        print("Training events")
+        gen_rel_plots(config["train_rel_rep_events"], ims, model, train_data_dirs, output_dir / "event_plots" / "train", config)
+        print("Validation events")
+        gen_rel_plots(config["val_rel_rep_events"], ims, model, val_data_dirs, output_dir / "event_plots" / "val", config)
+
     # Aggregate plots
     if config["gen_agg_plots_train"]:
         print(f"Generating aggregate plots - training data")
@@ -112,11 +134,23 @@ def create_plots(config):
 
     exit()
 
+
 def gen_agg_plots(ims, model, data_dirs, output_dir, config):
     plot_items_ffp, n_procs = config["plot_items_ffp"], config["n_procs"]
-    train_agg_plot_gen = nn_gmm.AggPlotGen(plot_items_ffp, model, ims, data_dirs, output_dir)
+    train_agg_plot_gen = nn_gmm.AggPlotGen(
+        plot_items_ffp, model, ims, data_dirs, output_dir
+    )
     for cur_plot_type in config["agg_plot_types"]:
         train_agg_plot_gen.plot_spatial_agg_maps(cur_plot_type, n_procs=n_procs)
+
+
+def gen_rel_plots(events, ims, model, data_dirs, output_dir, config):
+    plot_gen = nn_gmm.EventPlotGen(
+        config["plot_items_ffp"], model, data_dirs, output_dir
+    )
+    plot_gen.plot_realisation_maps(
+        events, ims, config["rel_plot_types"], n_procs=config["n_procs"], n_rels=config["n_rels"]
+    )
 
 
 def gen_event_plots(events, ims, model, data_dirs, output_dir, config):
@@ -138,13 +172,13 @@ def gen_event_plots(events, ims, model, data_dirs, output_dir, config):
             n_procs=n_procs,
         )
 
-        event_plot_types.remove("sim")
-        event_plot_types.remove("est_mean")
-
     for cur_plot_type in event_plot_types:
-        plot_gen.plot_spatial_events_maps(
-            events, ims, data_type=cur_plot_type, n_procs=n_procs
-        )
+        if cur_plot_type not in ["sim", "est_mean"]:
+            plot_gen.plot_spatial_events_maps(
+                events, ims, data_type=cur_plot_type, n_procs=n_procs
+            )
+
+    plot_gen.gen_IM_feature_plots(events, ims, "rrup")
 
 
 if __name__ == "__main__":
@@ -171,14 +205,17 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         base_dir = Path(args.train_result_dir)
-        with args.config_ffp.open() as f:
+        config_ffp = nn_gmm.to_path(args.config_ffp)
+        with config_ffp.open() as f:
             const_config = yaml.safe_load(f)
 
         config = {
             **PLOTTING_CONFIG,
             **{
                 "model_dir": base_dir / "best_model",
-                "output_dir": base_dir / "visualisation" if args.output_dir is None else args.output_dir,
+                "output_dir": base_dir / "visualisation"
+                if args.output_dir is None
+                else args.output_dir,
                 "ims": const_config["ims_plotting"],
                 "train_rep_events": const_config["train_rep_events"],
                 "val_rep_events": const_config["val_rep_events"],
