@@ -1,3 +1,9 @@
+"""Script for generating a plot that shows
+ the specified fault and the relevant vectors for the
+ calculation for theta and s for a specific site.
+
+ For validation
+ """
 import argparse
 import multiprocessing as mp
 from pathlib import Path
@@ -31,19 +37,11 @@ def gen_plot(
     srf_points = srf.read_srf_points(str(srf_ffp))  # Lon, lat, depth
     hypo_lon, hypo_lat = srf_info["hlon"], srf_info["hlat"]
 
-    hypo_seg_ix = nn_gmm.get_hypo_seg_ix(seg_bounds, hypo_lon, hypo_lat)
-
-    theta, s, theta_values, s_values, debug_details = nn_gmm.compute_site_theta_s(
-        site_name,
-        site_lon,
-        site_lat,
-        seg_bounds,
-        srf_info["strike"],
-        srf_info["rake"],
-        hypo_seg_ix,
-        (hypo_lon, hypo_lat),
-        verbose=True,
-        debug=True,
+    directivity_processor = nn_gmm.FaultDirectivityProcessor(
+        seg_bounds, srf_info["strike"], srf_info["rake"], (hypo_lon, hypo_lat)
+    )
+    theta, s, seg_results = directivity_processor.compute_site_theta_s(
+        site_lon, site_lat, debug=True, site_name=site_name
     )
 
     fig = plt.figure(figsize=(21, 13.5), dpi=144)
@@ -76,38 +74,30 @@ def gen_plot(
         )
 
     dp_fn = lambda values: [f"{val:.1f}" for val in values]
-    for (
-        ix,
-        (
-            (prev_lon, prev_lat),
-            (cur_lon, cur_lat),
-            cur_strike,
-            cur_site_bearing,
-            cur_rake_bearing,
-        ),
-    ) in enumerate(debug_details):
+    for (ix, cur_seg_result) in enumerate(seg_results):
         _plot_vectors(
-            prev_lon,
-            prev_lat,
-            cur_strike,
-            cur_site_bearing,
-            cur_rake_bearing,
+            cur_seg_result.start_loc.lon,
+            cur_seg_result.start_loc.lat,
+            cur_seg_result.segment.strike,
+            cur_seg_result.site_bearing,
+            cur_seg_result.rake_bearing,
             vec_dist,
             labels=ix == 0,
         )
 
         plt.plot(
-            [prev_lon, cur_lon],
-            [prev_lat, cur_lat],
+            [cur_seg_result.start_loc.lon, cur_seg_result.end_loc.lon,],
+            [cur_seg_result.start_loc.lat, cur_seg_result.end_loc.lat,],
             c="darkred",
             marker="x",
             linewidth=1.0,
-            label="s" if ix==0 else None,
+            label="s" if ix == 0 else None,
         )
 
     plt.title(
         f"{srf_ffp.name.split('.')[0]} - {site_name} - Theta: {theta:.1f}, "
-        f"s: {s:.1f}\nTheta values: {dp_fn(theta_values)}\ns values: {dp_fn(s_values)}"
+        f"s: {s:.1f}\nTheta values: {dp_fn([cur_result.theta for cur_result in seg_results])}\ns "
+        f"values: {dp_fn([cur_result.s for cur_result in seg_results])}"
     )
 
     plt.legend()
