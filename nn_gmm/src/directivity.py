@@ -23,12 +23,20 @@ def _compute_theta(rake_bearing: float, site_bearing: float):
 
 def get_hypo_seg_ix(seg_bounds, hypo_lon: float, hypo_lat: float):
     hypo_point = Point(hypo_lon, hypo_lat)
-    return np.flatnonzero(
+    contains_hypo = np.flatnonzero(
         [
             True if Polygon(cur_bounds).contains(hypo_point) else False
             for cur_bounds in seg_bounds
         ]
-    )[0]
+    )
+
+    # If none of the segments contains the hypocentre
+    # choose the closest segment
+    if not np.any(contains_hypo):
+        dist = [Polygon(cur_bounds).distance(hypo_point) for cur_bounds in seg_bounds]
+        return np.argmin(dist)
+    else:
+        return contains_hypo[0]
 
 
 def _process_site(
@@ -167,7 +175,7 @@ class FaultDirectivityProcessor:
         site_loc: Location,
         ix_dir: int = None,
     ):
-        assert segment.poly.distance(start_loc.point) < 1e-10
+        assert segment.poly.distance(start_loc.point) < 1e-05
 
         rake_bearing = (
             segment.strike - self.rake
@@ -256,7 +264,7 @@ class FaultDirectivityProcessor:
                     prev_end_loc.point
                 )
                 next_seg_poly_2_dist = self.segments[prev_ix + 1].poly.distance(
-                    prev_end_loc
+                    prev_end_loc.point
                 )
 
                 ix_direction = -1 if next_seg_poly_1_dist < next_seg_poly_2_dist else +1

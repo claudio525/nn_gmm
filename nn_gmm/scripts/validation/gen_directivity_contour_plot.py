@@ -85,7 +85,7 @@ def main(srf_ffp: Path, srf_info_ffp: Path, output_ffp: Path, vector_dist: float
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(21, 13.5), dpi=144)
 
-    levels = 10
+    levels = 20
     ct = ax1.contourf(x, y, theta_values, cmap="Reds_r", levels=levels)
     ax1.set_title("Theta")
     fig.colorbar(ct, ax=ax1, pad=0.01)
