@@ -122,6 +122,9 @@ class Location:
         self.lon, self.lat = lon, lat
         self.point = Point(lon, lat)
 
+    def __str__(self):
+        return self.point.wkt
+
 
 class Segment:
     def __init__(self, bounds: np.ndarray, strike: float):
@@ -327,7 +330,9 @@ class FaultDirectivityProcessor:
 
             prev_seg_result, cur_seg_ix = seg_result, seg_result.next_seg_ix
 
-        s_values = [cur_result.s for cur_result in seg_results]
+        # Adding a tiny amount in case an s-value is zero, as it can't be zero
+        # when taking the weighted average
+        s_values = [cur_result.s + 1e-10 for cur_result in seg_results]
         theta_values = [cur_result.theta for cur_result in seg_results]
 
         s, theta = np.sum(s_values), np.average(theta_values, weights=s_values)

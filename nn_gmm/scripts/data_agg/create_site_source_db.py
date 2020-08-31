@@ -21,6 +21,10 @@ def _process_realisation(
 
     fault = srf_ffp.name.split("_")[0]
     realisation = srf_ffp.name.split(".")[0]
+
+    if fault not in fault_station_lookup.keys():
+        print(f"Fault {fault} is not in the IMDB, skipping")
+        return None
     stations = fault_station_lookup[fault]
 
     print(f"Processing realisation {realisation}")
@@ -41,9 +45,12 @@ def _process_realisation(
     result_df["theta"] = theta_values
     result_df["s"] = s_values
 
-    result_df.set_index(np.char.add(realisation + "_", result_df.index.values.astype(str)), inplace=True)
+    result_df.set_index(
+        np.char.add(realisation + "_", result_df.index.values.astype(str)), inplace=True
+    )
 
     return result_df
+
 
 def _get_stations(imdb_ffp: Path, fault: str):
     with pd.HDFStore(imdb_ffp, "r") as imdb:
@@ -56,7 +63,13 @@ def _get_stations(imdb_ffp: Path, fault: str):
     return fault, stations
 
 
-def main(sources_dir: Path, imdb_ffp: Path, sites_ffp: Path, output_ffp: Path, n_procs: int = 8):
+def main(
+    sources_dir: Path,
+    imdb_ffp: Path,
+    sites_ffp: Path,
+    output_ffp: Path,
+    n_procs: int = 8,
+):
     # Load site locations
     sites_df = pd.read_csv(sites_ffp, index_col="station")
 
@@ -82,16 +95,26 @@ def main(sources_dir: Path, imdb_ffp: Path, sites_ffp: Path, output_ffp: Path, n
         if n_procs == 1:
             results = []
             for cur_srf_ffp in fault_srf_ffps:
-                 results.append(_process_realisation(cur_srf_ffp, fault_station_lookup, sites_df))
+                results.append(
+                    _process_realisation(cur_srf_ffp, fault_station_lookup, sites_df)
+                )
         else:
             with mp.Pool(processes=n_procs) as pool:
-                results = pool.starmap(_process_realisation, [(cur_srf_ffp, fault_station_lookup, sites_df) for cur_srf_ffp in fault_srf_ffps])
+                results = pool.starmap(
+                    _process_realisation,
+                    [
+                        (cur_srf_ffp, fault_station_lookup, sites_df)
+                        for cur_srf_ffp in fault_srf_ffps
+                    ],
+                )
 
-        fault_results[cur_fault_ffp.name] = pd.concat(results)
+        results = [result for result in results if result is not None]
+        if len(results) > 0:
+            fault_results[cur_fault_ffp.name] = pd.concat(results)
 
-    with pd.HDFStore(output_ffp, "w") as store:
-        for cur_fault, cur_df in fault_results.items():
-            store[cur_fault] = cur_df
+        with pd.HDFStore(output_ffp, "w") as store:
+            for cur_fault, cur_df in fault_results.items():
+                store[cur_fault] = cur_df
 
 
 if __name__ == "__main__":
@@ -100,8 +123,16 @@ if __name__ == "__main__":
     parser.add_argument("imdb_ffp", type=str, help="Path to the corresponding IMDB")
     parser.add_argument("sites_ffp", type=str, help="Path to the site csv")
     parser.add_argument("output_ffp", type=str, help="Path of the output db")
-    parser.add_argument("--n_procs", type=int, help="Number of processes to use", default=8)
+    parser.add_argument(
+        "--n_procs", type=int, help="Number of processes to use", default=8
+    )
 
     args = parser.parse_args()
 
-    main(Path(args.sources_dir), Path(args.imdb_ffp), Path(args.sites_ffp), Path(args.output_ffp), n_procs=args.n_procs)
+    main(
+        Path(args.sources_dir),
+        Path(args.imdb_ffp),
+        Path(args.sites_ffp),
+        Path(args.output_ffp),
+        n_procs=args.n_procs,
+    )
