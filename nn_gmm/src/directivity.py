@@ -178,7 +178,7 @@ class FaultDirectivityProcessor:
         site_loc: Location,
         ix_dir: int = None,
     ):
-        assert segment.poly.distance(start_loc.point) < 1e-03
+        assert segment.poly.distance(start_loc.point) < 1e-02
 
         rake_bearing = (
             segment.strike - self.rake

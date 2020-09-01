@@ -9,15 +9,17 @@ import pandas as pd
 from .utils import pandas_isin
 
 
-def load_site_source_df(site_df: pd.DataFrame, site_source_ffps: List[Path], n_procs: int = 4):
+def load_distance_df(
+    site_df: pd.DataFrame, distance_db_ffps: List[Path], n_procs: int = 4
+):
     """Loads the site-source parameters into a dictionary
 
     Parameters
     ----------
     site_df: pd.DataFrame
         The site params
-    site_source_ffps: list of Path
-        File path to the site-source DB
+    distance_db_ffps: list of Path
+        File path to the distance site-source DB
     n_procs: int
 
     Returns
@@ -30,22 +32,22 @@ def load_site_source_df(site_df: pd.DataFrame, site_source_ffps: List[Path], n_p
     if n_procs == 1:
         results = []
         for station in site_df.index.values:
-            results.append(__load_site_df(station, site_source_ffps))
+            results.append(__load_site_df(station, distance_db_ffps))
     else:
         with mp.Pool(processes=n_procs) as p:
             results = p.starmap(
                 __load_site_df,
-                [(station, site_source_ffps) for station in site_df.index.values],
+                [(station, distance_db_ffps) for station in site_df.index.values],
             )
 
     return pd.concat(results)
 
 
-def __load_site_df(cur_site: str, site_source_ffps: List[Path]):
+def __load_site_df(cur_site: str, distance_db_ffps: List[Path]):
     """MP helper function"""
     dfs = []
-    for cur_site_source_ffp in site_source_ffps:
-        with pd.HDFStore(cur_site_source_ffp, "r") as db:
+    for cur_distance_db_ffp in distance_db_ffps:
+        with pd.HDFStore(cur_distance_db_ffp, "r") as db:
             try:
                 cur_df = db[f"/distances/station_{cur_site}"]
             except KeyError:
@@ -59,6 +61,16 @@ def __load_site_df(cur_site: str, site_source_ffps: List[Path]):
             dfs.append(cur_df)
 
     return None if len(dfs) == 0 else pd.concat(dfs)
+
+
+def load_site_source_df(site_source_db_ffps: List[Path]):
+    dfs = []
+    for cur_site_source_db_ffp in site_source_db_ffps:
+        with pd.HDFStore(cur_site_source_db_ffp, "r") as db:
+            for cur_fault in db.keys():
+                dfs.append(db[cur_fault])
+
+    return pd.concat(dfs)
 
 
 def load_fault_im_df(cur_fault: str, im_db_ffps: List[Path]):
@@ -90,7 +102,11 @@ def create_sample_comb(im_df: pd.DataFrame):
 
     sample_combs = pd.DataFrame(index=im_df.index)
     sample_combs["source"] = split_ids[:, 0]
-    sample_combs["realisation"] = np.where(split_ids[:, 0] != split_ids[:, 1], np.char.add(split_ids[:, 0], np.char.add("_", split_ids[:, 1])), split_ids[:, 0])
+    sample_combs["realisation"] = np.where(
+        split_ids[:, 0] != split_ids[:, 1],
+        np.char.add(split_ids[:, 0], np.char.add("_", split_ids[:, 1])),
+        split_ids[:, 0],
+    )
     sample_combs["site"] = split_ids[:, 2]
 
     return sample_combs

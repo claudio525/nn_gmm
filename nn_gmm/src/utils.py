@@ -5,6 +5,7 @@ from PIL import Image
 
 import numpy as np
 import pandas as pd
+from scipy import interpolate
 
 
 def pandas_isin(array_1: np.ndarray, array_2: np.ndarray) -> np.ndarray:
@@ -70,3 +71,46 @@ def combine_imgs(img_ffp_1: Path, img_ffp_2: Path, output_ffp: Path):
     new_im.paste(cur_img_2, (cur_img_1.size[0], 0))
 
     new_im.save(output_ffp)
+
+
+def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
+    """Selects the pSA periods of interest if available in the specified
+    IM dataframe, otherwise interpolates to get the desired range of
+    pSA periods"""
+    if np.all(np.isin(target_ims, im_df.columns)):
+        return im_df
+
+    ims = im_df.columns.values.astype(str)
+    pSA_mask = np.char.startswith(ims, "pSA_")
+    pSA_periods = np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1].astype(float)
+
+    target_mask = np.char.startswith(target_ims, "pSA_")
+    target_periods = np.sort(
+        np.stack(np.char.split(target_ims[target_mask], "_"))[:, 1].astype(float)
+    )
+
+    # Interpolate
+    assert np.all(np.sort(pSA_periods) == pSA_periods)
+    f = interpolate.interp1d(
+        np.log(pSA_periods),
+        im_df.loc[:, ims[pSA_mask]].values,
+        kind="linear",
+        bounds_error=True,
+    )
+    target_values = f(np.log(target_periods))
+
+    pSA_df = pd.DataFrame(
+        columns=np.char.add("pSA_", target_periods.astype(str)),
+        data=target_values,
+        index=im_df.index,
+    )
+    result_df = pd.merge(
+        im_df.loc[:, ims[~pSA_mask]],
+        pSA_df,
+        left_index=True,
+        right_index=True,
+        how="inner",
+    )
+
+    assert result_df.shape[0] == im_df.shape[0]
+    return result_df

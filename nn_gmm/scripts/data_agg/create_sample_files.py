@@ -1,4 +1,3 @@
-import glob
 import pickle
 import argparse
 import multiprocessing as mp
@@ -8,7 +7,6 @@ from typing import Dict, List
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from scipy import interpolate
 
 import nn_gmm
 
@@ -115,49 +113,6 @@ def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame, n_procs: int = 8):
     return ser_examples
 
 
-def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims):
-    """Selects the pSA periods of interest if available in the specified
-    IM dataframe, otherwise interpolates to get the desired range of
-    pSA periods"""
-    if np.all(np.isin(target_ims, im_df.columns)):
-        return im_df
-
-    ims = im_df.columns.values.astype(str)
-    pSA_mask = np.char.startswith(ims, "pSA_")
-    pSA_periods = np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1].astype(float)
-
-    target_mask = np.char.startswith(target_ims, "pSA_")
-    target_periods = np.sort(
-        np.stack(np.char.split(IMs[target_mask], "_"))[:, 1].astype(float)
-    )
-
-    # Interpolate
-    assert np.all(np.sort(pSA_periods) == pSA_periods)
-    f = interpolate.interp1d(
-        np.log(pSA_periods),
-        im_df.loc[:, ims[pSA_mask]].values,
-        kind="linear",
-        bounds_error=True,
-    )
-    target_values = f(np.log(target_periods))
-
-    pSA_df = pd.DataFrame(
-        columns=np.char.add("pSA_", target_periods.astype(str)),
-        data=target_values,
-        index=im_df.index,
-    )
-    result_df = pd.merge(
-        im_df.loc[:, ims[~pSA_mask]],
-        pSA_df,
-        left_index=True,
-        right_index=True,
-        how="inner",
-    )
-
-    assert result_df.shape[0] == im_df.shape[0]
-    return result_df
-
-
 def gen_tf_records(
     sources: np.ndarray,
     rel_df: pd.DataFrame,
@@ -166,7 +121,7 @@ def gen_tf_records(
     im_db_ffps: List[Path],
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
-    n_procs: int = 8
+    n_procs: int = 8,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
@@ -216,7 +171,7 @@ def gen_tf_records(
             cur_input_df, "tect_type", tect_type_one_hot_dict
         )
 
-        cur_im_df = interpolate_pSA_periods(cur_im_df, IMs)
+        cur_im_df = nn_gmm.interpolate_pSA_periods(cur_im_df, IMs)
 
         assert np.all(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
@@ -249,6 +204,7 @@ def gen_tf_records(
 
 def main(
     site_params_dir: Path,
+    distance_dir: Path,
     site_source_dir: Path,
     source_params_dir: Path,
     im_db_dir: Path,
@@ -266,11 +222,16 @@ def main(
     assert np.unique(site_df.index).shape[0] == site_df.shape[0]
 
     # Load site-source params
-    print("Loading site-source params")
-    site_source_ffps = list(site_source_dir.glob("*.db"))
-    site_source_df = nn_gmm.load_site_source_df(
-        site_df, site_source_ffps, n_procs=n_procs
+    print("Loading distance params")
+    distance_db_ffps = list(distance_dir.glob("*.db"))
+    distance_df = nn_gmm.load_distance_df(
+        site_df, distance_db_ffps, n_procs=n_procs
     )
+
+    print("Loading site-source params")
+    site_source_db_ffps = list(distance_dir.glob("*.db"))
+    site_source_df = nn_gmm
+
 
     # Load source params
     print("Loading realisation params")
@@ -295,11 +256,11 @@ def main(
             train_sources,
             rel_df,
             site_df,
-            site_source_df,
+            distance_df,
             im_db_ffps,
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
-            n_procs=n_procs
+            n_procs=n_procs,
         )
 
         # Validation dataset
@@ -307,22 +268,22 @@ def main(
             val_sources,
             rel_df,
             site_df,
-            site_source_df,
+            distance_df,
             im_db_ffps,
             output_dir / "val",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
-            n_procs=n_procs
+            n_procs=n_procs,
         )
     else:
         gen_tf_records(
             rel_df.index.values.astype(str),
             rel_df,
             site_df,
-            site_source_df,
+            distance_df,
             im_db_ffps,
             output_dir,
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
-            n_procs=n_procs
+            n_procs=n_procs,
         )
 
 
@@ -333,8 +294,9 @@ if __name__ == "__main__":
         "site_params_dir", type=str, help="The path to the site params dir"
     )
     parser.add_argument(
-        "site_source_dir", type=str, help="The path to the site-source dir"
+        "distance_dir", type=str, help="The path to the distance site-source dir"
     )
+    parser.add_argument("site_source_dir", type=str, help="The path to the site-source dir")
     parser.add_argument(
         "source_params_dir", type=str, help="The path to the source params dir",
     )
@@ -353,6 +315,7 @@ if __name__ == "__main__":
 
     main(
         nn_gmm.to_path(args.site_params_dir),
+        nn_gmm.to_path(args.distance_dir),
         nn_gmm.to_path(args.site_source_dir),
         nn_gmm.to_path(args.source_params_dir),
         nn_gmm.to_path(args.im_db_dir),

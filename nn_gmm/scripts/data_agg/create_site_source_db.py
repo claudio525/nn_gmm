@@ -84,10 +84,6 @@ def main(
         )
     fault_station_lookup = {fault: stations for fault, stations in results}
 
-    # Get all srf file paths
-    print("Getting the srf file paths")
-    # srf_ffps = sources_dir.glob("*/Srf/*.srf")
-
     print("Processing faults")
     fault_results = {}
     for cur_fault_ffp in sources_dir.iterdir():
