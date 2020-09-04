@@ -1,6 +1,7 @@
 """Script for creating a site-source db that contains
 site-source features such as rupture directivity
 """
+import time
 import multiprocessing as mp
 import argparse
 from pathlib import Path
@@ -11,16 +12,13 @@ import pandas as pd
 import numpy as np
 
 import nn_gmm
-from qcore import srf
 
 
 def _process_realisation(
-    srf_ffp: Path, fault_station_lookup: Dict, sites_df: pd.DataFrame
+    srf_info_ffp: Path, fault_station_lookup: Dict, sites_df: pd.DataFrame
 ):
-    srf_info_ffp = f"{str(srf_ffp).split('.')[0]}.info"
-
-    fault = srf_ffp.name.split("_")[0]
-    realisation = srf_ffp.name.split(".")[0]
+    fault = srf_info_ffp.name.split("_")[0] if "_" in srf_info_ffp.name else srf_info_ffp.name.split(".")[0]
+    realisation = srf_info_ffp.name.split(".")[0]
 
     if fault not in fault_station_lookup.keys():
         print(f"Fault {fault} is not in the IMDB, skipping")
@@ -30,10 +28,9 @@ def _process_realisation(
     print(f"Processing realisation {realisation}")
     with h5py.File(srf_info_ffp, "r") as f:
         srf_info = dict(f.attrs)
-    seg_bounds = srf.get_bounds(str(srf_ffp))
 
     theta_values, s_values = nn_gmm.compute_theta_s(
-        seg_bounds,
+        srf_info["corners"],
         srf_info["strike"],
         srf_info["rake"],
         (srf_info["hlon"], srf_info["hlat"]),
@@ -85,37 +82,36 @@ def main(
     fault_station_lookup = {fault: stations for fault, stations in results}
 
     print("Processing faults")
-    fault_results = {}
-    for cur_fault_ffp in sources_dir.iterdir():
-        fault_srf_ffps = cur_fault_ffp.glob("Srf/*.srf")
-        if n_procs == 1:
-            results = []
-            for cur_srf_ffp in fault_srf_ffps:
-                results.append(
-                    _process_realisation(cur_srf_ffp, fault_station_lookup, sites_df)
-                )
-        else:
-            with mp.Pool(processes=n_procs) as pool:
-                results = pool.starmap(
-                    _process_realisation,
-                    [
-                        (cur_srf_ffp, fault_station_lookup, sites_df)
-                        for cur_srf_ffp in fault_srf_ffps
-                    ],
-                )
+    fault_dirs = list(sources_dir.iterdir())
+    with pd.HDFStore(output_ffp, "w") as store:
+        for ix, cur_fault_ffp in enumerate(fault_dirs):
+            print(f"Processing {cur_fault_ffp.name}, {ix+1}/{len(fault_dirs)}")
+            fault_srf_info_ffps = cur_fault_ffp.glob("Srf/*.info")
+            if n_procs == 1:
+                results = []
+                for cur_srf_ffp in fault_srf_info_ffps:
+                    results.append(
+                        _process_realisation(cur_srf_ffp, fault_station_lookup, sites_df)
+                    )
+            else:
+                with mp.Pool(processes=n_procs) as pool:
+                    results = pool.starmap(
+                        _process_realisation,
+                        [
+                            (cur_srf_ffp, fault_station_lookup, sites_df)
+                            for cur_srf_ffp in fault_srf_info_ffps
+                        ],
+                    )
 
-        results = [result for result in results if result is not None]
-        if len(results) > 0:
-            fault_results[cur_fault_ffp.name] = pd.concat(results)
-
-        with pd.HDFStore(output_ffp, "w") as store:
-            for cur_fault, cur_df in fault_results.items():
-                store[cur_fault] = cur_df
+            # Write the results for the current fault
+            results = [result for result in results if result is not None]
+            if len(results) > 0:
+                store[cur_fault_ffp.name] = pd.concat(results)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("sources_dir", type=str, help="Path to th sources directory")
+    parser.add_argument("sources_dir", type=str, help="Path to the sources directory")
     parser.add_argument("imdb_ffp", type=str, help="Path to the corresponding IMDB")
     parser.add_argument("sites_ffp", type=str, help="Path to the site csv")
     parser.add_argument("output_ffp", type=str, help="Path of the output db")
