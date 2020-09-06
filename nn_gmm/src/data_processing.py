@@ -27,7 +27,7 @@ def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
 def get_min_max_scaling_fn(
     data_min: float,
     data_max: float,
-    target_min: float = 0.0,
+    target_min: float = -1.0,
     target_max: float = 1.0,
     tf_fn: bool = True,
 ):
@@ -61,7 +61,7 @@ def get_min_max_scaling_fn(
 def get_inv_min_max_scaling_fn(
     data_min: float,
     data_max: float,
-    target_min: float = 0.0,
+    target_min: float = -1.0,
     target_max: float = 1.0,
     tf_fn: bool = True,
 ):
@@ -77,12 +77,16 @@ def get_inv_min_max_scaling_fn(
 
 def preprocess_df(df: pd.DataFrame, config: Dict):
     for name, func in config.items():
+        if name not in df.columns:
+            print(f"Ignoring feature {name} as this is not in the dataframe!")
+            continue
+
         df[name] = func(df[name].values) if func is not None else df[name]
 
     return df
 
 
-def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
+def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict = None):
     """Performs pre-processing on the specified tf.data.Dataset
     using the functions in the feature & IM config
 
@@ -95,11 +99,14 @@ def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
         for name, func in feature_config.items():
             features.append(func(item[name]) if func is not None else item[name])
 
-        target_values = []
-        for name, func in im_config.items():
-            target_values.append(func(item[name]) if func is not None else item[name])
+        if im_config is not None:
+            target_values = []
+            for name, func in im_config.items():
+                target_values.append(func(item[name]) if func is not None else item[name])
 
-        return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
+            return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
+
+        return tf.stack(features, axis=1)
 
     return ds.map(
         tf.function(_apply_pre_config), num_parallel_calls=tf.data.experimental.AUTOTUNE
@@ -108,10 +115,7 @@ def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict):
 
 def convert_to_transform_fn(config: Dict, tf_fn: bool = True):
     """Converts the items in the input config to callable
-    tensorflow functions for pre-processing
-
-    Note: This function is only for the training workflow (i.e. when
-    using tf.data.Dataset, NOT for predictions
+    (tensorflow) functions for pre-processing
     """
     for key, item in config.items():
         if item is None:

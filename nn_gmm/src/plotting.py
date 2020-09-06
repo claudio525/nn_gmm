@@ -1,4 +1,4 @@
-import os
+import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
 
@@ -10,16 +10,14 @@ import seaborn as sns
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
-from visualization.gmt.plotting import plot_multiple
-from .evaluation import EvaluationResult
-from .model import GMM
-from .utils import get_station_from_id
-from . import data
+from visualization.gmt.plotting import plot_multiple, plot_single
 
+from .model import GMM
+from .utils import get_station_from_id, get_station_lookup, to_path, to_list
+from . import data
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
-
 
 MARKERS = [
     ".",
@@ -60,6 +58,43 @@ MARKERS = [
     10,
     11,
 ]
+
+DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
+    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
+    "options": {
+        "xyz-grid-search": "12m",
+        "xyz-grid-automask": "12k",
+        "xyz-cpt": "polar",
+        "xyz-cpt-bg": "0/0/80",
+        "xyz-cpt-fg": "80/0/0",
+        "xyz-transparency": "30",
+        "xyz-size": "1k",
+        "xyz-cpt-inc": "0.125",
+        "xyz-cpt-tick": "0.25",
+        "xyz-cpt-min": "-1.0",
+        "xyz-cpt-max": "1.0",
+    },
+}
+
+DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
+    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
+    "options": {
+        "xyz-grid-search": "12m",
+        "xyz-grid-automask": "12k",
+        "xyz-cpt": "hot",
+        "xyz-transparency": "30",
+        "xyz-size": "1k",
+        "xyz-cpt-min": "0",
+        "xyz-cpt-max": "0.6",
+    },
+}
+
+PLOT_TYPE_OPTIONS_MAPPING = {
+    "sim": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    "est_mean": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    "est_std": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+}
 
 
 def multi_fig(
@@ -102,8 +137,12 @@ class IMvsPlotGen:
             "z2p5": 1.3,
             "dip": 60,
             "rake": 45,
+            "strike": 177,
+            "length": 18.9,
             "width": 18.2775,
             "ztor": 0,
+            "dbottom": 16.8,
+            "is_point_source": 0,
             "mag": 7.0,
             "rjb": 91,
             "rrup": 91,
@@ -401,7 +440,7 @@ class IMvsPlotGen:
             )
 
         if emp_df is not None:
-            self.add_emp(emp_df)
+            add_emp(emp_df)
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
@@ -449,7 +488,7 @@ class IMvsPlotGen:
 
         # Empirical plots
         if emp_df is not None:
-            self.add_emp(emp_df)
+            add_emp(emp_df)
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
@@ -467,35 +506,6 @@ class IMvsPlotGen:
             plt.show()
 
         return fig
-
-    def add_emp(self, emp_df: pd.Series):
-        """Adds the empirical data to the
-        current plot
-
-        Parameters
-        ----------
-        emp_df: dataframe
-            The empirical GMM estimates, expects
-            the columns [mu, sigma]
-        """
-        # mean prediction
-        plt.plot(
-            emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
-        )
-        # +- sigma
-        plt.plot(
-            emp_df.index.values,
-            emp_df["mu"].values * np.exp(emp_df["sigma"].values),
-            c="r",
-            linestyle="--",
-            label="Std Bradley 2013",
-        )
-        plt.plot(
-            emp_df.index.values,
-            emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
-            c="r",
-            linestyle="--",
-        )
 
     def gen_plots(
         self,
@@ -515,9 +525,9 @@ class IMvsPlotGen:
             output_dir.mkdir(parents=True)
 
         for cur_feature, cur_feature_values in feature_dict.items():
-            cur_feature_df, (
-                cur_mean_est_df,
-                cur_std_est_df,
+            (
+                cur_feature_df,
+                (cur_mean_est_df, cur_std_est_df,),
             ) = self.get_est_site_values(
                 cur_feature, cur_feature_values, self.CONST_DEFAULT_VALUES, locations
             )
@@ -551,38 +561,7 @@ class IMvsPlotGen:
                     )
 
 
-class SpatialPlotGen:
-
-    DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "polar",
-            "xyz-cpt-bg": "0/0/80",
-            "xyz-cpt-fg": "80/0/0",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-inc": "0.125",
-            "xyz-cpt-tick": "0.25",
-            "xyz-cpt-min": "-1.0",
-            "xyz-cpt-max": "1.0",
-        },
-    }
-
-    DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
-        "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
-        "options": {
-            "xyz-grid-search": "12m",
-            "xyz-grid-automask": "12k",
-            "xyz-cpt": "hot",
-            "xyz-transparency": "30",
-            "xyz-size": "1k",
-            "xyz-cpt-min": "0",
-            "xyz-cpt-max": "0.6",
-        },
-    }
-
+class PlotGen:
     def __init__(
         self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
     ):
@@ -595,7 +574,10 @@ class SpatialPlotGen:
 
         self._estimates = {}
 
-    def _get_event_estimates(self, event: str):
+    def _get_event_estimates(
+        self, event: str,
+    ):
+        """Get estimates for the specified event"""
         if event in self._estimates.keys():
             return self._estimates[event]
         else:
@@ -611,7 +593,243 @@ class SpatialPlotGen:
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
 
-    def plot_event_maps(
+
+class AggPlotGen(PlotGen):
+    """Class for generating aggregate plots"""
+
+    def __init__(
+        self,
+        plot_items_ffp: str,
+        model: GMM,
+        ims: List[str],
+        data_dirs: List[Path],
+        output_dir: Path,
+    ):
+        super().__init__(plot_items_ffp, model, data_dirs, output_dir)
+        self._ims = ims
+
+        print(f"Getting estimates for the specified IMs")
+        self._sim_df, self._mean_df, self._std_df = self._get_estimates()
+        assert np.all(self._sim_df.index == self._mean_df.index)
+
+        self._sim_df["station"] = get_station_from_id(
+            self._sim_df.index.values.astype(str)
+        )
+        self._mean_df["station"] = get_station_from_id(
+            self._mean_df.index.values.astype(str)
+        )
+        self._std_df["station"] = get_station_from_id(
+            self._std_df.index.values.astype(str)
+        )
+
+        if not self.output_dir.is_dir():
+            self.output_dir.mkdir(parents=True)
+
+    def _get_estimates(self):
+        return self.model.predict_dirs(
+            self.data_dirs, ims=self._ims, features=["lat", "lon"]
+        )
+
+    def _get_event_estimates(self, event: str):
+        raise NotImplementedError()
+
+    def plot_spatial_agg_maps(self, plot_type: str = "res_mean", n_procs: int = 4):
+        """Generates spatial aggregate maps (i.e. the data is aggregated
+        at each station across all realisations of all events
+
+        Parameters
+        ----------
+        plot_type: str
+            "res_mean": Residual between simulation IMs and
+            estimated mean value from the NN GMM
+        n_procs: int, optional
+            Number of processes to use for plotting
+
+        Returns
+        -------
+        list of strings:
+            The csv file paths for each plot
+        """
+        is_res_plot = "res" in plot_type
+
+        data_df, non_negative = None, True
+        if plot_type == "res_mean":
+            data_df = (
+                self._mean_df[self._ims] / self._sim_df[self._ims].apply(np.exp)
+            ).apply(np.log)
+            non_negative = False
+
+        data_df["station"] = self._mean_df.station
+        data_df = data_df.groupby("station").mean()
+
+        # Add lat & lon
+        station_df = get_station_lookup(self._sim_df)
+        data_df = pd.merge(
+            data_df,
+            station_df,
+            left_on="station",
+            right_index=True,
+            how="inner",
+            validate="one_to_one",
+        )
+
+        print(f"Generating csv files for {len(self._ims)} IMs")
+        csv_files = []
+        for im in self._ims:
+            im_name = im.replace(".", "p")
+            cb_options = (
+                {}
+                if is_res_plot
+                else compute_GMT_std_ticks(
+                    data_df[im], n_std=2, non_negative=non_negative
+                )
+            )
+            gmt_options = get_gmt_options_dict(
+                options={
+                    **{"title": f"{im_name}-{plot_type}", "xyz-cpt-labels": f"{im}",},
+                    **cb_options,
+                }
+            )
+
+            plot_csv_ffp = self.output_dir / f"{im_name}"
+            plot_csv_ffp = _gmt_save(
+                data_df, im, str(plot_csv_ffp), gmt_options=gmt_options
+            )
+
+            csv_files.append(plot_csv_ffp)
+
+        # Generate the plot
+        print(f"Plotting")
+        plot_multiple(
+            self.plot_items_ffp,
+            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            if "res" in plot_type
+            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            in_ffps=csv_files,
+            n_procs=n_procs,
+        )
+
+        return csv_files
+
+
+class EventPlotGen(PlotGen):
+    """Class for generating even specific plots"""
+
+    def __init__(
+        self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
+    ):
+        super().__init__(plot_items_ffp, model, data_dirs, output_dir)
+
+    def gen_IM_feature_plots(
+        self, events: Union[str, List[str]], ims: List[str], feature_key: str
+    ):
+        """Generates IM vs feature plots for the specified IMs and events"""
+        events = [events] if isinstance(events, str) else events
+
+        for event in events:
+            for im in ims:
+                self.gen_IM_feature_plot(event, im, feature_key)
+
+    def gen_IM_feature_plot(self, event: str, im: str, feature_key: str):
+        """Generates a IM vs feature plot for the specified IM and event"""
+        event_out_dir = self.output_dir / event
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        sim_df, mean_df, std_df = self._get_event_estimates(event)
+        assert np.all(sim_df.index == mean_df.index)
+
+        fig = plt.figure(figsize=(18, 13.5))
+        # fig = plt.figure(figsize=(7, 5.5))
+
+        x, sim_y = sim_df[feature_key], sim_df[im].apply(np.exp)
+        plt.scatter(x, sim_y, label="Simulation", s=1.0)
+        plt.scatter(x, mean_df[im], label="Estimated", s=1.0)
+
+        # Aggregate at each unique value of the feature of interest
+        mean_df[feature_key] = sim_df[feature_key]
+        std_df[feature_key] = sim_df[feature_key]
+
+        bin_edges = np.linspace(x.min() - 1e-5, x.max(), 50)
+        bin_indices = np.digitize(sim_df[feature_key].values, bin_edges, right=True)
+
+        # Get center points of the bins (there might be a better way of doing this
+        bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
+
+        mean_df["bin_ix"], std_df["bin_ix"] = bin_indices, bin_indices
+        bin_mean_mean = mean_df.groupby("bin_ix").mean()[im]
+        bin_mean_std = std_df.groupby("bin_ix").mean()[im]
+        plt.plot(
+            bin_centers[bin_mean_mean.index - 1],
+            bin_mean_mean,
+            c="k",
+            marker="o",
+            ms=1.5,
+            linewidth=1.25,
+            label="Bin mean of estimated means",
+        )
+        plt.plot(
+            bin_centers[bin_mean_std.index - 1],
+            bin_mean_mean * np.exp(bin_mean_std),
+            linestyle="--",
+            c="k",
+            marker="o",
+            ms=1.75,
+            linewidth=1.25,
+            label="Bin mean of estiamted stds",
+        )
+        plt.plot(
+            bin_centers[bin_mean_std.index - 1],
+            bin_mean_mean * np.exp(-bin_mean_std),
+            linestyle="--",
+            c="k",
+            marker="o",
+            ms=1.75,
+            linewidth=1.25,
+        )
+
+        plt.xlabel(feature_key)
+        plt.ylabel(im)
+        plt.yscale("log")
+        plt.grid(linestyle="--", linewidth=0.25)
+        plt.title("{} {} {}".format(event, im, feature_key))
+        plt.legend()
+        set_plot_lims(x, [sim_y, mean_df[im]])
+
+        output_ffp = self.output_dir / event / f"{event}_{im}_{feature_key}.png"
+        plt.savefig(output_ffp)
+        plt.close()
+
+    def plot_spatial_events_maps(
+        self,
+        events: List[str],
+        ims: List[str],
+        data_type: str = "est_mean",
+        events_cb_options: Dict[str, Dict[str, Dict]] = None,
+        suffix: str = "",
+        n_procs: int = 4,
+    ):
+        """Plots spatial maps for the specified IMs and events
+        See gen_event_map_data for parameter details
+        """
+        result_cb_options = {}
+        for event in events:
+            print(f"Plotting spatial event maps for {event}")
+            cur_cb_options = self.plot_spatial_event_maps(
+                event,
+                ims,
+                data_type=data_type,
+                cb_options=events_cb_options.get(event)
+                if events_cb_options is not None
+                else None,
+                suffix=suffix,
+                n_procs=n_procs,
+            )
+            result_cb_options[event] = cur_cb_options
+
+        return result_cb_options
+
+    def plot_spatial_event_maps(
         self,
         event: str,
         ims: List[str],
@@ -620,6 +838,9 @@ class SpatialPlotGen:
         suffix: str = "",
         n_procs: int = 4,
     ):
+        """Plots spatial maps for the specified IMs and event
+        See gen_event_map_data for parameter details
+        """
         csv_ffps, result_cb_option = [], {}
         for im in ims:
             cur_csv, cur_cb_options = self.gen_event_map_data(
@@ -629,30 +850,86 @@ class SpatialPlotGen:
             result_cb_option[im] = cur_cb_options
 
         # Generate the plots
-        gmt_options = self.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS if "res" in data_type else self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        gmt_options = (
+            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            if "res" in data_type
+            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+        )
         plot_multiple(
-            self.plot_items_ffp,
-            gmt_options,
-            in_ffps=csv_ffps,
-            n_procs=n_procs,
+            self.plot_items_ffp, gmt_options, in_ffps=csv_ffps, n_procs=n_procs
         )
 
         return result_cb_option
 
-    def plot_event_map(
+    def plot_spatial_event_map(
         self, event: str, im: str, data_type: str = "est_mean", suffix: str = ""
     ):
+        """plots spatial maps for the specified IM and event
+        See gen_event_map_data for parameter details
+        """
         # Create the data
-        plot_csv_ffp = self.gen_event_map_data(
+        plot_csv_ffp, cb_options = self.gen_event_map_data(
             event, im, data_type=data_type, suffix=suffix
         )
 
         # Generate the plot
         plot_multiple(
             self.plot_items_ffp,
-            self.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=[str(plot_csv_ffp)],
         )
+
+        return cb_options
+
+    def _get_event_data(
+        self, event: str, im: str, data_type: str = "est_mean", cb_options: Dict = None,
+    ):
+        """Gets the data for the speicified event, IMs and data type
+        See gen_event_map_data for parameter details
+        """
+        sim_df, mean_est, std_est = self._get_event_estimates(event)
+        assert np.all(mean_est.index.values == sim_df.index.values)
+
+        n_std = 2.5
+        sim_df["station"] = get_station_from_id(sim_df.index.values.astype(str))
+        if "res" not in data_type:
+            if data_type == "sim" or data_type == "est_mean":
+                sim_im_df = sim_df[im].apply(np.exp).to_frame()
+                data_df = (
+                    mean_est.copy() if data_type == "est_mean" else sim_im_df.copy()
+                )
+
+                sim_im_df["station"] = sim_df.station
+                cb_df = sim_im_df.groupby("station").mean()
+            elif data_type.lower() == "est_std":
+                data_df = std_est.copy()
+                cb_df = sim_df.loc[:, [im, "station"]].groupby("station").std()
+                n_std = 3.0
+            else:
+                raise ValueError(f"Invalid data_type: {data_type}")
+
+            cb_options = (
+                compute_GMT_std_ticks(cb_df[im], n_std=n_std, non_negative=True)
+                if cb_options is None
+                else cb_options[im]
+            )
+        elif data_type.lower() == "res_mean":
+            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
+            cb_options = {}
+        else:
+            raise ValueError(f"Invalid data_type: {data_type}")
+
+        data_df = pd.merge(
+            data_df,
+            sim_df.loc[:, ["lat", "lon", "station"]],
+            left_index=True,
+            right_index=True,
+            how="inner",
+        )
+
+        assert data_df.shape[0] == mean_est.shape[0]
+
+        return data_df, cb_options
 
     def gen_event_map_data(
         self,
@@ -662,8 +939,7 @@ class SpatialPlotGen:
         cb_options: Dict = None,
         suffix: str = "",
     ):
-        """
-        Generates event based map data
+        """Generates event based map data
 
         Realisations are aggregated at each station using the mean
 
@@ -680,54 +956,35 @@ class SpatialPlotGen:
             "sim": Simulation IM values
             "res_mean": Residual between simulation IMs and
                 estimated mean value from the NN GMM
-        cb_options
-        suffix
+        cb_options: Dict, optional
+            GMT colour-bar options, if not given then
+            these will be calculated based on the simulation data
+            as this is consistent across models
+            Useful when wanting two plots with the
+            same colour-bar scale
+
+        suffix: str, optional
+            Filename suffix
 
         Returns
         -------
-
+        str
+            Path to the data csv
+        dict
+            The colour-bar options used
         """
+        data_type = data_type.lower()
         event_out_dir = self.output_dir / event
         if not event_out_dir.is_dir():
             event_out_dir.mkdir(parents=True)
 
-        sim_df, mean_est, std_est = self._get_event_estimates(event)
-        assert np.all(mean_est.index.values == sim_df.index.values)
-
-        non_negative = True
-        if data_type.lower() == "sim":
-            data_df = sim_df[im].apply(np.exp).to_frame()
-        elif data_type.lower() == "est_mean":
-            data_df = mean_est.copy()
-        elif data_type.lower() == "est_std":
-            data_df = std_est.copy()
-        elif data_type.lower() == "res_mean":
-            data_df = (mean_est[im] / sim_df[im].apply(np.exp)).apply(np.log).to_frame()
-            non_negative, cb_options = False, {im: {}}
-        else:
-            raise ValueError(f"Invalid data_type: {data_type}")
-
-        data_df = pd.merge(
-            data_df,
-            sim_df.loc[:, ["lat", "lon"]],
-            left_index=True,
-            right_index=True,
-            how="inner",
-        )
-
-        assert data_df.shape[0] == mean_est.shape[0]
-
-        data_df["station"] = get_station_from_id(data_df.index.values.astype(str))
+        data_df, cb_options = self._get_event_data(event, im, data_type, cb_options)
 
         # Aggregate across realisation at each station
         agg_df = data_df.groupby("station").mean()
+        assert np.all(~agg_df[im].isna())
 
         im_name = im.replace(".", "p")
-        cb_options = (
-            compute_GMT_std_ticks(agg_df[im], n_std=2, non_negative=non_negative)
-            if cb_options is None
-            else cb_options[im]
-        )
         gmt_options = get_gmt_options_dict(
             options={
                 **{
@@ -743,6 +1000,132 @@ class SpatialPlotGen:
         plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
 
         return plot_csv_ffp, cb_options
+
+    def plot_realisation_maps(
+        self,
+        events: Union[str, List[str]],
+        ims: Union[str, List[str]],
+        data_types: Union[str, List[str]] = "est_mean",
+        n_procs: int = 8,
+        n_rels: int = None,
+    ):
+        # Generate the required data files
+        for cur_data_type in to_list(data_types):
+            plot_csv_ffps = []
+            for cur_event in to_list(events):
+                for cur_im in to_list(ims):
+                        cur_plot_csv_ffps, cb_options = self.gen_rel_map_data(
+                            cur_event, cur_im, data_type=cur_data_type, n_rels=n_rels
+                        )
+                        plot_csv_ffps.extend(cur_plot_csv_ffps)
+
+            plot_multiple(
+                self.plot_items_ffp,
+                PLOT_TYPE_OPTIONS_MAPPING[cur_data_type],
+                in_ffps=plot_csv_ffps,
+                n_procs=n_procs,
+            )
+
+        return
+
+    def gen_rel_map_data(
+        self,
+        event: str,
+        im: str,
+        data_type: str = "est_mean",
+        cb_options: Dict = None,
+        n_rels: int = None,
+    ):
+        """Generates map data for all realisation for the specified event (and IM)"""
+        data_type = data_type.lower()
+        event_out_dir = self.output_dir / event / "realisations"
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        data_df, cb_options = self._get_event_data(event, im, data_type, cb_options)
+
+        data_df["rel"] = np.stack(np.char.split(data_df.index.values.astype(str), "_"))[
+            :, 1
+        ]
+
+        # Only plot specified number of realisation
+        rels = np.unique(data_df.rel)
+        if n_rels is not None:
+            rels = rels[: min(n_rels, len(rels))]
+
+        plot_csv_ffps = []
+        for cur_rel in rels:
+            im_name = im.replace(".", "p")
+            gmt_options = get_gmt_options_dict(
+                options={
+                    **{
+                        "title": f"{im_name}-{event}-{cur_rel}-{data_type}",
+                        "xyz-cpt-labels": f"{im}",
+                    },
+                    **cb_options,
+                }
+            )
+            cur_plot_csv_ffp = _gmt_save(
+                data_df.loc[data_df.rel == cur_rel],
+                im,
+                str(event_out_dir / f"{im_name}_{data_type}_{cur_rel}"),
+                gmt_options=gmt_options,
+            )
+            plot_csv_ffps.append(cur_plot_csv_ffp)
+
+        return plot_csv_ffps, cb_options
+
+
+def plot_n_records_map(
+    data_dirs: List[Union[Path, str]],
+    plot_items_ffp: Union[Path, str],
+    output_ffp: str,
+    title: str = "Number-of-records",
+):
+    """Generates a spatial map that shows number of records at each station"""
+    data_dirs, plot_items_ffp = to_path(data_dirs), to_path(plot_items_ffp)
+
+    ds = data.load_dataset(
+        data_dirs,
+        data.load_feature_details(data_dirs[0]),
+        5_000_000,
+        shuffle_buffer=None,
+        block_size=1024,
+    )
+
+    dfs = []
+    for cur_batch in ds.as_numpy_iterator():
+        cur_df = pd.DataFrame.from_dict(
+            {key: cur_batch[key] for key in ["id", "lat", "lon"]}
+        )
+        cur_df["id"] = cur_df.id.str.decode("UTF-8")
+        cur_df.set_index("id", inplace=True)
+
+        dfs.append(cur_df)
+
+    df = pd.concat(dfs)
+    df["station"] = get_station_from_id(df.index.values.astype(str))
+
+    station_lookup_df = get_station_lookup(df)
+
+    n_records_df = df.groupby("station").count()
+    n_records_df["count"] = n_records_df["lat"]
+    n_records_df.drop(columns=["lat", "lon"], inplace=True)
+
+    n_records_df = pd.merge(
+        n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
+    )
+
+    cb_options = compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
+    gmt_options = get_gmt_options_dict(
+        options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
+    )
+    csv_ffp = _gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        plot_single(plot_items_ffp, csv_ffp, DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
+
+    return
 
 
 def find_record_ffp(data_dirs: List[Path], event: str):
@@ -844,3 +1227,52 @@ def compute_GMT_std_ticks(
     options["xyz-cpt-tick"], options["xyz-cpt-inc"] = tick_inc, tick_inc / 2
 
     return options
+
+
+def add_emp(emp_df: pd.Series, label: str = "Bradley 2013"):
+    """Adds the empirical data to the
+    current plot
+
+    Parameters
+    ----------
+    emp_df: dataframe
+        The empirical GMM estimates, expects
+        the columns [mu, sigma]
+    """
+    # mean prediction
+    plt.plot(
+        emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
+    )
+    # +- sigma
+    plt.plot(
+        emp_df.index.values,
+        emp_df["mu"].values * np.exp(emp_df["sigma"].values),
+        c="r",
+        linestyle="--",
+        label=f"Std {label}",
+    )
+    plt.plot(
+        emp_df.index.values,
+        emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
+        c="r",
+        linestyle="--",
+        label=f"Mean {label}",
+    )
+
+
+def set_plot_lims(
+    x: Union[np.ndarray, List[np.ndarray]], y: Union[np.ndarray, List[np.ndarray]]
+):
+    x = x if isinstance(x, list) else [x]
+    y = y if isinstance(y, list) else [y]
+
+    x_min = np.min([cur_x.min() for cur_x in x])
+    y_min = np.min([cur_y.min() for cur_y in y])
+
+    x_max = np.max([cur_x.max() for cur_x in x])
+    y_max = np.max([cur_y.max() for cur_y in y])
+
+    plt.xlim((x_min, x_max))
+    plt.ylim((y_min, y_max))
+
+

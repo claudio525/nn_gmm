@@ -14,12 +14,12 @@ def main(
     dfs = []
     for cur_data_dir in data_dirs:
         cur_data_dir = Path(cur_data_dir)
-        cur_ds = nn_gmm.load_dataset(
+        cur_ds = nn_gmm.load_datasets(
             cur_data_dir,
             nn_gmm.load_feature_details(cur_data_dir),
             10000,
             file_filter=file_filter,
-            shuffle_buffer=None,
+            shuffle_buffer_size=None,
             block_size=30000,
         )
 

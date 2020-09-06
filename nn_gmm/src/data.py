@@ -1,5 +1,5 @@
 import pickle
-from typing import Dict, Union
+from typing import Dict, Union, List
 from pathlib import Path
 
 import pandas as pd
@@ -8,7 +8,7 @@ import tensorflow as tf
 
 
 def load_dataset(
-    data_dir: Path,
+    data_dirs: Union[Path, List[Path]],
     feature_details: Dict,
     batch_size: int,
     file_filter: str = "*.tfrecord",
@@ -21,7 +21,7 @@ def load_dataset(
 
     Parameters
     ----------
-    data_dir: Path
+    data_dirs: Path, list of Path
         Directory that contains the .tfrecord files to use
     feature_details: dictionary
         Specifies how to parse the data,
@@ -70,9 +70,12 @@ def load_dataset(
     # as samples are removed
     # 4) Batch
     # 5) Parse each batch
-    ds = tf.data.Dataset.list_files(
-        str(data_dir / file_filter), shuffle=True
-    ).interleave(
+    file_patterns = (
+        [str(cur_dir / file_filter) for cur_dir in data_dirs]
+        if isinstance(data_dirs, list)
+        else str(data_dirs / file_filter)
+    )
+    ds = tf.data.Dataset.list_files(file_patterns, shuffle=True).interleave(
         lambda f: tf.data.TFRecordDataset(f),
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
         cycle_length=n_open_files,
@@ -89,7 +92,9 @@ def load_dataset(
 
     return ds
 
+
 def load_tfrecord(record_ffp: str, feature_details: Dict):
+    """Loads a single tfrecord file as a dataframe"""
     ds = tf.data.TFRecordDataset(filenames=[record_ffp])
 
     def _parse_fn(example_proto):
@@ -98,9 +103,11 @@ def load_tfrecord(record_ffp: str, feature_details: Dict):
 
     # Slight hack, just want to parse the whole record in one go,
     # not sure how to do this without batching...
-    ds = ds.batch(10000).map(_parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    ds = ds.batch(10000).map(
+        _parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
+    )
 
-    dfs = [pd.DataFrame.from_dict(cur_data)  for cur_data in ds.as_numpy_iterator()]
+    dfs = [pd.DataFrame.from_dict(cur_data) for cur_data in ds.as_numpy_iterator()]
     df = pd.concat(dfs)
 
     df.id = df.id.str.decode("UTF-8")
@@ -109,18 +116,14 @@ def load_tfrecord(record_ffp: str, feature_details: Dict):
     return df
 
 
-
 def sel_rand_locations(
-    data_dir: Path, feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
+    data_dirs: List[Path], feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
 ):
     """Selects a set of random locations from the
     specified dataframe
 
     Parameters
     ----------
-    ds: tensorflow dataset
-        Tensorflow dataset from which to select locations,
-        assumes that samples are already shuffled
     n_locs: int
         Number of locations to select
 
@@ -130,7 +133,7 @@ def sel_rand_locations(
         with the selected locations
         columns: [lon, lat]
     """
-    ds = load_dataset(data_dir, feature_details, n_locs, shuffle_buffer=shuffle_buffer)
+    ds = load_dataset(data_dirs, feature_details, n_locs, shuffle_buffer=shuffle_buffer)
     data_dict = next(ds.take(1).as_numpy_iterator())
 
     return pd.DataFrame(

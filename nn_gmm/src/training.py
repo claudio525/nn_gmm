@@ -1,21 +1,15 @@
 import pickle
 import json
-import glob
 import os
 import datetime
-from typing import List, Dict, Tuple, Callable
+from typing import List, Dict, Tuple, Callable, Union
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.keras as keras
-import tensorflow_probability as tfp
-from sklearn import preprocessing
-from sklearn.model_selection import train_test_split
 
-from . import hidden_layers
 from . import utils
 from . import data_processing
 from . import data
@@ -49,21 +43,25 @@ class TrainingResult:
 
 
 def load_datasets(
-    train_dir: Path, batch_size: int, val_dir: Path = None, shuffle_buffer: int = None
+    train_dirs: Union[Path, List[Path]],
+    batch_size: int,
+    val_dirs: Union[Path, List[Path]] = None,
+    shuffle_buffer_size: int = None,
 ):
     """Loads the training and validation (if specified) datasets
     from the .tfrecord files in the given directories"""
-    with (train_dir / "feature_details.pickle").open("rb") as f:
+    train_dirs = train_dirs if isinstance(train_dirs, list) else [train_dirs]
+    with (train_dirs[0] / "feature_details.pickle").open("rb") as f:
         feature_details = pickle.load(f)
 
     train_ds = data.load_dataset(
-        train_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer
+        train_dirs, feature_details, batch_size, shuffle_buffer=shuffle_buffer_size
     )
     val_ds = (
         data.load_dataset(
-            val_dir, feature_details, batch_size, shuffle_buffer=shuffle_buffer
+            val_dirs, feature_details, batch_size, shuffle_buffer=shuffle_buffer_size
         )
-        if val_dir is not None
+        if val_dirs is not None
         else None
     )
 
@@ -127,12 +125,10 @@ def train(
         json.dump(config, f, cls=utils.GenericObjJSONEncoder)
 
     train_ds, val_ds = load_datasets(
-        Path(input_config["train_data_dir"]),
+        utils.to_path(input_config["train_data_dirs"]),
         training_config["batch_size"],
-        val_dir=Path(input_config["val_data_dir"])
-        if input_config["val_data_dir"] is not None
-        else None,
-        shuffle_buffer=training_config["shuffle_buffer_size"],
+        val_dirs=utils.to_path(input_config["val_data_dirs"]),
+        shuffle_buffer_size=training_config["shuffle_buffer_size"],
     )
 
     feature_config = data_processing.convert_to_transform_fn(
@@ -200,8 +196,8 @@ def train(
 
     # Create loss plot
     plt.figure()
-    plt.plot(history.epoch, loss_df.loss, label="Loss")
-    plt.plot(history.epoch, loss_df.val_loss, label="Validation loss")
+    plt.plot(history.epoch, loss_df.loss, label=f"Loss - {loss_df.loss.min():.4f}")
+    plt.plot(history.epoch, loss_df.val_loss, label=f"Validation loss - {loss_df.val_loss.min():.4f}")
 
     plt.ylabel(training_config["loss"])
     plt.xlabel("Epoch")
@@ -215,3 +211,5 @@ def train(
         TrainingResult(input_config, training_config, output_dir, model_dir),
         output_dir,
     )
+
+
