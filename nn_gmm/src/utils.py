@@ -82,7 +82,7 @@ def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
 
     ims = im_df.columns.values.astype(str)
     pSA_mask = np.char.startswith(ims, "pSA_")
-    pSA_periods = np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1].astype(float)
+    pSA_periods = np.char.replace(np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1], "p", ".").astype(float)
 
     target_mask = np.char.startswith(target_ims, "pSA_")
     target_periods = np.sort(

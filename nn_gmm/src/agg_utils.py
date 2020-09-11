@@ -63,12 +63,25 @@ def __load_site_df(cur_site: str, distance_db_ffps: List[Path]):
     return None if len(dfs) == 0 else pd.concat(dfs)
 
 
-def load_site_source_df(site_source_db_ffps: List[Path]):
+def _load_site_source_db(site_source_db_ffp: Path):
     dfs = []
-    for cur_site_source_db_ffp in site_source_db_ffps:
-        with pd.HDFStore(cur_site_source_db_ffp, "r") as db:
-            for cur_fault in db.keys():
-                dfs.append(db[cur_fault])
+    with pd.HDFStore(site_source_db_ffp, "r") as db:
+        for cur_fault in db.keys():
+            dfs.append(db[cur_fault])
+    return dfs
+
+
+def load_site_source_df(site_source_db_ffps: List[Path], n_procs: int = 1):
+    """Creates a site-source dataframe from the specified dbs
+    and across all faults in the dbs"""
+    if n_procs == 1:
+        dfs = []
+        for cur_site_source_db_ffp in site_source_db_ffps:
+            dfs.extend(_load_site_source_db(cur_site_source_db_ffp))
+    else:
+        with mp.Pool(processes=n_procs) as pool:
+            dfs_lists = pool.map(_load_site_source_db, site_source_db_ffps)
+        dfs = [cur_df for cur_dfs_list in dfs_lists for cur_df in cur_dfs_list]
 
     return pd.concat(dfs)
 

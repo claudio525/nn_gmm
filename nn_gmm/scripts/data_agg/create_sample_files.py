@@ -117,6 +117,7 @@ def gen_tf_records(
     sources: np.ndarray,
     rel_df: pd.DataFrame,
     site_df: pd.DataFrame,
+    distance_df: pd.DataFrame,
     site_source_df: pd.DataFrame,
     im_db_ffps: List[Path],
     output_dir: Path,
@@ -139,10 +140,12 @@ def gen_tf_records(
             continue
         cur_im_df.sort_index(inplace=True)
 
+        # Create sample combinations
         cur_input_df = nn_gmm.create_sample_comb(cur_im_df)
         cur_input_df["id"] = cur_input_df.index.values.astype(str)
+
+        # Merge with realisation source parameters
         cur_input_df = pd.merge(
-            # cur_input_df, source_df, how="inner", left_on="source", right_on="source"
             cur_input_df,
             rel_df,
             how="inner",
@@ -150,13 +153,25 @@ def gen_tf_records(
             right_index=True,
             suffixes=(None, "_rel_df"),
         )
+
+        # Merge with site parameters
         cur_input_df = pd.merge(
             cur_input_df, site_df, how="inner", left_on="site", right_index=True
         )
 
+        # Merge with site-source parameters
         cur_input_df = pd.merge(
             cur_input_df,
-            site_source_df,
+            site_source_df.loc[:, ["theta", "s"]],
+            how="inner",
+            left_index=True,
+            right_index=True,
+        )
+
+        # Merge with distance parameters
+        cur_input_df = pd.merge(
+            cur_input_df,
+            distance_df,
             how="inner",
             left_on=["source", "site"],
             right_on=["source", "site"],
@@ -216,22 +231,26 @@ def main(
 
     # Load Site params
     print("Loading site params")
-    site_df = nn_gmm.load_dfs(list(site_params_dir.glob("*.csv")), index_col="station")
+    site_df = nn_gmm.load_dfs(list(site_params_dir.glob("*.csv")))
 
-    # Check there are no duplicates
-    assert np.unique(site_df.index).shape[0] == site_df.shape[0]
+    # Drop duplicates & check for duplicates
+    n_unique_stations = np.unique(site_df.station.values.astype(str)).shape[0]
+    site_df = site_df.drop_duplicates()
+    assert n_unique_stations == site_df.shape[0]
+    site_df.set_index("station", inplace=True)
 
     # Load site-source params
     print("Loading distance params")
     distance_db_ffps = list(distance_dir.glob("*.db"))
-    distance_df = nn_gmm.load_distance_df(
-        site_df, distance_db_ffps, n_procs=n_procs
-    )
+    distance_df = nn_gmm.load_distance_df(site_df, distance_db_ffps, n_procs=n_procs)
 
     print("Loading site-source params")
-    site_source_db_ffps = list(distance_dir.glob("*.db"))
-    site_source_df = nn_gmm
-
+    site_source_db_ffps = list(site_source_dir.glob("*.db"))
+    site_source_df = nn_gmm.load_site_source_df(site_source_db_ffps, n_procs=n_procs)
+    assert (
+        np.unique(site_source_df.index.values.astype(str)).shape[0]
+        == site_source_df.shape[0]
+    )
 
     # Load source params
     print("Loading realisation params")
@@ -257,6 +276,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
+            site_source_df,
             im_db_ffps,
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -269,6 +289,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
+            site_source_df,
             im_db_ffps,
             output_dir / "val",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -280,6 +301,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
+            site_source_df,
             im_db_ffps,
             output_dir,
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -296,7 +318,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "distance_dir", type=str, help="The path to the distance site-source dir"
     )
-    parser.add_argument("site_source_dir", type=str, help="The path to the site-source dir")
+    parser.add_argument(
+        "site_source_dir", type=str, help="The path to the site-source dir"
+    )
     parser.add_argument(
         "source_params_dir", type=str, help="The path to the source params dir",
     )

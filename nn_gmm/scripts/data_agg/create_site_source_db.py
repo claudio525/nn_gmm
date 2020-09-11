@@ -17,8 +17,10 @@ import nn_gmm
 def _process_realisation(
     srf_info_ffp: Path, fault_station_lookup: Dict, sites_df: pd.DataFrame
 ):
+    # Get the fault and realisation name, some special handling for validation events/"realisation"
     fault = srf_info_ffp.name.split("_")[0] if "_" in srf_info_ffp.name else srf_info_ffp.name.split(".")[0]
     realisation = srf_info_ffp.name.split(".")[0]
+    realisation = realisation if fault != realisation else f"{fault}_{realisation}"
 
     if fault not in fault_station_lookup.keys():
         print(f"Fault {fault} is not in the IMDB, skipping")
