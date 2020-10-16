@@ -56,13 +56,15 @@ class GMM:
             columns=self.outputs,
             index=result_df_index,
         )
-        std_df = pd.DataFrame(
-            data=y_est[:, self.outputs.size :],
-            columns=self.outputs,
-            index=result_df_index,
-        )
+        if y_est.shape[1] == 2 * self.outputs.size:
+            std_df = pd.DataFrame(
+                data=y_est[:, self.outputs.size :],
+                columns=self.outputs,
+                index=result_df_index,
+            )
+            return mean_df, std_df
 
-        return mean_df, std_df
+        return mean_df, None
 
     def predict_dirs(
         self,
@@ -86,7 +88,7 @@ class GMM:
         ims: list of strings
         features: list of strings
             The IMs and features to keep. Unless the computer used has a large
-            amount of memory, keeping all is probably not the greates idea
+            amount of memory, keeping all is probably not the greatest idea
 
         Returns
         -------
@@ -111,13 +113,19 @@ class GMM:
 
             # Only keep some IMs (to reduce size of resulting data)
             if ims is not None:
-                cur_mean_df, cur_std_df = cur_mean_df[ims], cur_std_df[ims]
+                cur_mean_df = cur_mean_df[ims]
+                cur_std_df = cur_std_df[ims] if cur_std_df is not None else None
+
                 sim_dfs.append(cur_df[ims + features])
 
             mean_dfs.append(cur_mean_df)
-            std_dfs.append(cur_std_df)
+            del cur_df
 
-        mean_df, std_df = pd.concat(mean_dfs), pd.concat(std_dfs)
+            if cur_std_df is not None:
+                std_dfs.append(cur_std_df)
+
+        mean_df = pd.concat(mean_dfs)
+        std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
         return pd.concat(sim_dfs), mean_df, std_df
 
     def _pre_process(self, X: pd.DataFrame):
@@ -236,3 +244,4 @@ class MargNLLLoss(keras.losses.Loss):
     def get_config(self):
         base_config = super().get_config()
         return {**base_config, "n_outputs": int(self.n_outputs)}
+

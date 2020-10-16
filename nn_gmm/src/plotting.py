@@ -1,3 +1,4 @@
+import gc
 import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
@@ -7,6 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.express as px
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
@@ -140,6 +142,7 @@ class IMvsPlotGen:
             "strike": 177,
             "length": 18.9,
             "width": 18.2775,
+            "hdepth": 8.990423e00,
             "ztor": 0,
             "dbottom": 16.8,
             "is_point_source": 0,
@@ -148,6 +151,8 @@ class IMvsPlotGen:
             "rrup": 91,
             "rx": 91,
             "ry": 91,
+            "s": 2.760520e01,
+            "theta": 4.517924e01,
             "tect_type": "ACTIVE_SHALLOW",
         }
     )
@@ -354,9 +359,10 @@ class IMvsPlotGen:
         mean_est_df[["lon", "lat", feature_key]] = feature_df[
             ["lon", "lat", feature_key]
         ]
-        std_est_df[["lon", "lat", feature_key]] = feature_df[
-            ["lon", "lat", feature_key]
-        ]
+        if std_est_df is not None:
+            std_est_df[["lon", "lat", feature_key]] = feature_df[
+                ["lon", "lat", feature_key]
+            ]
         return feature_df, (mean_est_df, std_est_df)
 
     def gen_plot(
@@ -612,26 +618,98 @@ class AggPlotGen(PlotGen):
         self._sim_df, self._mean_df, self._std_df = self._get_estimates()
         assert np.all(self._sim_df.index == self._mean_df.index)
 
+        print("Adding station data")
         self._sim_df["station"] = get_station_from_id(
             self._sim_df.index.values.astype(str)
         )
-        self._mean_df["station"] = get_station_from_id(
-            self._mean_df.index.values.astype(str)
-        )
-        self._std_df["station"] = get_station_from_id(
-            self._std_df.index.values.astype(str)
-        )
+        self._mean_df["station"] = self._sim_df.station.values
+
+        if self._std_df is not None:
+            self._std_df["station"] = self._sim_df.station.values
 
         if not self.output_dir.is_dir():
             self.output_dir.mkdir(parents=True)
 
     def _get_estimates(self):
         return self.model.predict_dirs(
-            self.data_dirs, ims=self._ims, features=["lat", "lon"]
+            self.data_dirs, ims=self._ims, features=["lat", "lon", "mag"]
         )
 
     def _get_event_estimates(self, event: str):
         raise NotImplementedError()
+
+    def plot_realisation_residuals(self, abs_residual: bool = False):
+        """Creates a residual plot for realisations"""
+        print("Plotting realisation residuals")
+        assert np.all(self._mean_df.index == self._sim_df.index)
+
+        split_ids = np.stack(np.char.split(self._mean_df.index.values.astype(str), "_"))
+        self._mean_df["realisation"] = np.char.add(
+            np.char.add(split_ids[:, 0], "_"), split_ids[:, 1]
+        )
+        self._mean_df["fault"] = split_ids[:, 0]
+
+        self._sim_df["realisation"] = self._mean_df.realisation
+
+        rel_fault = self._mean_df.groupby("realisation").first()["fault"].to_frame()
+
+        rel_mag = self._sim_df.groupby("realisation").first()["mag"]
+        rel_n_stations = self._sim_df.groupby("realisation").count()["station"]
+
+        for im in self._ims:
+            res = (
+                self._sim_df.loc[:, im] - self._mean_df.loc[:, im].apply(np.log)
+            ).to_frame()
+            if abs_residual:
+                res[im] = res[im].apply(np.abs)
+
+            res["realisation"] = self._mean_df.realisation
+
+            rel_res = res.groupby("realisation").mean()
+            rel_res = rel_res.merge(rel_mag, left_index=True, right_index=True)
+            rel_res = rel_res.merge(rel_fault, left_index=True, right_index=True)
+
+            assert np.all(rel_mag.index == rel_res.index)
+
+            fig = px.scatter(
+                data_frame=rel_res,
+                x="mag",
+                y=im,
+                symbol="fault",
+                symbol_sequence=list(range(45)),
+                hover_name=np.char.add(
+                    np.char.add(rel_res.index.values.astype(str), " - "),
+                    rel_n_stations.values.astype(str),
+                ),
+                title=f"{im} - Realisation ln residuals (mean)",
+                labels={
+                    "x": im,
+                    "y": f"Mean ln {'abs' if abs_residual else ''} residual",
+                },
+                marginal_y="histogram",
+            )
+            fig.update_layout(
+                shapes=[
+                    {
+                        "type": "line",
+                        "xref": "paper",
+                        "y0": 0,
+                        "y1": 0,
+                        "yref": "y",
+                        "x0": 0,
+                        "x1": 1,
+                    }
+                ],
+                showlegend=False,
+            )
+            fig.write_html(
+                str(
+                    self.output_dir
+                    / f"{im}_realisation_ln_{'abs_' if abs_residual else ''}residual.html"
+                )
+            )
+
+        return
 
     def plot_spatial_agg_maps(self, plot_type: str = "res_mean", n_procs: int = 4):
         """Generates spatial aggregate maps (i.e. the data is aggregated
@@ -730,6 +808,41 @@ class EventPlotGen(PlotGen):
             for im in ims:
                 self.gen_IM_feature_plot(event, im, feature_key)
 
+    def gen_IM_residuals_plot(
+        self, event: str, im: str, feature_key: str, log_space: bool = False
+    ):
+        """Creates a residual sactter plot for the specified IM
+        against the feature of interest"""
+        event_out_dir = self.output_dir / event
+        if not event_out_dir.is_dir():
+            event_out_dir.mkdir(parents=True)
+
+        sim_df, mean_df, std_df = self._get_event_estimates(event)
+        assert np.all(sim_df.index == mean_df.index)
+
+        im_name = im.replace(".", "p")
+        if log_space:
+            residual = sim_df.loc[:, im] - mean_df.loc[:, im].apply(np.log)
+            title = f"{im_name} Log ratio - Mean absolute log ratio {np.mean(np.abs(residual.values)):.4f}"
+        else:
+            residual = sim_df.loc[:, im].apply(np.exp) - mean_df.loc[:, im]
+            title = f"{im_name} - Mean residual {np.mean(np.abs(residual.values)):.4f}"
+
+        filename = (
+            f"{im}_{feature_key}_residual.png"
+            if not log_space
+            else f"{im}_{feature_key}_log_ratio.png"
+        )
+
+        residual_hist_plot(
+            sim_df.loc[:, feature_key].values,
+            residual.values,
+            feature_key,
+            im,
+            output_ffp=str(event_out_dir / filename),
+            title=title,
+        )
+
     def gen_IM_feature_plot(self, event: str, im: str, feature_key: str):
         """Generates a IM vs feature plot for the specified IM and event"""
         event_out_dir = self.output_dir / event
@@ -748,7 +861,8 @@ class EventPlotGen(PlotGen):
 
         # Aggregate at each unique value of the feature of interest
         mean_df[feature_key] = sim_df[feature_key]
-        std_df[feature_key] = sim_df[feature_key]
+        if std_df is not None:
+            std_df[feature_key] = sim_df[feature_key]
 
         bin_edges = np.linspace(x.min() - 1e-5, x.max(), 50)
         bin_indices = np.digitize(sim_df[feature_key].values, bin_edges, right=True)
@@ -756,9 +870,13 @@ class EventPlotGen(PlotGen):
         # Get center points of the bins (there might be a better way of doing this
         bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
 
-        mean_df["bin_ix"], std_df["bin_ix"] = bin_indices, bin_indices
+        mean_df["bin_ix"] = bin_indices
         bin_mean_mean = mean_df.groupby("bin_ix").mean()[im]
-        bin_mean_std = std_df.groupby("bin_ix").mean()[im]
+
+        if std_df is not None:
+            std_df["bin_ix"] = bin_indices
+            bin_mean_std = std_df.groupby("bin_ix").mean()[im]
+
         plt.plot(
             bin_centers[bin_mean_mean.index - 1],
             bin_mean_mean,
@@ -768,30 +886,32 @@ class EventPlotGen(PlotGen):
             linewidth=1.25,
             label="Bin mean of estimated means",
         )
-        plt.plot(
-            bin_centers[bin_mean_std.index - 1],
-            bin_mean_mean * np.exp(bin_mean_std),
-            linestyle="--",
-            c="k",
-            marker="o",
-            ms=1.75,
-            linewidth=1.25,
-            label="Bin mean of estiamted stds",
-        )
-        plt.plot(
-            bin_centers[bin_mean_std.index - 1],
-            bin_mean_mean * np.exp(-bin_mean_std),
-            linestyle="--",
-            c="k",
-            marker="o",
-            ms=1.75,
-            linewidth=1.25,
-        )
+        if std_df is not None:
+            plt.plot(
+                bin_centers[bin_mean_std.index - 1],
+                bin_mean_mean * np.exp(bin_mean_std),
+                linestyle="--",
+                c="k",
+                marker="o",
+                ms=1.75,
+                linewidth=1.25,
+                label="Bin mean of estiamted stds",
+            )
+            plt.plot(
+                bin_centers[bin_mean_std.index - 1],
+                bin_mean_mean * np.exp(-bin_mean_std),
+                linestyle="--",
+                c="k",
+                marker="o",
+                ms=1.75,
+                linewidth=1.25,
+            )
 
         plt.xlabel(feature_key)
         plt.ylabel(im)
         plt.yscale("log")
-        plt.grid(linestyle="--", linewidth=0.25)
+        plt.grid(which="major", linestyle="-", linewidth=0.5)
+        plt.grid(which="minor", linestyle="--", linewidth=0.25)
         plt.title("{} {} {}".format(event, im, feature_key))
         plt.legend()
         set_plot_lims(x, [sim_y, mean_df[im]])
@@ -1014,10 +1134,10 @@ class EventPlotGen(PlotGen):
             plot_csv_ffps = []
             for cur_event in to_list(events):
                 for cur_im in to_list(ims):
-                        cur_plot_csv_ffps, cb_options = self.gen_rel_map_data(
-                            cur_event, cur_im, data_type=cur_data_type, n_rels=n_rels
-                        )
-                        plot_csv_ffps.extend(cur_plot_csv_ffps)
+                    cur_plot_csv_ffps, cb_options = self.gen_rel_map_data(
+                        cur_event, cur_im, data_type=cur_data_type, n_rels=n_rels
+                    )
+                    plot_csv_ffps.extend(cur_plot_csv_ffps)
 
             plot_multiple(
                 self.plot_items_ffp,
@@ -1074,6 +1194,255 @@ class EventPlotGen(PlotGen):
             plot_csv_ffps.append(cur_plot_csv_ffp)
 
         return plot_csv_ffps, cb_options
+
+
+class BinPlotGen(PlotGen):
+    """Creates plots for the binned dataset"""
+
+    DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
+
+    def __init__(
+        self,
+        plot_items_ffp: str,
+        model: GMM,
+        data_sets: Dict[str, Path],
+        output_dir: Path,
+        mag_bins: List[float] = None,
+        vs30_bins: List[float] = None,
+    ):
+        super().__init__(plot_items_ffp, model, list(data_sets.values()), output_dir)
+
+        self.mag_bins = mag_bins
+        self.vs30_bins = vs30_bins if vs30_bins is not None else self.DEFAULT_VS30_BINS
+
+        self.data_sets = data_sets
+
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True)
+
+    def create_IM_bin_plot(self, dataset: str, im: str):
+        data_set_dir = self.data_sets[dataset]
+
+        # Get the events of the dataset
+        events = [
+            event_record.name.split(".")[0]
+            for event_record in data_set_dir.glob("*.tfrecord")
+        ]
+
+        # Get the required data
+        data_dfs, mean_est_dfs = [], []
+        for event in events:
+            df, mean_est, std_est = self._get_event_estimates(event)
+            data_dfs.append(df.loc[:, ["mag", "vs30", "rrup", im]])
+            mean_est_dfs.append(mean_est.loc[:, im])
+
+        df, mean_est = pd.concat(data_dfs), pd.concat(mean_est_dfs)
+
+        mag_bins = (
+            self.mag_bins
+            if self.mag_bins is not None
+            else self._get_default_mag_bins(df.mag.values)
+        )
+
+        plot_mag_vs30_bins(
+            df,
+            mean_est,
+            im,
+            np.asarray(mag_bins),
+            np.asarray(self.vs30_bins),
+            self.output_dir / f"{dataset}_{im}.png",
+        )
+
+    def create_IM_res_scatter_bin_plot(
+        self, dataset: str, im: str, log_space: bool = False
+    ):
+        """Creates an residual scatter plot with x- & y-axis histograms
+        for each magnitude and vs30 bin
+        """
+        data_set_dir = self.data_sets[dataset]
+
+        # Get the events of the dataset
+        events = [
+            event_record.name.split(".")[0]
+            for event_record in data_set_dir.glob("*.tfrecord")
+        ]
+
+        # Get the required data
+        data_dfs, mean_est_dfs = [], []
+        for event in events:
+            df, mean_est, std_est = self._get_event_estimates(event)
+            data_dfs.append(df.loc[:, ["mag", "vs30", "rrup", im]])
+            mean_est_dfs.append(mean_est.loc[:, im])
+
+        df, mean_est = pd.concat(data_dfs), pd.concat(mean_est_dfs)
+        assert np.all(df.index == mean_est.index)
+
+        mag_bins = (
+            self.mag_bins
+            if self.mag_bins is not None
+            else self._get_default_mag_bins(df.mag.values)
+        )
+
+        filename = (
+            f"{dataset}_{im}_binned_residual_plots.png"
+            if not log_space
+            else f"{dataset}_{im}_binned_log_ratio_plots.png"
+        )
+
+        plot_mag_vs30_res_bins(
+            df,
+            mean_est,
+            im,
+            mag_bins,
+            np.asarray(self.vs30_bins),
+            self.output_dir / filename,
+            log_space=log_space,
+        )
+
+    def _get_default_mag_bins(self, mag_values: np.ndarray):
+        return np.arange(np.floor(np.min(mag_values)), np.ceil(np.max(mag_values)) + 1)
+
+
+def plot_mag_vs30_res_bins(
+    df: pd.DataFrame,
+    mean_est_df: pd.DataFrame,
+    im: str,
+    mag_bins: np.ndarray,
+    vs30_bins: np.ndarray,
+    output_ffp: Path,
+    log_space: bool = False,
+):
+    mag_ind = np.digitize(df.mag.values, mag_bins)
+    vs_30_ind = np.digitize(df.vs30.values, vs30_bins)
+
+    n_rows, n_cols = len(mag_bins) - 1, len(vs30_bins) - 1
+    fig = multi_fig((8, 6), n_rows, n_cols)
+    outer_grid = fig.add_gridspec(
+        n_rows,
+        n_cols,
+        left=0.05,
+        right=0.95,
+        bottom=0.05,
+        top=0.95,
+        wspace=0.1,
+        hspace=0.15,
+    )
+    subfig_ix = 0
+    for cur_mag_bin_ix in range(n_rows):
+
+        # Bin indices start from 1
+        cur_mag_bin_ix += 1
+
+        if not np.any(mag_ind == cur_mag_bin_ix):
+            continue
+
+        for cur_vs30_bin_ix in range(n_cols):
+            cur_vs30_bin_ix += 1
+            inner_grid = outer_grid[subfig_ix].subgridspec(
+                2,
+                2,
+                width_ratios=(7, 2),
+                height_ratios=(2, 7),
+                wspace=0.00,
+                hspace=0.00,
+            )
+            subfig_ix += 1
+
+            ax = fig.add_subplot(inner_grid[1, 0])
+            ax_histx = fig.add_subplot(inner_grid[0, 0], sharex=ax)
+            ax_histy = fig.add_subplot(inner_grid[1, 1], sharey=ax)
+
+            if not np.any(vs_30_ind == cur_vs30_bin_ix):
+                continue
+
+            cur_mask = (mag_ind == cur_mag_bin_ix) & (vs_30_ind == cur_vs30_bin_ix)
+
+            if log_space:
+                residual = df.loc[cur_mask, im] - mean_est_df.loc[cur_mask].apply(
+                    np.log
+                )
+                title = f"Mean abs ln residual {np.mean(np.abs(residual.values)):.2f}"
+            else:
+                residual = (
+                    df.loc[cur_mask, im].apply(np.exp) - mean_est_df.loc[cur_mask]
+                )
+                title = f"Mean abs residual {np.mean(np.abs(residual.values)):.2f}"
+
+            title = (
+                f"Vs30: {vs30_bins[cur_vs30_bin_ix - 1]}-{vs30_bins[cur_vs30_bin_ix]}, "
+                f"Mag: {mag_bins[cur_mag_bin_ix-1]}-{mag_bins[cur_mag_bin_ix]}, "
+                f"N: {df.loc[cur_mask].shape[0]} - {title}"
+            )
+
+            residual_hist_plot(
+                df.loc[cur_mask, "rrup"].values,
+                residual.values,
+                "rrup",
+                im,
+                fig=fig,
+                ax=ax,
+                ax_histx=ax_histx,
+                ax_histy=ax_histy,
+                title=title,
+                log_hist_x=True,
+                log_hist_y=True,
+            )
+
+    fig.savefig(output_ffp)
+
+
+def plot_mag_vs30_bins(
+    df: pd.DataFrame,
+    mean_est_df: pd.DataFrame,
+    im: str,
+    mag_bins: np.ndarray,
+    vs30_bins: np.ndarray,
+    output_ffp: Path,
+):
+    """Creates IM value vs rrup scatter plots for each of the
+    magnitude and vs30 bins
+    """
+    mag_ind = np.digitize(df.mag.values, mag_bins)
+    vs_30_ind = np.digitize(df.vs30.values, vs30_bins)
+
+    n_rows, n_cols = len(mag_bins) - 1, len(vs30_bins) - 1
+    fig = multi_fig((8, 6), n_rows, n_cols)
+    ax_ix = 1
+    for cur_mag_bin_ix in range(n_rows):
+        # Bin indices start from 1
+        cur_mag_bin_ix += 1
+
+        if not np.any(mag_ind == cur_mag_bin_ix):
+            continue
+
+        for cur_vs30_bin_ix in range(n_cols):
+            cur_vs30_bin_ix += 1
+            cur_ax = fig.add_subplot(n_rows, n_cols, ax_ix)
+            ax_ix += 1
+
+            if not np.any(vs_30_ind == cur_vs30_bin_ix):
+                continue
+
+            cur_mask = (mag_ind == cur_mag_bin_ix) & (vs_30_ind == cur_vs30_bin_ix)
+
+            cur_ax.scatter(df.rrup[cur_mask], np.exp(df.loc[cur_mask, im]), s=1.0)
+            cur_ax.scatter(df.rrup[cur_mask], mean_est_df.loc[cur_mask], s=1.0)
+            cur_ax.set_yscale("log")
+
+            cur_ax.text(
+                0.99,
+                0.99,
+                f"Vs30: {vs30_bins[cur_vs30_bin_ix - 1]}-{vs30_bins[cur_vs30_bin_ix]}, "
+                f"Mag: {mag_bins[cur_mag_bin_ix-1]}-{mag_bins[cur_mag_bin_ix]},"
+                f"N: {df.loc[cur_mask].shape[0]}",
+                horizontalalignment="right",
+                verticalalignment="top",
+                transform=cur_ax.transAxes,
+            )
+            cur_ax.grid(linestyle="--", linewidth=0.25, alpha=0.75)
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
 
 
 def plot_n_records_map(
@@ -1276,3 +1645,100 @@ def set_plot_lims(
     plt.ylim((y_min, y_max))
 
 
+def scatter_hist(
+    x, y, ax, ax_histx, ax_histy, n_bins: int = 25, scatter_kwargs: Dict = None
+):
+    scatter_kwargs = {} if scatter_kwargs is None else scatter_kwargs
+
+    # no labels
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+
+    # the scatter plot:
+    ax.scatter(x, y, **scatter_kwargs)
+
+    # bins = np.arange(-lim, lim + binwidth, binwidth)
+    ax_histx.hist(x, bins=n_bins, color="k")
+    ax_histy.hist(y, bins=n_bins, orientation="horizontal", color="k")
+
+
+def residual_hist_plot(
+    x: np.ndarray,
+    residual: np.ndarray,
+    x_label: str,
+    y_label: str,
+    title: str = "",
+    output_ffp: str = None,
+    fig: plt.Figure = None,
+    ax: plt.Axes = None,
+    ax_histx: plt.Axes = None,
+    ax_histy: plt.Axes = None,
+    log_hist_y: bool = False,
+    log_hist_x: bool = False,
+):
+
+    gs = fig.add_gridspec(
+        2,
+        2,
+        width_ratios=(7, 2),
+        height_ratios=(2, 7),
+        left=0.05,
+        right=0.95,
+        bottom=0.05,
+        top=0.95,
+        wspace=0.00,
+        hspace=0.00,
+    )
+
+    if ax is None:
+        fig = plt.figure(figsize=(18, 13.5))
+        ax = fig.add_subplot(gs[1, 0])
+        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax)
+        ax_histy = fig.add_subplot(gs[1, 1], sharey=ax)
+
+    scatter_hist(
+        x,
+        residual,
+        ax,
+        ax_histx,
+        ax_histy,
+        n_bins=50,
+        scatter_kwargs={"s": 0.5, "alpha": 0.5},
+    )
+    ax.set_ylabel(y_label)
+    ax.set_xlabel(x_label)
+    ax.axhline(0.0, color="k", linestyle="--")
+
+    under_mask = residual > 0
+    over_mask = residual < 0
+    ax.text(
+        0.01,
+        0.99,
+        f"Under - N: {np.count_nonzero(under_mask)} - SumE: {np.sum(residual[under_mask]):.2f} - "
+        f"SumSE: {np.sum(np.square(residual[under_mask])):.2f}",
+        horizontalalignment="left",
+        verticalalignment="top",
+        transform=ax.transAxes,
+    )
+    ax.text(
+        0.01,
+        0.01,
+        f"Over - N: {np.count_nonzero(over_mask)} - SumE: {np.sum(residual[over_mask]):.2f} - "
+        f"SumSE: {np.sum(np.square(residual[over_mask])):.2f}",
+        horizontalalignment="left",
+        verticalalignment="bottom",
+        transform=ax.transAxes,
+    )
+    ax_histx.set_title(title)
+
+    if log_hist_x:
+        ax_histx.set_yscale("log")
+    if log_hist_y:
+        ax_histy.set_xscale("log")
+
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+
+    if output_ffp is not None:
+        fig.savefig(output_ffp)
+        plt.close()

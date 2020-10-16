@@ -17,6 +17,7 @@ def _compute_rake_bearing(strike: float, rake: float):
 
 
 def _compute_theta(rake_bearing: float, site_bearing: float):
+    """Computes the theta angle"""
     theta = np.abs(geo.angle_diff(rake_bearing, site_bearing))
     return theta if theta < 90 else 180 - theta
 

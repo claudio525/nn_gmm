@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, List, Union
+from typing import Any, List, Union, Dict
 from PIL import Image
 
 import numpy as np
@@ -38,7 +38,8 @@ def get_station_lookup(X: pd.DataFrame):
 
 def get_station_from_id(ids: np.ndarray) -> List[str]:
     """Computes the stations from station_rupture ids"""
-    return [cur_split[-1] for cur_split in np.char.split(ids, "_")]
+    return np.stack(np.char.split(ids, "_"))[:, -1]
+    # return [cur_split[-1] for cur_split in np.char.split(ids, "_")]
 
 
 def to_path(input: Union[str, List[str], List[Path]] = None):
@@ -114,3 +115,17 @@ def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
 
     assert result_df.shape[0] == im_df.shape[0]
     return result_df
+
+def convert_input_config(config: Dict, stats_df: pd.DataFrame):
+    """Adds the correct stats parameters to the input config"""
+    for key, item in config.items():
+        if item is None:
+            continue
+        elif item == "standard":
+            config[key] = (item, stats_df.loc[key, "mean"], stats_df.loc[key, "std"])
+        elif item == "min_max":
+            config[key] = (item, stats_df.loc[key, "min"], stats_df.loc[key, "max"])
+        else:
+            raise ValueError(f"{item} is not a valid preprocessing config value")
+
+    return config

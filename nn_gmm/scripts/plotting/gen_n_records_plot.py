@@ -8,10 +8,10 @@ plot_items_ffp = (
 )
 
 train_data_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/train",
+    "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train",
 ]
 val_data_dirs = [
-    "/home/cbs51/dev/work/data/nn_gmm/sample_files/val",
+    "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val",
 ]
 data_dirs = train_data_dirs + val_data_dirs
 output_dir = Path("/home/claudy/dev/work/data/nn_gmm/results/keep/n_records")

@@ -11,9 +11,10 @@ def relu_BN_dropout(input: layers.Layer, n_units: int, dropout: float = 0.5):
     return x
 
 
-def relu_dropout(input: layers.Layer, n_units: int, dropout: float = 0.5):
+def relu_dropout(input: layers.Layer, n_units: int, dropout: float = 0.2):
     x = layers.Dense(units=n_units, activation="relu")(input)
-    x = layers.Dropout(rate=dropout)(x)
+    if dropout is not None:
+        x = layers.Dropout(rate=dropout)(x)
 
     return x
 

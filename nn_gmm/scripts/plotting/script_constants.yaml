@@ -1,5 +1,5 @@
 "train_rep_events": ['Tuakana10', 'MS05', "Rakaia", 'Wairau', 'AlpineF2K']
-"val_rep_events": ['MotuhoraS01', 'Pegasus1nw', 'HopeConway']
+"val_rep_events": ['MotuhoraS01', 'Pegasus1nw', 'AlpineR']
 "ims_plotting": [
   "Ds595",
   "PGA",

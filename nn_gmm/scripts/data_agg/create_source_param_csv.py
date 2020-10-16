@@ -37,8 +37,8 @@ def get_fault_data(sources_dir: str, fault_name: str):
                     "hlat": f.attrs["hlat"],
                     "dhyp": np.max(f.attrs["dhyp"]),
                     "shyp": np.max(f.attrs["shyp"]),
-                    "width": np.mean(f.attrs["width"]),
-                    "length": np.mean(f.attrs["length"]),
+                    "width": np.sum(f.attrs["width"]),
+                    "length": np.sum(f.attrs["length"]),
                     "is_point_source": f.attrs["type"] == 1})
 
     return pd.DataFrame.from_records(data_dirs, index=rel_names)
