@@ -4,13 +4,28 @@ specified parameter space & specified constraints
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+import tensorflow as tf
 from scipy import stats
 from tensorflow import keras
 
 import ml_tools
 import nn_gmm
+
+import matplotlib
+matplotlib.use("Agg")
+
+# Grow the GPU memory usage as needed
+gpus = tf.config.experimental.list_physical_devices("GPU")
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        logical_gpus = tf.config.experimental.list_logical_devices("GPU")
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
 
 ## -------- Input Config ------------
 
@@ -131,12 +146,12 @@ for ix in range(n_evals):
     cur_config["training_config"]["optimizer"] = optimizer
 
     # Running the training
-    train_result, _, *_ = nn_gmm.train(
+    train_result, cur_output_dir, *_ = nn_gmm.train(
         INPUT_CONFIG, cur_config, model_fn=nn_gmm.create_reg_model, verbose=1
     )
 
-    cur_model_id = output_dir.name
-    loss_df = pd.read_csv(output_dir / "loss.csv", index_col=0)
+    cur_model_id = cur_output_dir.name
+    loss_df = pd.read_csv(cur_output_dir / "loss.csv", index_col=0)
     min_val_loss_ix = loss_df["val_loss"].argmin()
 
     # Saving the results

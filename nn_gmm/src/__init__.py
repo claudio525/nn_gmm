@@ -6,5 +6,6 @@ from .model import *
 from .data_processing import *
 from .data import *
 from .directivity import *
+from .eval import *
 
 from .utils import *

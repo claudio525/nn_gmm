@@ -17,6 +17,7 @@ from visualization.gmt.plotting import plot_multiple, plot_single
 from .model import GMM
 from .utils import get_station_from_id, get_station_lookup, to_path, to_list
 from . import data
+from .eval import get_realisation_residuals
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
@@ -614,9 +615,42 @@ class AggPlotGen(PlotGen):
         super().__init__(plot_items_ffp, model, data_dirs, output_dir)
         self._ims = ims
 
+        self._sim_df, self._mean_df, self._std_df = None, None, None
+
+        self._rel_res_df = None
+
+        if not self.output_dir.is_dir():
+            self.output_dir.mkdir(parents=True)
+
+    @property
+    def rel_res_df(self):
+        if self._rel_res_df is None:
+            self._rel_res_df = get_realisation_residuals(self.data_dirs, self.model)
+        return self._rel_res_df
+
+    @property
+    def sim_df(self):
+        if self._sim_df is None:
+            self._get_estimates()
+        return self._sim_df
+
+    @property
+    def mean_df(self):
+        if self._sim_df is None:
+            self._get_estimates()
+        return self._mean_df
+
+    @property
+    def std_df(self):
+        if self._sim_df is None:
+            self._get_estimates()
+        return self._std_df
+
+    def _get_estimates(self):
         print(f"Getting estimates for the specified IMs")
-        self._sim_df, self._mean_df, self._std_df = self._get_estimates()
-        assert np.all(self._sim_df.index == self._mean_df.index)
+        self._sim_df, self._mean_df, self._std_df = self.model.predict_dirs(
+            self.data_dirs, ims=self._ims, features=["lat", "lon", "mag"]
+        )
 
         print("Adding station data")
         self._sim_df["station"] = get_station_from_id(
@@ -627,64 +661,30 @@ class AggPlotGen(PlotGen):
         if self._std_df is not None:
             self._std_df["station"] = self._sim_df.station.values
 
-        if not self.output_dir.is_dir():
-            self.output_dir.mkdir(parents=True)
-
-    def _get_estimates(self):
-        return self.model.predict_dirs(
-            self.data_dirs, ims=self._ims, features=["lat", "lon", "mag"]
-        )
 
     def _get_event_estimates(self, event: str):
         raise NotImplementedError()
 
-    def plot_realisation_residuals(self, abs_residual: bool = False):
+    def plot_realisation_residuals(self):
         """Creates a residual plot for realisations"""
+
         print("Plotting realisation residuals")
-        assert np.all(self._mean_df.index == self._sim_df.index)
-
-        split_ids = np.stack(np.char.split(self._mean_df.index.values.astype(str), "_"))
-        self._mean_df["realisation"] = np.char.add(
-            np.char.add(split_ids[:, 0], "_"), split_ids[:, 1]
-        )
-        self._mean_df["fault"] = split_ids[:, 0]
-
-        self._sim_df["realisation"] = self._mean_df.realisation
-
-        rel_fault = self._mean_df.groupby("realisation").first()["fault"].to_frame()
-
-        rel_mag = self._sim_df.groupby("realisation").first()["mag"]
-        rel_n_stations = self._sim_df.groupby("realisation").count()["station"]
-
         for im in self._ims:
-            res = (
-                self._sim_df.loc[:, im] - self._mean_df.loc[:, im].apply(np.log)
-            ).to_frame()
-            if abs_residual:
-                res[im] = res[im].apply(np.abs)
-
-            res["realisation"] = self._mean_df.realisation
-
-            rel_res = res.groupby("realisation").mean()
-            rel_res = rel_res.merge(rel_mag, left_index=True, right_index=True)
-            rel_res = rel_res.merge(rel_fault, left_index=True, right_index=True)
-
-            assert np.all(rel_mag.index == rel_res.index)
 
             fig = px.scatter(
-                data_frame=rel_res,
+                data_frame=self.rel_res_df,
                 x="mag",
                 y=im,
-                symbol="fault",
-                symbol_sequence=list(range(45)),
+                # symbol="fault",
+                # symbol_sequence=list(range(45)),
                 hover_name=np.char.add(
-                    np.char.add(rel_res.index.values.astype(str), " - "),
-                    rel_n_stations.values.astype(str),
+                    np.char.add(self.rel_res_df.index.values.astype(str), " - "),
+                    self.rel_res_df.loc[:, "n_stations"].values.astype(str),
                 ),
                 title=f"{im} - Realisation ln residuals (mean)",
                 labels={
-                    "x": im,
-                    "y": f"Mean ln {'abs' if abs_residual else ''} residual",
+                    "x": f"{im} - Realisation ln residual (mean)",
+                    "y": f"Mean ln abs residual",
                 },
                 marginal_y="histogram",
             )
@@ -705,7 +705,7 @@ class AggPlotGen(PlotGen):
             fig.write_html(
                 str(
                     self.output_dir
-                    / f"{im}_realisation_ln_{'abs_' if abs_residual else ''}residual.html"
+                    / f"{im}_realisation_ln_abs_residual.html"
                 )
             )
 
@@ -1250,7 +1250,7 @@ class BinPlotGen(PlotGen):
             im,
             np.asarray(mag_bins),
             np.asarray(self.vs30_bins),
-            self.output_dir / f"{dataset}_{im}.png",
+            self.output_dir / f"{dataset}_{im.replace('.', 'p')}.png",
         )
 
     def create_IM_res_scatter_bin_plot(

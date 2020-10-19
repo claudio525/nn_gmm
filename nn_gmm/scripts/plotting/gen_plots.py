@@ -169,8 +169,7 @@ def gen_rel_residual_plots(ims, model, data_dirs, output_dir, config):
         plot_items_ffp, model, ims, data_dirs, output_dir
     )
 
-    train_agg_plot_gen.plot_realisation_residuals(abs_residual=False)
-    train_agg_plot_gen.plot_realisation_residuals(abs_residual=True)
+    train_agg_plot_gen.plot_realisation_residuals()
 
 
 def gen_agg_plots(ims, model, data_dirs, output_dir, config):

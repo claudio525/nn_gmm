@@ -38,7 +38,7 @@ class GMM:
         pre_process: bool = True,
         result_df_index: np.ndarray = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        X = self._pre_process(X) if pre_process else X
+        X = self._pre_process(X.copy()) if pre_process else X
 
         # Ensure that all the required features exist
         if not np.all(np.isin(self.features, X.columns.values.astype(str))):
