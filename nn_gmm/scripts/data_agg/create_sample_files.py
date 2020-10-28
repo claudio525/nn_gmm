@@ -2,7 +2,7 @@ import pickle
 import argparse
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import numpy as np
@@ -76,7 +76,7 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 
-def _serialize(ix_1, cur_input_row, ix_2, cur_im_df_row):
+def _serialize(ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weight: float):
     assert ix_1 == ix_2
 
     features = {
@@ -84,12 +84,13 @@ def _serialize(ix_1, cur_input_row, ix_2, cur_im_df_row):
         **{key: _float_feature(value) for key, value in cur_im_df_row.items()},
     }
     features["id"] = _bytes_feature(str.encode(ix_1))
+    features["sample_weight"] = _float_feature(sample_weight)
 
     example_proto = tf.train.Example(features=tf.train.Features(feature=features))
     return example_proto.SerializeToString()
 
 
-def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame, n_procs: int = 8):
+def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame, sample_weights_df: pd.Series, n_procs: int = 8):
     """Serializes training data (features & labels) into the tf.train.Example format"""
     ser_examples = []
 
@@ -97,13 +98,13 @@ def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame, n_procs: int = 8):
         for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(
             input_df.iterrows(), im_df.iterrows()
         ):
-            ser_examples.append(_serialize(ix_1, cur_input_row, ix_2, cur_im_df_row))
+            ser_examples.append(_serialize(ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weights_df.loc[ix_1]))
     else:
         with mp.Pool(processes=n_procs) as pool:
             ser_examples = pool.starmap(
                 _serialize,
                 [
-                    (ix_1, cur_input_row, ix_2, cur_im_df_row)
+                    (ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weights_df.loc[ix_1])
                     for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(
                         input_df.iterrows(), im_df.iterrows()
                     )
@@ -122,11 +123,14 @@ def gen_tf_records(
     im_db_ffps: List[Path],
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
+    rrup_mag_weighting_data: Tuple[np.ndarray, np.ndarray, np.ndarray] = None,
     n_procs: int = 8,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
     """
+    print("Generating tfrecord files")
+    total_sample_weights = 0
     for ix, cur_source in enumerate(sources):
         print(f"Processing {ix + 1}/{sources.size}")
         cur_output_ffp = output_dir / f"{cur_source}.tfrecord"
@@ -188,10 +192,28 @@ def gen_tf_records(
 
         cur_im_df = nn_gmm.interpolate_pSA_periods(cur_im_df, IMs)
 
+        # Get the sample weights
+        sample_weights_df = pd.Series(index=cur_input_df.index, data=np.ones(cur_input_df.shape[0], dtype=float))
+        if rrup_mag_weighting_data is not None:
+            bin_weights, mag_bins, rrup_bins = rrup_mag_weighting_data
+
+            mag_diff = mag_bins - cur_input_df.mag.values[:, None]
+            mag_diff[mag_diff >= 0] = -np.inf
+            mag_bin_ind = mag_diff.argmax(axis=1)
+
+            rrup_diff = rrup_bins - cur_input_df.rrup.values[:, None]
+            rrup_diff[rrup_diff >= 0] = -np.inf
+            rrup_bin_ind = rrup_diff.argmax(axis=1)
+
+            sample_weights = bin_weights[rrup_bin_ind, mag_bin_ind]
+            total_sample_weights += sample_weights.sum()
+
+            sample_weights_df = pd.Series(index=cur_input_df.index, data=sample_weights)
+
         assert np.all(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
         )
-        examples = serialize(cur_input_df, cur_im_df[IMs], n_procs=n_procs)
+        examples = serialize(cur_input_df, cur_im_df[IMs], sample_weights_df, n_procs=n_procs)
 
         if ix == 0:
             print(f"Writing feature details")
@@ -207,7 +229,8 @@ def gen_tf_records(
             }
             feature_description = {
                 **feature_description,
-                **{"id": tf.io.FixedLenFeature([], tf.string)},
+                **{"id": tf.io.FixedLenFeature([], tf.string),
+                   "sample_weight": tf.io.FixedLenFeature([], tf.float32)},
             }
             with open(str(output_dir / "feature_details.pickle"), "wb") as f:
                 pickle.dump(feature_description, f)
@@ -216,6 +239,63 @@ def gen_tf_records(
             for example in examples:
                 writer.write(example)
 
+    if rrup_mag_weighting_data is not None:
+        if not np.isclose(total_sample_weights, 1.0):
+            print("Sample weights don't add up to 1.0")
+
+
+def gen_bin_weights(distance_df: pd.DataFrame, rel_df: pd.DataFrame, sources: np.ndarray, imdb_ffps: List[Path], n_rrup_bins: int = 10,
+                    n_mag_bins: int = 10):
+    """Computes samples weights based on rrup and magnitude distribution of the samples using
+    a n_rrup_bins x n_mag_bins grid
+    """
+    mag_bins = np.linspace(rel_df.mag.min(), rel_df.mag.max(), n_mag_bins)
+    rrup_bins = np.linspace(distance_df.rrup.min(), distance_df.rrup.max(), n_rrup_bins)
+
+    bin_count = None
+    print("Generating bin weights")
+    for ix, cur_source in enumerate(sources):
+        print(f"Processing {ix + 1}/{sources.size}")
+        cur_im_df = nn_gmm.load_fault_im_df(cur_source, imdb_ffps) 
+
+        if cur_im_df is None:
+            print(f"No IM data found for source {cur_source}, skipping.")
+            continue
+
+        cur_input_df = nn_gmm.create_sample_comb(cur_im_df)
+        cur_input_df["id"] = cur_input_df.index.values.astype(str)
+
+        # Merge with realisation source parameters
+        cur_input_df = pd.merge(
+            cur_input_df,
+            rel_df,
+            how="inner",
+            left_on="realisation",
+            right_index=True,
+            suffixes=(None, "_rel_df"),
+        )
+
+        # Merge with distance parameters
+        cur_input_df = pd.merge(
+            cur_input_df,
+            distance_df,
+            how="inner",
+            left_on=["source", "site"],
+            right_on=["source", "site"],
+        )
+        cur_input_df.set_index("id", inplace=True)
+
+        cur_bin_count, _, __ = np.histogram2d(cur_input_df.rrup.values, cur_input_df.mag.values, bins=(rrup_bins, mag_bins))
+
+        bin_count = cur_bin_count if bin_count is None else bin_count + cur_bin_count
+
+    bin_weights = np.zeros(bin_count.shape, dtype=float)
+    mask = bin_count != 0
+    bin_weights[mask] = 1 / np.count_nonzero(mask) / bin_count[mask]
+
+    assert np.isclose(np.sum(bin_weights * bin_count), 1.0)
+
+    return bin_weights, mag_bins, rrup_bins
 
 def main(
     site_params_dir: Path,
@@ -270,6 +350,8 @@ def main(
             val_sources = np.asarray([line.strip() for line in f.readlines()])
         train_sources = all_sources[~np.isin(all_sources, val_sources)]
 
+        bin_weights, mag_bins, rrup_bins = gen_bin_weights(distance_df, rel_df, train_sources, im_db_ffps)
+
         # Training dataset
         gen_tf_records(
             train_sources,
@@ -280,6 +362,7 @@ def main(
             im_db_ffps,
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
+            rrup_mag_weighting_data=(bin_weights, mag_bins, rrup_bins),
             n_procs=n_procs,
         )
 
@@ -296,6 +379,8 @@ def main(
             n_procs=n_procs,
         )
     else:
+        bin_weights, mag_bins, rrup_bins = gen_bin_weights(distance_df, rel_df, rel_df.index.values.astype(str), im_db_ffps)
+
         gen_tf_records(
             rel_df.index.values.astype(str),
             rel_df,
@@ -305,8 +390,11 @@ def main(
             im_db_ffps,
             output_dir,
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
+            rrup_mag_weighting_data=(bin_weights, mag_bins, rrup_bins),
             n_procs=n_procs,
         )
+
+
 
 
 if __name__ == "__main__":
@@ -334,7 +422,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_procs", type=int, help="Number of processes to use", default=4
     )
-
     args = parser.parse_args()
 
     main(

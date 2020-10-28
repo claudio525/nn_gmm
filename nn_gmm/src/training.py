@@ -138,7 +138,9 @@ def train(
         input_config["im_config"].copy()
     )
     n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
-    train_ds = data_processing.preprocess_ds(train_ds, feature_config, im_config)
+    train_ds = data_processing.preprocess_ds(
+        train_ds, feature_config, im_config, use_sample_weights=training_config["use_sample_weights"]
+    )
     val_ds = (
         val_ds
         if val_ds is None
@@ -197,7 +199,11 @@ def train(
     # Create loss plot
     plt.figure()
     plt.plot(history.epoch, loss_df.loss, label=f"Loss - {loss_df.loss.min():.4f}")
-    plt.plot(history.epoch, loss_df.val_loss, label=f"Validation loss - {loss_df.val_loss.min():.4f}")
+    plt.plot(
+        history.epoch,
+        loss_df.val_loss,
+        label=f"Validation loss - {loss_df.val_loss.min():.4f}",
+    )
 
     plt.ylabel(training_config["loss"])
     plt.xlabel("Epoch")
@@ -211,5 +217,3 @@ def train(
         TrainingResult(input_config, training_config, output_dir, model_dir),
         output_dir,
     )
-
-

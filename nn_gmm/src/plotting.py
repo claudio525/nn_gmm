@@ -136,8 +136,9 @@ class IMvsPlotGen:
     CONST_DEFAULT_VALUES = pd.Series(
         data={
             "vs30": 388,
-            "z1p0": 0.21,
-            "z2p5": 1.3,
+            "vs500": 1.345,
+            "z1p0": 0.134,
+            "z2p5": 1.03,
             "dip": 60,
             "rake": 45,
             "strike": 177,
@@ -1390,6 +1391,8 @@ def plot_mag_vs30_res_bins(
 
     fig.savefig(output_ffp)
 
+    plt.close()
+
 
 def plot_mag_vs30_bins(
     df: pd.DataFrame,
@@ -1443,6 +1446,8 @@ def plot_mag_vs30_bins(
 
     fig.tight_layout()
     fig.savefig(output_ffp)
+
+    plt.close()
 
 
 def plot_n_records_map(

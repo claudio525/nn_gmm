@@ -37,6 +37,7 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
                 cur_state["min"][key] = cur_state["min"][key] if cur_state["min"][key] < cur_min else cur_min
                 cur_state["max"][key] = cur_state["max"][key] if cur_state["max"][key] > cur_max else cur_max
                 cur_state["sum"][key] += tf.reduce_sum(items[key])
+                # cur_state["ln_sum"]["key"] += tf.reduce_sum(tf.math.log(items[key]))
 
         return cur_state
 
@@ -70,6 +71,15 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
                                               tf.constant(2, dtype=tf.float32)))
 
         return cur_state
+
+    # def _get_ln_sigma_sum(cur_state, items):
+    #     for key in items.keys():
+    #         if key != "id":
+    #             cur_state[key] += tf.reduce_sum(tf.math.pow(tf.math.log(items[key]) - stats_df.loc[key, "ln_mean"],
+    #                                           tf.constant(2, dtype=tf.float32)))
+    #
+    #     return cur_state
+
 
     start_time = time.time()
     std_sum = parsed_dataset.prefetch(tf.data.experimental.AUTOTUNE).reduce(

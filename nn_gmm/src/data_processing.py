@@ -50,6 +50,7 @@ def get_min_max_scaling_fn(
     -------
     tf.function or function
     """
+
     def min_max_fn(data):
         return ((data - data_min) / (data_max - data_min)) * (
             target_max - target_min
@@ -81,19 +82,23 @@ def preprocess_df(df: pd.DataFrame, config: Dict):
             print(f"Ignoring feature {name} as this is not in the dataframe!")
             continue
 
-        df[name] = func(df[name].values) if func is not None else df[name]
+        df[name] = func(df[name].values.astype(float)) if func is not None else df[name]
 
     return df
 
 
-def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict = None):
+def preprocess_ds(
+    ds: tf.data.Dataset,
+    feature_config: Dict,
+    im_config: Dict = None,
+    use_sample_weights: bool = False,
+):
     """Performs pre-processing on the specified tf.data.Dataset
     using the functions in the feature & IM config
 
     Items in those dictionaries have to be tf functions taking
     and returning a single tensor
     """
-
     def _apply_pre_config(item):
         features = []
         for name, func in feature_config.items():
@@ -102,7 +107,16 @@ def preprocess_ds(ds: tf.data.Dataset, feature_config: Dict, im_config: Dict = N
         if im_config is not None:
             target_values = []
             for name, func in im_config.items():
-                target_values.append(func(item[name]) if func is not None else item[name])
+                target_values.append(
+                    func(item[name]) if func is not None else item[name]
+                )
+
+            if use_sample_weights:
+                return (
+                    tf.stack(features, axis=1),
+                    tf.stack(target_values, axis=1),
+                    item["sample_weight"]
+                )
 
             return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
 
@@ -124,6 +138,8 @@ def convert_to_transform_fn(config: Dict, tf_fn: bool = True):
             config[key] = get_standard_scaling_fn(item[1], item[2], tf_fn=tf_fn)
         elif item[0] == "min_max":
             config[key] = get_min_max_scaling_fn(item[1], item[2], tf_fn=tf_fn)
+        elif item[0] == "ln":
+            config[key] = tf.math.log
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 

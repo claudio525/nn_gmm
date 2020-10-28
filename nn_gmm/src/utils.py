@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, List, Union, Dict
 from PIL import Image
 
+import git
 import numpy as np
 import pandas as pd
 from scipy import interpolate
@@ -125,7 +126,14 @@ def convert_input_config(config: Dict, stats_df: pd.DataFrame):
             config[key] = (item, stats_df.loc[key, "mean"], stats_df.loc[key, "std"])
         elif item == "min_max":
             config[key] = (item, stats_df.loc[key, "min"], stats_df.loc[key, "max"])
+        elif item == "ln":
+            config[key] = (item, )
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
     return config
+
+def get_repo_version():
+    """Gets the current commit hash"""
+    repo = git.Repo(search_parent_directories=True)
+    return repo.head.object.hexsha

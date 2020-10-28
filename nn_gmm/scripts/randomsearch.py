@@ -1,6 +1,7 @@
 """Performs a random search in the
 specified parameter space & specified constraints
 """
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -30,15 +31,15 @@ if gpus:
 ## -------- Input Config ------------
 
 INPUT_CONFIG = {
-    "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train"],
-    "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
-    "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
-    "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/gridsearch",
+    # "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train"],
+    # "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
+    # "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
+    # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/gridsearch",
 
-    # "train_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train"],
-    # "val_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/val"],
-    # "stats_df": "/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train/stats.csv",
-    # "base_output_dir": "/home/cbs51/code/nn_gmm/results/test",
+    "train_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train"],
+    "val_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/val"],
+    "stats_df": "/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train/stats.csv",
+    "base_output_dir": "/home/cbs51/code/nn_gmm/results/gridsearch",
 
     "output_dir": None,
     "feature_config": {
@@ -57,11 +58,16 @@ INPUT_CONFIG = {
         "lon": "min_max",
         "lat": "min_max",
         "vs30": "standard",
+
         "s": "standard",
         "theta": "min_max",
-        # "z1p0": "standard",
-        # "z2p5": "standard",
-        "rrup": "standard",
+
+        "z1p0": "standard",
+        "z2p5": "standard",
+        "vs500": "standard",
+
+        # "rrup": "standard",
+        "rrup": "ln",
         "rx": "standard",
         "rjb": "standard",
         "ry": "standard",
@@ -88,17 +94,13 @@ INPUT_CONFIG["im_config"] = nn_gmm.convert_input_config(INPUT_CONFIG["im_config"
 
 CONFIG = {
     "model_config": {
-        "hidden_layer_config": {"dropout": 0.3},
+        "hidden_layer_config": {},
         "hidden_layer_func": nn_gmm.relu_dropout,
-        "units": [76, 76, 76],
     },
     "training_config": {
-        "batch_size": 1024,
         "shuffle_buffer_size": int(7e6),
-        "n_epochs": 2,
-        "optimizer": "Adam",
-        "loss": "mse",
-        # "loss": nn_gmm.MargNLLLoss(len(list(INPUT_CONFIG["im_config"].keys()))),
+        "n_epochs": 15,
+        "use_sample_weights": True,
     },
 }
 
@@ -106,16 +108,26 @@ CONFIG = {
 
 param_config = {
     "learning_rate": [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1],
-    "batch_size": [256, 512, 1024, int(1e4)],
-    "n_hidden_layers": stats.randint(1, 6),
-    "n_units": [8, 16, 32, 64, 128, 256],
-    "dropout": stats.norm(0.3, 0.07),
-    "optimizer": [("sgd", 0.2), ("adam", 0.8)]
+    "batch_size": [128, 256, 512, 1024, int(1e4)],
+    "n_hidden_layers": stats.randint(1, 7),
+    "n_units": [16, 32, 64, 128, 256, 512],
+    "dropout": [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4],
+    "optimizer": [("sgd", 0.1), ("adam", 0.9)]
 }
+
+# param_config = {
+#     "learning_rate": [1e-5, 1e-4, 1e-3, 1e-2],
+#     "batch_size": [256, 512, 1024, int(1e4)],
+#     "n_hidden_layers": stats.randint(2, 7),
+#     "n_units": [150, 200, 250, 300, 350],
+#     # "dropout": stats.norm(0.3, 0.07),
+#     "dropout": [0.2, 0.25, 0.3, 0.35, 0.4],
+#     "optimizer": [("sgd", 0.1), ("adam", 0.9)]
+# }
 
 # -------- Other params ------------
 
-n_evals = 25
+n_evals = 50
 
 # ---------- Run ------------
 rand_params_gen = ml_tools.RandomParamGenerator(param_config)
@@ -123,6 +135,19 @@ rand_params_gen = ml_tools.RandomParamGenerator(param_config)
 output_dir = Path(INPUT_CONFIG["base_output_dir"]) / nn_gmm.create_run_id()
 output_dir.mkdir()
 INPUT_CONFIG["base_output_dir"] = str(output_dir)
+
+# Save the configs
+with open(output_dir / "input_config.json") as f:
+    json.dump(INPUT_CONFIG, f)
+
+with open(output_dir / "base_config.json") as f:
+    json.dump(CONFIG, f)
+
+with open(output_dir / "param_eval_config.json") as f:
+    json.dump(param_config, f)
+
+with open(output_dir / "metadata.json") as f:
+    json.dump({"commit_hash": nn_gmm.utils.get_repo_version()}, f)
 
 result_dfs = []
 for ix in range(n_evals):
@@ -166,6 +191,8 @@ for ix in range(n_evals):
 
     result_df = pd.concat(result_dfs)
     result_df.to_csv(output_dir / "results.csv", index_label="id")
+
+
 
 
 
