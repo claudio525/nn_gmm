@@ -1,4 +1,5 @@
 """Script for generating number of records spatial maps"""
+import src.plotting_funcs
 from pathlib import Path
 
 import nn_gmm
@@ -17,10 +18,10 @@ data_dirs = train_data_dirs + val_data_dirs
 output_dir = Path("/home/claudy/dev/work/data/nn_gmm/results/keep/n_records")
 
 print(f"Generating all records map")
-nn_gmm.plot_n_records_map(data_dirs, plot_items_ffp, str(output_dir / "n_records"))
+src.plotting_funcs.plot_n_records_map(data_dirs, plot_items_ffp, str(output_dir / "n_records"))
 
 print(f"Generating training records map")
-nn_gmm.plot_n_records_map(
+src.plotting_funcs.plot_n_records_map(
     train_data_dirs,
     plot_items_ffp,
     str(output_dir / "n_records_train"),
@@ -28,7 +29,7 @@ nn_gmm.plot_n_records_map(
 )
 
 print(f"Generating validation records map")
-nn_gmm.plot_n_records_map(
+src.plotting_funcs.plot_n_records_map(
     val_data_dirs,
     plot_items_ffp,
     str(output_dir / "n_records_val"),

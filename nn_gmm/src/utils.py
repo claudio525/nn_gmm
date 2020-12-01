@@ -142,3 +142,25 @@ def get_repo_version():
     """Gets the current commit hash"""
     repo = git.Repo(search_parent_directories=True)
     return repo.head.object.hexsha
+
+def find_record_ffp(data_dirs: List[Path], event: str):
+    """Finds the tfrecord file for the given event in
+    the specified directories, raises ValueError if no
+    file is found
+    """
+    results = []
+    for cur_dir in data_dirs:
+        cur_r = list(cur_dir.glob(f"{event}.tfrecord"))
+
+        if len(cur_r) > 0:
+            cur_feature_details = data.load_feature_details(cur_dir)
+            results.append((cur_r[0], cur_feature_details))
+
+    if len(results) == 0:
+        raise ValueError(
+            f"No tfrecord file could be found for the specified event: {event}"
+        )
+
+    assert len(results) == 1, "More than one tfrecord file found"
+
+    return results[0]
