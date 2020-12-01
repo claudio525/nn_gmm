@@ -35,6 +35,7 @@ INPUT_CONFIG = {
     # "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
     # "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
     # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/gridsearch",
+    # # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/tmp",
 
     "train_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train"],
     "val_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/val"],
@@ -66,8 +67,8 @@ INPUT_CONFIG = {
         "z2p5": "standard",
         "vs500": "standard",
 
-        # "rrup": "standard",
-        "rrup": "ln",
+        "rrup": "standard",
+        # "rrup": "ln",
         "rx": "standard",
         "rjb": "standard",
         "ry": "standard",
@@ -99,8 +100,9 @@ CONFIG = {
     },
     "training_config": {
         "shuffle_buffer_size": int(7e6),
-        "n_epochs": 15,
+        "n_epochs": 20,
         "use_sample_weights": True,
+        "loss": "mse",
     },
 }
 
@@ -137,16 +139,16 @@ output_dir.mkdir()
 INPUT_CONFIG["base_output_dir"] = str(output_dir)
 
 # Save the configs
-with open(output_dir / "input_config.json") as f:
-    json.dump(INPUT_CONFIG, f)
+with open(output_dir / "input_config.json", "w") as f:
+    json.dump(INPUT_CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
 
-with open(output_dir / "base_config.json") as f:
-    json.dump(CONFIG, f)
+with open(output_dir / "base_config.json", "w") as f:
+    json.dump(CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
 
-with open(output_dir / "param_eval_config.json") as f:
-    json.dump(param_config, f)
+with open(output_dir / "param_eval_config.json", "w") as f:
+    json.dump(param_config, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
 
-with open(output_dir / "metadata.json") as f:
+with open(output_dir / "metadata.json", "w") as f:
     json.dump({"commit_hash": nn_gmm.utils.get_repo_version()}, f)
 
 result_dfs = []

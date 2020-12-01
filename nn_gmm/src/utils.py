@@ -54,6 +54,7 @@ def to_path(input: Union[str, List[str], List[Path]] = None):
 
     return input
 
+
 def to_list(input: Union[Any, List[Any]]):
     return input if isinstance(input, list) else [input]
 
@@ -84,7 +85,9 @@ def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
 
     ims = im_df.columns.values.astype(str)
     pSA_mask = np.char.startswith(ims, "pSA_")
-    pSA_periods = np.char.replace(np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1], "p", ".").astype(float)
+    pSA_periods = np.char.replace(
+        np.stack(np.char.split(ims[pSA_mask], "_"))[:, 1], "p", "."
+    ).astype(float)
 
     target_mask = np.char.startswith(target_ims, "pSA_")
     target_periods = np.sort(
@@ -117,6 +120,7 @@ def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
     assert result_df.shape[0] == im_df.shape[0]
     return result_df
 
+
 def convert_input_config(config: Dict, stats_df: pd.DataFrame):
     """Adds the correct stats parameters to the input config"""
     for key, item in config.items():
@@ -127,11 +131,12 @@ def convert_input_config(config: Dict, stats_df: pd.DataFrame):
         elif item == "min_max":
             config[key] = (item, stats_df.loc[key, "min"], stats_df.loc[key, "max"])
         elif item == "ln":
-            config[key] = (item, )
+            config[key] = (item,)
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
     return config
+
 
 def get_repo_version():
     """Gets the current commit hash"""

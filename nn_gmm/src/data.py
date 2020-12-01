@@ -93,12 +93,29 @@ def load_dataset(
     return ds
 
 
-def load_tfrecord(record_ffp: str, feature_details: Dict):
-    """Loads a single tfrecord file as a dataframe"""
+def load_tfrecord(record_ffp: str, data_details: Dict, batch_size: int = 10_000):
+    """
+    Loads a single tfrecord file as a dataframe
+
+    Parameters
+    ----------
+    record_ffp: string
+        Path to the .tfrecord file
+    data_details: dictionary
+        Contains the data details required for loading
+    batch_size: int, optional
+        The batch size used for loading, this has to exceed the number samples
+        in the .tfrecord file
+
+    Returns
+    -------
+    dataframe:
+        Data from the specified .tfrecord file
+    """
     ds = tf.data.TFRecordDataset(filenames=[record_ffp])
 
     def _parse_fn(example_proto):
-        parsed = tf.io.parse_example(example_proto, feature_details)
+        parsed = tf.io.parse_example(example_proto, data_details)
         return parsed
 
     # Slight hack, just want to parse the whole record in one go,

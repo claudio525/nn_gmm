@@ -53,6 +53,7 @@ IMs = np.asarray(
     ]
 )
 
+BIN_RRUP_MIN, BIN_RRUP_MAX = 0, 395
 
 def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
@@ -250,7 +251,7 @@ def gen_bin_weights(distance_df: pd.DataFrame, rel_df: pd.DataFrame, sources: np
     a n_rrup_bins x n_mag_bins grid
     """
     mag_bins = np.linspace(rel_df.mag.min(), rel_df.mag.max(), n_mag_bins)
-    rrup_bins = np.linspace(distance_df.rrup.min(), distance_df.rrup.max(), n_rrup_bins)
+    rrup_bins = np.linspace(BIN_RRUP_MIN, BIN_RRUP_MAX, n_rrup_bins)
 
     bin_count = None
     print("Generating bin weights")
@@ -259,7 +260,7 @@ def gen_bin_weights(distance_df: pd.DataFrame, rel_df: pd.DataFrame, sources: np
         cur_im_df = nn_gmm.load_fault_im_df(cur_source, imdb_ffps) 
 
         if cur_im_df is None:
-            print(f"No IM data found for source {cur_source}, skipping.")
+            print(f"WARNING: No IM data found for source {cur_source}, skipping.")
             continue
 
         cur_input_df = nn_gmm.create_sample_comb(cur_im_df)

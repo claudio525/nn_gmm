@@ -2,6 +2,7 @@ import gc
 import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
+from collections import namedtuple
 
 import yaml
 import numpy as np
@@ -9,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import plotly.express as px
+import matplotlib
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
@@ -99,6 +101,8 @@ PLOT_TYPE_OPTIONS_MAPPING = {
     "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
 }
 
+DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
+
 
 def multi_fig(
     ind_fig_size: Tuple[float, float], n_rows: int, n_cols: int, dpi: int = 100
@@ -128,6 +132,216 @@ def create_multi_hist(
 
     fig.suptitle(title)
     fig.savefig(plot_ffp)
+
+
+DataSpec = namedtuple("DataSpec", ["name", "fn", "fn_name"])
+
+
+def _get_data_spec(data_spec: Union[str, DataSpec]):
+    return data_spec if isinstance(data_spec, DataSpec) else DataSpec(data_spec, None, None)
+
+
+class DataExpPlotGen:
+    """Computes plots for feature exploration"""
+
+    def __init__(self, data_dir: Path, output_dir: Path, data_names: List[str] = None):
+        self.output_dir = output_dir
+        self.data_dir = data_dir
+
+        self._data_df = None
+
+        if data_names is not None:
+            self._load_data(data_names)
+
+    def _load_data(self, data_names: Union[str, List[str]]):
+        data_names = [data_names] if isinstance(data_names, str) else data_names
+
+        ds = data.load_dataset(
+            [self.data_dir],
+            data.load_feature_details(self.data_dir),
+            int(1e6),
+            shuffle_buffer=None,
+            block_size=1024,
+        )
+
+        dfs = []
+        for cur_batch in ds.as_numpy_iterator():
+            cur_df = pd.DataFrame.from_dict(
+                {key: cur_batch[key] for key in data_names + ["id"]}
+            )
+            cur_df["id"] = cur_df.id.str.decode("UTF-8")
+            cur_df.set_index("id", inplace=True)
+
+            dfs.append(cur_df)
+
+        df = pd.concat(dfs)
+
+        self._data_df = (
+            df
+            if self._data_df is None
+            else self._data_df.merge(df, how="inner", left_index=True, right_index=True)
+        )
+
+    def _get_data_df(self, data_names: Union[str, List[str], np.ndarray]):
+        data_names = np.asarray(
+            [data_names] if isinstance(data_names, str) else data_names
+        )
+
+        if self._data_df is None:
+            self._load_data(list(data_names))
+
+        mask = np.isin(data_names, self._data_df.columns.values.astype(str))
+        if np.any(~mask):
+            self._load_data(list(data_names[~mask]))
+
+        return self._data_df.loc[:, data_names]
+
+    def _get_data_from_specs(self, data_spec: DataSpec) -> Tuple[np.ndarray, str]:
+        name, trans_fn, fn_name = data_spec if isinstance(data_spec, DataSpec) else (data_spec, None, None)
+        data_df = self._get_data_df(name)
+
+        values = data_df[name].values
+        if trans_fn is not None:
+            values = trans_fn(values)
+
+        if fn_name is not None:
+            name = f"{fn_name}_{name.replace('.', 'p')}"
+
+        return values, name
+
+    def gen_hist_plots(
+        self,
+        data_specs: Union[str, DataSpec, List[Union[str, DataSpec]]],
+        n_bins: int = 25,
+    ):
+        """
+        Generates a histogram for the specified data type
+
+        Parameters
+        ----------
+        data_specs: str or Dataspec, or list of
+            Specifies the data for which to create the histogram
+            Either just the name of the data or if a transformation should
+            be applied a tuple of the format (name, fn, fn_name)
+        n_bins: int
+        """
+        for cur_data_spec in data_specs:
+            fig = plt.figure(figsize=(18, 13.5))
+
+            values, cur_name = self._get_data_from_specs(cur_data_spec)
+
+            plt.hist(values, bins=n_bins)
+            plt.xlabel(cur_name)
+            plt.ylabel("Count")
+            plt.title(f"{cur_name} - Histogram")
+
+            plt.grid()
+
+            fig.savefig(self.output_dir / f"{cur_name}_hist.png")
+
+        plt.close()
+
+    def gen_multi_hist_plot(
+        self,
+        data_spec_hist: Union[str, DataSpec],
+        data_spec_x: Union[str, DataSpec],
+        bin_x: Union[int, np.ndarray, Callable[[float, float], np.ndarray]],
+        data_spec_y: Union[str, DataSpec] = None,
+        n_bins: int = 10,
+    ):
+        def _get_bin_values(
+            bin_arg: Union[int, np.ndarray, Callable[[float, float], np.ndarray]],
+            values: np.ndarray,
+        ):
+            if isinstance(bin_arg, int):
+                return np.linspace(values.min(), values.max(), bin_x + 1)
+            elif isinstance(bin_arg, np.ndarray):
+                return bin_arg
+            else:
+                return bin_arg(values.min(), values.max())
+
+        values_hist, name_hist = self._get_data_from_specs(data_spec_hist)
+        values_x, name_x = self._get_data_from_specs(data_spec_x)
+        if data_spec_y is None:
+            bin_x = _get_bin_values(bin_x, values_x)
+
+            bin_x_ind = np.digitize(values_x, bin_x)
+
+            n_cols = len(bin_x) - 1
+            fig = multi_fig((9, 6), 1, n_cols)
+            for cur_bin_ix in range(n_cols):
+                # Bin indices start from 1
+                cur_bin_ix += 1
+
+                if not np.any(bin_x_ind == cur_bin_ix):
+                    continue
+
+                cur_ax = fig.add_subplot(1, n_cols, cur_bin_ix)
+
+                cur_mask = bin_x_ind == cur_bin_ix
+                cur_ax.hist(values_hist[cur_mask], bins=n_bins)
+
+                cur_ax.text(
+                    0.99,
+                    0.99,
+                    f"{name_x}: {bin_x[cur_bin_ix - 1]}-{bin_x[cur_bin_ix]}, "
+                    f"N: {np.count_nonzero(cur_mask)}",
+                    horizontalalignment="right",
+                    verticalalignment="top",
+                    transform=cur_ax.transAxes,
+                )
+                cur_ax.grid(linestyle="--", linewidth=0.25, alpha=0.75)
+                cur_ax.set_xlabel(name_x)
+                cur_ax.set_ylabel("Count")
+
+            fig.tight_layout()
+            fig.savefig(self.output_dir / f"{name_hist}_multi_hist_{name_x}.png")
+        else:
+            raise NotImplementedError()
+
+        plt.close()
+
+    def gen_2d_hist_plot(
+        self,
+        data_spec_x: Union[str, DataSpec],
+        data_spec_y: Union[str, DataSpec],
+        n_bins: int = 10,
+        weights: Union[str, DataSpec] = None,
+        log_z: bool = True,
+    ):
+        """Generates a 2D histogram (with count as colour) the two specified data keys"""
+        data_spec_x = (
+            data_spec_x if isinstance(data_spec_x, tuple) else DataSpec(data_spec_x, None, None)
+        )
+        data_spec_y = (
+            data_spec_y if isinstance(data_spec_y, tuple) else DataSpec(data_spec_y, None, None)
+        )
+
+        values_x, name_x = self._get_data_from_specs(data_spec_x)
+        values_y, name_y = self._get_data_from_specs(data_spec_y)
+        value_weights, _ = (
+            self._get_data_from_specs(weights) if weights is not None else (None, None)
+        )
+
+        cur_name = f"{name_x}_{name_y}"
+
+        fig = plt.figure(figsize=(18, 13.5))
+        plt.hist2d(
+            values_x,
+            values_y,
+            bins=n_bins,
+            norm=matplotlib.colors.LogNorm() if log_z else None,
+            weights=value_weights,
+        )
+        plt.xlabel(name_x)
+        plt.ylabel(name_y)
+        plt.colorbar()
+        plt.title(f"{cur_name} - 2D Histogram")
+
+        fig.tight_layout()
+        fig.savefig(self.output_dir / f"{cur_name}_2d_hist_{n_bins}.png")
+
+        plt.close()
 
 
 class IMvsPlotGen:
@@ -569,7 +783,7 @@ class IMvsPlotGen:
                     )
 
 
-class PlotGen:
+class ModelBasePlotGen:
     def __init__(
         self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
     ):
@@ -602,7 +816,7 @@ class PlotGen:
             return df, mean_est, std_est
 
 
-class AggPlotGen(PlotGen):
+class AggPlotGen(ModelBasePlotGen):
     """Class for generating aggregate plots"""
 
     def __init__(
@@ -662,7 +876,6 @@ class AggPlotGen(PlotGen):
         if self._std_df is not None:
             self._std_df["station"] = self._sim_df.station.values
 
-
     def _get_event_estimates(self, event: str):
         raise NotImplementedError()
 
@@ -704,10 +917,7 @@ class AggPlotGen(PlotGen):
                 showlegend=False,
             )
             fig.write_html(
-                str(
-                    self.output_dir
-                    / f"{im}_realisation_ln_abs_residual.html"
-                )
+                str(self.output_dir / f"{im}_realisation_ln_abs_residual.html")
             )
 
         return
@@ -791,7 +1001,7 @@ class AggPlotGen(PlotGen):
         return csv_files
 
 
-class EventPlotGen(PlotGen):
+class EventPlotGen(ModelBasePlotGen):
     """Class for generating even specific plots"""
 
     def __init__(
@@ -1197,10 +1407,8 @@ class EventPlotGen(PlotGen):
         return plot_csv_ffps, cb_options
 
 
-class BinPlotGen(PlotGen):
+class BinPlotGen(ModelBasePlotGen):
     """Creates plots for the binned dataset"""
-
-    DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
 
     def __init__(
         self,
@@ -1214,7 +1422,7 @@ class BinPlotGen(PlotGen):
         super().__init__(plot_items_ffp, model, list(data_sets.values()), output_dir)
 
         self.mag_bins = mag_bins
-        self.vs30_bins = vs30_bins if vs30_bins is not None else self.DEFAULT_VS30_BINS
+        self.vs30_bins = vs30_bins if vs30_bins is not None else DEFAULT_VS30_BINS
 
         self.data_sets = data_sets
 
@@ -1285,9 +1493,9 @@ class BinPlotGen(PlotGen):
         )
 
         filename = (
-            f"{dataset}_{im}_binned_residual_plots.png"
+            f"{dataset}_{im.replace('.', 'p')}_binned_residual_plots.png"
             if not log_space
-            else f"{dataset}_{im}_binned_log_ratio_plots.png"
+            else f"{dataset}_{im.replace('.', 'p')}_binned_log_ratio_plots.png"
         )
 
         plot_mag_vs30_res_bins(
