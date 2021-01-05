@@ -26,9 +26,6 @@ class GMM:
             self.feature_config.copy(), tf_fn=False
         )
 
-        # Don't currently support pre-processing of outputs (IMs)
-        assert np.all([val is None for val in self.im_config.values()])
-
         self.features = np.asarray(list(self.feature_config.keys()))
         self.outputs = np.asarray(list(self.im_config.keys()))
 
@@ -62,6 +59,9 @@ class GMM:
                 columns=self.outputs,
                 index=result_df_index,
             )
+            assert (
+                self.im_config.items()[0] == None
+            ), "No post-processing currently supported when using NLL"
             return mean_df, std_df
 
         return mean_df, None
@@ -71,30 +71,35 @@ class GMM:
         data_dirs: List[Path],
         batch_size: int = 1_000_000,
         ims: List[str] = None,
-        features: List[str] = []
+        features: List[str] = [],
     ):
         """
-        Performs prediction using the tfrecord files in the specified directories
+        Performs prediction using the tfrecord files in
+        the specified directories
 
-        Should mainly be used when getting predictions for the training or validation dataset
+        Should mainly be used when getting predictions
+        for the training or validation dataset
 
         Parameters
         ----------
         data_dirs: list of Path
             Directories from which to read the tfrecord files
         batch_size: int, optional
-            How many records to predict in a single batch, larger will be
-            faster, however requires more memory
+            How many records to predict in a single batch,
+            larger will be faster, however requires more memory
         ims: list of strings
+            The IMs to keep, defaults to all supported IMs of the model
+            Note: If the number of IMs is large, then this will result in
+            large memory usage
         features: list of strings
-            The IMs and features to keep. Unless the computer used has a large
+            The features to keep. Unless the computer used has a large
             amount of memory, keeping all is probably not the greatest idea
+            Default is to return no features
 
         Returns
         -------
         sim_df: dataframe
             The simulation IM values and the features (specified in features argument)
-
         """
         # Get feature details, have to be same across all directories anyways
         with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
@@ -104,6 +109,7 @@ class GMM:
             data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
         ).prefetch(tf.data.experimental.AUTOTUNE)
 
+        ims = ims if ims is not None else list(self.outputs)
         sim_dfs, mean_dfs, std_dfs = [], [], []
         for ix, cur_data in enumerate(ds.as_numpy_iterator()):
             print(f"Processing batch - {ix + 1}")
@@ -126,6 +132,8 @@ class GMM:
 
         mean_df = pd.concat(mean_dfs)
         std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
+
+        mean_df = self._post_process(mean_df)
         return pd.concat(sim_dfs), mean_df, std_df
 
     def _pre_process(self, X: pd.DataFrame):
@@ -139,6 +147,16 @@ class GMM:
         X = data_processing.preprocess_df(X, self.feature_config_prcd)
 
         return X
+
+    def _post_process(self, mean_df: pd.DataFrame):
+        """Performs inverse pre-processing for the model outputs
+        Note: Currently only supported when predicting the mean"""
+        inv_config = data_processing.convert_to_inv_transform_fn(self.im_config, tf_fn=False)
+        for im in mean_df.columns.values.astype(str):
+            if inv_config[im] is not None:
+                mean_df[im] = inv_config[im](mean_df[im].values)
+
+        return mean_df
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):
@@ -244,4 +262,3 @@ class MargNLLLoss(keras.losses.Loss):
     def get_config(self):
         base_config = super().get_config()
         return {**base_config, "n_outputs": int(self.n_outputs)}
-

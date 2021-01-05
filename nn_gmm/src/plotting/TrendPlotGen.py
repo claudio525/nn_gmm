@@ -1,3 +1,6 @@
+"""Class for generating plots that show model behaviour with respect to one
+or more inputs"""
+
 from pathlib import Path
 from typing import Union, Tuple, Dict
 

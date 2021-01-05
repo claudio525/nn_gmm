@@ -72,6 +72,7 @@ def train(
     input_config: Dict,
     config: Dict,
     model_fn: Callable = model.create_reg_model,
+    callbacks: List[keras.callbacks.Callback] = None,
     verbose: int = 2,
 ) -> Tuple[TrainingResult, str]:
     """
@@ -162,7 +163,8 @@ def train(
     # Callbacks
     model_dir = output_dir / "best_model"
     model_dir.mkdir()
-    callbacks = [
+    callbacks = [] if callbacks is None else callbacks
+    callbacks += [
         # Saves the best model (based on the validation loss)
         keras.callbacks.ModelCheckpoint(
             str(model_dir), monitor="val_loss", save_best_only=True

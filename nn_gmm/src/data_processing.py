@@ -99,6 +99,7 @@ def preprocess_ds(
     Items in those dictionaries have to be tf functions taking
     and returning a single tensor
     """
+
     def _apply_pre_config(item):
         features = []
         for name, func in feature_config.items():
@@ -115,7 +116,7 @@ def preprocess_ds(
                 return (
                     tf.stack(features, axis=1),
                     tf.stack(target_values, axis=1),
-                    item["sample_weight"]
+                    item["sample_weight"],
                 )
 
             return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
@@ -140,6 +141,25 @@ def convert_to_transform_fn(config: Dict, tf_fn: bool = True):
             config[key] = get_min_max_scaling_fn(item[1], item[2], tf_fn=tf_fn)
         elif item[0] == "ln":
             config[key] = tf.math.log
+        else:
+            raise ValueError(f"{item} is not a valid preprocessing config value")
+
+    return config
+
+
+def convert_to_inv_transform_fn(config: Dict, tf_fn: bool = True):
+    """Converts the items in the input config to callable
+    (tensorflow) functions for inverse pre-processing
+    """
+    for key, item in config.items():
+        if item is None:
+            continue
+        elif item[0] == "standard":
+            config[key] = get_standard_inv_scaling_fn(item[1], item[2], tf_fn=tf_fn)
+        elif item[0] == "min_max":
+            config[key] = get_inv_min_max_scaling_fn(item[1], item[2], tf_fn=tf_fn)
+        elif item[0] == "ln":
+            config[key] = tf.math.exp
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
