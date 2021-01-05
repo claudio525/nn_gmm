@@ -32,18 +32,21 @@ PLOTTING_CONFIG = {
     "ims": None,
     "model_dir": None,
     # Input/Output
-    "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train",],
+    "train_data_dirs": [
+        "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train",
+    ],
     # "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/small_mod_events_sample_files/train",],
     "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val",],
     # "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/small_mod_events_sample_files/val",],
     "output_dir": None,
     # Plot type flags
-    "gen_generic_IM_plots": False,
-    "gen_bin_plots": False,
-    "gen_scatter_res_bin_plots": False,
-    "gen_event_plots": False,
+    "gen_generic_IM_plots": True,
+    "gen_bin_plots": True,
+    "gen_scatter_res_bin_plots": True,
+    "gen_event_plots": True,
     "gen_rel_residual_plots": True,
-    "gen_rel_plots": False,
+    "gen_rel_plots": True,
+
     "gen_agg_plots_train": False,
     "gen_agg_plots_val": False,
     # Generic IM vs feature plots
@@ -59,10 +62,10 @@ PLOTTING_CONFIG = {
     # "rel_plot_types": ["sim", "est_mean", "est_std", "res_mean"],
     "rel_plot_types": ["sim", "est_mean", "res_mean"],
     "train_rel_rep_events": ["AlpineF2K"],
-    "val_rel_rep_events": ["AlpineR"],
-    "n_rels": 5,
+    "val_rel_rep_events": ["HopeConway", "AlpineR"],
+    "n_rels": 7,
     # Aggregate based plots
-    "agg_plot_types": ["res_mean"],
+    # "agg_plot_types": ["res_mean"],
     # Other
     "plot_items_ffp": "/home/cbs51/dev/work/code/visualization/visualization/gmt/plot_items.py",
     "n_procs": 8,
@@ -98,9 +101,12 @@ def create_plots(config):
         sel_loc_df.to_csv(output_dir / "im_plots" / "locations.csv")
 
     if config["gen_bin_plots"] or config["gen_scatter_res_bin_plots"]:
-        bin_plot_gen = nn_gmm.BinPlotGen(config["plot_items_ffp"], model, {"training": train_data_dirs[0],
-                                                     "validation": val_data_dirs[0]},
-                                         output_dir / "bin_plots")
+        bin_plot_gen = nn_gmm.BinPlotGen(
+            config["plot_items_ffp"],
+            model,
+            {"training": train_data_dirs[0], "validation": val_data_dirs[0]},
+            output_dir / "bin_plots",
+        )
 
         if config["gen_bin_plots"]:
             print("Generating bin plots")
@@ -112,9 +118,12 @@ def create_plots(config):
             print("Generating bin scatter residual plots")
             for im in ims:
                 # bin_plot_gen.create_bin_plot("training", im)
-                bin_plot_gen.create_IM_res_scatter_bin_plot("validation", im, log_space=True)
-                bin_plot_gen.create_IM_res_scatter_bin_plot("validation", im, log_space=False)
-
+                bin_plot_gen.create_IM_res_scatter_bin_plot(
+                    "validation", im, log_space=True
+                )
+                bin_plot_gen.create_IM_res_scatter_bin_plot(
+                    "validation", im, log_space=False
+                )
 
     # Event based plots
     if config["gen_event_plots"]:
@@ -142,17 +151,34 @@ def create_plots(config):
     if config["gen_rel_residual_plots"]:
         print("Generating realisation residual plots")
         print("Training data")
-        gen_rel_residual_plots(ims, model, train_data_dirs, output_dir / "agg" / "train", config)
+        gen_rel_residual_plots(
+            ims, model, train_data_dirs, output_dir / "agg" / "train", config
+        )
         print("Validation data")
-        gen_rel_residual_plots(ims, model, val_data_dirs, output_dir / "agg" / "val", config)
+        gen_rel_residual_plots(
+            ims, model, val_data_dirs, output_dir / "agg" / "val", config
+        )
 
     if config["gen_rel_plots"]:
         print("Generating realisation based plots")
         print("Training events")
-        gen_rel_plots(config["train_rel_rep_events"], ims, model, train_data_dirs, output_dir / "event_plots" / "train", config)
+        gen_rel_plots(
+            config["train_rel_rep_events"],
+            ims,
+            model,
+            train_data_dirs,
+            output_dir / "event_plots" / "train",
+            config,
+        )
         print("Validation events")
-        gen_rel_plots(config["val_rel_rep_events"], ims, model, val_data_dirs, output_dir / "event_plots" / "val", config)
-
+        gen_rel_plots(
+            config["val_rel_rep_events"],
+            ims,
+            model,
+            val_data_dirs,
+            output_dir / "event_plots" / "val",
+            config,
+        )
 
     # Aggregate plots
     if config["gen_agg_plots_train"]:
@@ -162,6 +188,7 @@ def create_plots(config):
     if config["gen_agg_plots_val"]:
         print(f"Generating aggregate plots - validation data")
         gen_agg_plots(ims, model, val_data_dirs, output_dir / "agg" / "val", config)
+
 
 def gen_rel_residual_plots(ims, model, data_dirs, output_dir, config):
     plot_items_ffp, n_procs = config["plot_items_ffp"], config["n_procs"]
@@ -186,7 +213,11 @@ def gen_rel_plots(events, ims, model, data_dirs, output_dir, config):
         config["plot_items_ffp"], model, data_dirs, output_dir
     )
     plot_gen.plot_realisation_maps(
-        events, ims, config["rel_plot_types"], n_procs=config["n_procs"], n_rels=config["n_rels"]
+        events,
+        ims,
+        config["rel_plot_types"],
+        n_procs=config["n_procs"],
+        n_rels=config["n_rels"],
     )
 
 
@@ -226,7 +257,7 @@ if __name__ == "__main__":
             "train_result_dirs",
             type=str,
             help="The base output directory from a training run",
-            nargs="+"
+            nargs="+",
         )
         parser.add_argument(
             "--config_ffp",

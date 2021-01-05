@@ -120,7 +120,7 @@ def load_tfrecord(record_ffp: str, data_details: Dict, batch_size: int = 10_000)
 
     # Slight hack, just want to parse the whole record in one go,
     # not sure how to do this without batching...
-    ds = ds.batch(10000).map(
+    ds = ds.batch(batch_size).map(
         _parse_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
     )
 
@@ -136,8 +136,7 @@ def load_tfrecord(record_ffp: str, data_details: Dict, batch_size: int = 10_000)
 def sel_rand_locations(
     data_dirs: List[Path], feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
 ):
-    """Selects a set of random locations from the
-    specified dataframe
+    """Selects a set of random locations specified data
 
     Parameters
     ----------

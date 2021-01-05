@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from scipy import interpolate
 
+from . import data
+
 
 def pandas_isin(array_1: np.ndarray, array_2: np.ndarray) -> np.ndarray:
     """This is the same as a np.isin,

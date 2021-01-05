@@ -1,26 +1,5 @@
-import gc
-import tempfile
-from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
-from pathlib import Path
-from collections import namedtuple
-
-import yaml
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.express as px
-import matplotlib
-
-import empirical.util.classdef as classdef
-import empirical.util.empirical_factory as emp_factory
-from visualization.gmt.plotting import plot_multiple, plot_single
-
-from nn_gmm.src.model import GMM
-from nn_gmm.src.utils import get_station_from_id, get_station_lookup, to_path, to_list
-from nn_gmm.src import data
-from nn_gmm.src.eval import get_realisation_residuals
 from .plotting_funcs import *
+from .plotting_utils import *
 
 
 class BinPlotGen(ModelEventBasePlotGen):
@@ -124,5 +103,5 @@ class BinPlotGen(ModelEventBasePlotGen):
             log_space=log_space,
         )
 
-    def _get_default_mag_bins(self, mag_values: np.ndarray):
-        return np.arange(np.floor(np.min(mag_values)), np.ceil(np.max(mag_values)) + 1)
+    def _get_default_mag_bins(self, values: np.ndarray):
+        return np.arange(np.floor(np.min(values)), np.ceil(np.max(values)) + 1)

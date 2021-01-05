@@ -1,25 +1,18 @@
-import gc
-import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
-from collections import namedtuple
 
 import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
-import matplotlib
 
-import empirical.util.classdef as classdef
-import empirical.util.empirical_factory as emp_factory
-from visualization.gmt.plotting import plot_multiple, plot_single
 
-from nn_gmm.src.model import GMM
-from nn_gmm.src.utils import get_station_from_id, get_station_lookup, to_path, to_list
-from nn_gmm.src import data
-from nn_gmm.src.eval import get_realisation_residuals
+
+from .. import GMM
+from .. import utils
+from .. import data
+from .. import eval
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
@@ -87,7 +80,7 @@ class ModelEventBasePlotGen:
             return self._estimates[event]
         else:
             # Find the .tfrecord file
-            record_ffp, feature_details = find_record_ffp(self.data_dirs, event)
+            record_ffp, feature_details = utils.find_record_ffp(self.data_dirs, event)
 
             # Load the data
             df = data.load_tfrecord(str(record_ffp), feature_details)
@@ -146,7 +139,7 @@ def set_plot_lims(
     plt.ylim((y_min, y_max))
 
 
-def _gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = None):
+def gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = None):
     """Saves the specified data in the correct csv format for GMT plotting,
     also creates the corresponding options file
 

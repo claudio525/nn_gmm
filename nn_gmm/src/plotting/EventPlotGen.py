@@ -1,29 +1,18 @@
-import gc
-import tempfile
-from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
-from collections import namedtuple
+from typing import List, Dict, Tuple, Union
 
-import yaml
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.express as px
-import matplotlib
-
-import empirical.util.classdef as classdef
-import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple, plot_single
 
-from nn_gmm.src.model import GMM
-from nn_gmm.src.utils import get_station_from_id, get_station_lookup, to_path, to_list
-from nn_gmm.src import data
-from nn_gmm.src.eval import get_realisation_residuals
-from .plotting_funcs import *
+from .. import utils
+from .. import GMM
+from . import plotting_funcs as plt_funcs
+from . import plotting_utils as plt_utils
 
 
-class EventPlotGen(ModelEventBasePlotGen):
+class EventPlotGen(plt_utils.ModelEventBasePlotGen):
     """Class for generating event specific plots"""
 
     def __init__(
@@ -67,7 +56,7 @@ class EventPlotGen(ModelEventBasePlotGen):
             else f"{im}_{feature_key}_log_ratio.png"
         )
 
-        residual_hist_plot(
+        plt_funcs.residual_hist_plot(
             sim_df.loc[:, feature_key].values,
             residual.values,
             feature_key,
@@ -147,7 +136,7 @@ class EventPlotGen(ModelEventBasePlotGen):
         plt.grid(which="minor", linestyle="--", linewidth=0.25)
         plt.title("{} {} {}".format(event, im, feature_key))
         plt.legend()
-        set_plot_lims(x, [sim_y, mean_df[im]])
+        plt_utils.set_plot_lims(x, [sim_y, mean_df[im]])
 
         output_ffp = self.output_dir / event / f"{event}_{im}_{feature_key}.png"
         plt.savefig(output_ffp)
@@ -204,9 +193,9 @@ class EventPlotGen(ModelEventBasePlotGen):
 
         # Generate the plots
         gmt_options = (
-            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            plt_utils.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
             if "res" in data_type
-            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS
+            else plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS
         )
         plot_multiple(
             self.plot_items_ffp, gmt_options, in_ffps=csv_ffps, n_procs=n_procs
@@ -228,7 +217,7 @@ class EventPlotGen(ModelEventBasePlotGen):
         # Generate the plot
         plot_multiple(
             self.plot_items_ffp,
-            DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=[str(plot_csv_ffp)],
         )
 
@@ -244,7 +233,7 @@ class EventPlotGen(ModelEventBasePlotGen):
         assert np.all(mean_est.index.values == sim_df.index.values)
 
         n_std = 2.5
-        sim_df["station"] = get_station_from_id(sim_df.index.values.astype(str))
+        sim_df["station"] = utils.get_station_from_id(sim_df.index.values.astype(str))
         if "res" not in data_type:
             if data_type == "sim" or data_type == "est_mean":
                 sim_im_df = sim_df[im].apply(np.exp).to_frame()
@@ -262,7 +251,7 @@ class EventPlotGen(ModelEventBasePlotGen):
                 raise ValueError(f"Invalid data_type: {data_type}")
 
             cb_options = (
-                compute_GMT_std_ticks(cb_df[im], n_std=n_std, non_negative=True)
+                plt_utils.compute_GMT_std_ticks(cb_df[im], n_std=n_std, non_negative=True)
                 if cb_options is None
                 else cb_options[im]
             )
@@ -338,7 +327,7 @@ class EventPlotGen(ModelEventBasePlotGen):
         assert np.all(~agg_df[im].isna())
 
         im_name = im.replace(".", "p")
-        gmt_options = get_gmt_options_dict(
+        gmt_options = plt_utils.get_gmt_options_dict(
             options={
                 **{
                     "title": f"{im_name}-{event}-{data_type}",
@@ -350,7 +339,7 @@ class EventPlotGen(ModelEventBasePlotGen):
 
         suffix = suffix if len(suffix) == 0 else f"_{suffix}"
         plot_csv_ffp = event_out_dir / f"{im_name}_{data_type}{suffix}"
-        plot_csv_ffp = _gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
+        plot_csv_ffp = plt_utils.gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
 
         return plot_csv_ffp, cb_options
 
@@ -363,10 +352,10 @@ class EventPlotGen(ModelEventBasePlotGen):
         n_rels: int = None,
     ):
         # Generate the required data files
-        for cur_data_type in to_list(data_types):
+        for cur_data_type in utils.to_list(data_types):
             plot_csv_ffps = []
-            for cur_event in to_list(events):
-                for cur_im in to_list(ims):
+            for cur_event in utils.to_list(events):
+                for cur_im in utils.to_list(ims):
                     cur_plot_csv_ffps, cb_options = self.gen_rel_map_data(
                         cur_event, cur_im, data_type=cur_data_type, n_rels=n_rels
                     )
@@ -374,7 +363,7 @@ class EventPlotGen(ModelEventBasePlotGen):
 
             plot_multiple(
                 self.plot_items_ffp,
-                PLOT_TYPE_OPTIONS_MAPPING[cur_data_type],
+                plt_utils.PLOT_TYPE_OPTIONS_MAPPING[cur_data_type],
                 in_ffps=plot_csv_ffps,
                 n_procs=n_procs,
             )
@@ -409,7 +398,7 @@ class EventPlotGen(ModelEventBasePlotGen):
         plot_csv_ffps = []
         for cur_rel in rels:
             im_name = im.replace(".", "p")
-            gmt_options = get_gmt_options_dict(
+            gmt_options = plt_utils.get_gmt_options_dict(
                 options={
                     **{
                         "title": f"{im_name}-{event}-{cur_rel}-{data_type}",
@@ -418,7 +407,7 @@ class EventPlotGen(ModelEventBasePlotGen):
                     **cb_options,
                 }
             )
-            cur_plot_csv_ffp = _gmt_save(
+            cur_plot_csv_ffp = plt_utils.gmt_save(
                 data_df.loc[data_df.rel == cur_rel],
                 im,
                 str(event_out_dir / f"{im_name}_{data_type}_{cur_rel}"),

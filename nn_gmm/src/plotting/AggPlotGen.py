@@ -1,28 +1,19 @@
-import gc
-import tempfile
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
-from collections import namedtuple
 
-import yaml
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-import matplotlib
 
-import empirical.util.classdef as classdef
-import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple, plot_single
 
-from nn_gmm.src.model import GMM
-from nn_gmm.src.utils import get_station_from_id, get_station_lookup, to_path, to_list
-from nn_gmm.src import data
-from nn_gmm.src.eval import get_realisation_residuals
-from .plotting_funcs import *
+from .. import utils
+from .. import GMM
+from .. import eval
+from . import plotting_utils as plt_utils
 
-class AggPlotGen(ModelEventBasePlotGen):
+
+class AggPlotGen(plt_utils.ModelEventBasePlotGen):
     """Class for generating aggregate plots"""
 
     def __init__(
@@ -46,7 +37,9 @@ class AggPlotGen(ModelEventBasePlotGen):
     @property
     def rel_res_df(self):
         if self._rel_res_df is None:
-            self._rel_res_df = get_realisation_residuals(self.data_dirs, self.model)
+            self._rel_res_df = eval.get_realisation_residuals(
+                self.data_dirs, self.model
+            )
         return self._rel_res_df
 
     @property
@@ -74,7 +67,7 @@ class AggPlotGen(ModelEventBasePlotGen):
         )
 
         print("Adding station data")
-        self._sim_df["station"] = get_station_from_id(
+        self._sim_df["station"] = utils.get_station_from_id(
             self._sim_df.index.values.astype(str)
         )
         self._mean_df["station"] = self._sim_df.station.values
@@ -158,7 +151,7 @@ class AggPlotGen(ModelEventBasePlotGen):
         data_df = data_df.groupby("station").mean()
 
         # Add lat & lon
-        station_df = get_station_lookup(self._sim_df)
+        station_df = utils.get_station_lookup(self._sim_df)
         data_df = pd.merge(
             data_df,
             station_df,
@@ -175,11 +168,11 @@ class AggPlotGen(ModelEventBasePlotGen):
             cb_options = (
                 {}
                 if is_res_plot
-                else compute_GMT_std_ticks(
+                else plt_utils.compute_GMT_std_ticks(
                     data_df[im], n_std=2, non_negative=non_negative
                 )
             )
-            gmt_options = get_gmt_options_dict(
+            gmt_options = plt_utils.get_gmt_options_dict(
                 options={
                     **{"title": f"{im_name}-{plot_type}", "xyz-cpt-labels": f"{im}",},
                     **cb_options,
@@ -187,7 +180,7 @@ class AggPlotGen(ModelEventBasePlotGen):
             )
 
             plot_csv_ffp = self.output_dir / f"{im_name}"
-            plot_csv_ffp = _gmt_save(
+            plot_csv_ffp = plt_utils.gmt_save(
                 data_df, im, str(plot_csv_ffp), gmt_options=gmt_options
             )
 
@@ -197,9 +190,9 @@ class AggPlotGen(ModelEventBasePlotGen):
         print(f"Plotting")
         plot_multiple(
             self.plot_items_ffp,
-            DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
+            plt_utils.DEFAULT_RES_GEN_GMT_PLOT_OPTIONS
             if "res" in plot_type
-            else DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+            else plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
             in_ffps=csv_files,
             n_procs=n_procs,
         )

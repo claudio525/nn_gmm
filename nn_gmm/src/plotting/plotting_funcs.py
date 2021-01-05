@@ -1,4 +1,17 @@
-from src import data
+import tempfile
+from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from visualization.gmt.plotting import plot_single, plot_multiple
+
+from .. import data
+from .. import utils
+from . import plotting_utils as plt_utils
+
 
 MARKERS = [
     ".",
@@ -40,7 +53,6 @@ MARKERS = [
     11,
 ]
 
-
 def plot_mag_vs30_res_bins(
     df: pd.DataFrame,
     mean_est_df: pd.DataFrame,
@@ -54,7 +66,7 @@ def plot_mag_vs30_res_bins(
     vs_30_ind = np.digitize(df.vs30.values, vs30_bins)
 
     n_rows, n_cols = len(mag_bins) - 1, len(vs30_bins) - 1
-    fig = multi_fig((8, 6), n_rows, n_cols)
+    fig = plt_utils.multi_fig((8, 6), n_rows, n_cols)
     outer_grid = fig.add_gridspec(
         n_rows,
         n_cols,
@@ -146,7 +158,7 @@ def plot_mag_vs30_bins(
     vs_30_ind = np.digitize(df.vs30.values, vs30_bins)
 
     n_rows, n_cols = len(mag_bins) - 1, len(vs30_bins) - 1
-    fig = multi_fig((8, 6), n_rows, n_cols)
+    fig = plt_utils.multi_fig((8, 6), n_rows, n_cols)
     ax_ix = 1
     for cur_mag_bin_ix in range(n_rows):
         # Bin indices start from 1
@@ -194,7 +206,7 @@ def plot_n_records_map(
     title: str = "Number-of-records",
 ):
     """Generates a spatial map that shows number of records at each station"""
-    data_dirs, plot_items_ffp = to_path(data_dirs), to_path(plot_items_ffp)
+    data_dirs, plot_items_ffp = utils.to_path(data_dirs), utils.to_path(plot_items_ffp)
 
     ds = data.load_dataset(
         data_dirs,
@@ -215,9 +227,9 @@ def plot_n_records_map(
         dfs.append(cur_df)
 
     df = pd.concat(dfs)
-    df["station"] = get_station_from_id(df.index.values.astype(str))
+    df["station"] = utils.get_station_from_id(df.index.values.astype(str))
 
-    station_lookup_df = get_station_lookup(df)
+    station_lookup_df = utils.get_station_lookup(df)
 
     n_records_df = df.groupby("station").count()
     n_records_df["count"] = n_records_df["lat"]
@@ -227,19 +239,19 @@ def plot_n_records_map(
         n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
     )
 
-    cb_options = compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
-    gmt_options = get_gmt_options_dict(
+    cb_options = plt_utils.compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
+    gmt_options = plt_utils.get_gmt_options_dict(
         options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
     )
-    csv_ffp = _gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
+    csv_ffp = plt_utils.gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        plot_single(plot_items_ffp, csv_ffp, DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
+        plot_single(plot_items_ffp, csv_ffp, plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
 
     return
 
 
-def add_emp(emp_df: pd.Series, label: str = "Bradley 2013"):
+def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = None):
     """Adds the empirical data to the
     current plot
 
@@ -249,24 +261,26 @@ def add_emp(emp_df: pd.Series, label: str = "Bradley 2013"):
         The empirical GMM estimates, expects
         the columns [mu, sigma]
     """
+    if ax is None:
+        ax = plt.gca()
+
     # mean prediction
-    plt.plot(
-        emp_df.index.values, emp_df["mu"].values, c="r", label="Mean Bradley 2013."
+    ax.plot(
+        emp_df.index.values, emp_df["mu"].values, c="r", label=f"Mean {label}"
     )
     # +- sigma
-    plt.plot(
+    ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(emp_df["sigma"].values),
         c="r",
         linestyle="--",
         label=f"Std {label}",
     )
-    plt.plot(
+    ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
         c="r",
         linestyle="--",
-        label=f"Mean {label}",
     )
 
 

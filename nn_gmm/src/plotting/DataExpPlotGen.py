@@ -74,7 +74,7 @@ class DataExpPlotGen:
         if self._data_df is None:
             self._load_data(list(data_names))
 
-        mask = np.isin(data_names, self._data_df.columns.values.astype(str))
+        mask = np.isin(data_names, self._data_df.columns.astype(str))
         if np.any(~mask):
             self._load_data(list(data_names[~mask]))
 
@@ -109,6 +109,7 @@ class DataExpPlotGen:
             be applied a tuple of the format (name, fn, fn_name)
         n_bins: int
         """
+        data_specs = data_specs if isinstance(data_specs, list) else [data_specs]
         for cur_data_spec in data_specs:
             fig = plt.figure(figsize=(18, 13.5))
 
@@ -117,7 +118,7 @@ class DataExpPlotGen:
             plt.hist(values, bins=n_bins)
             plt.xlabel(cur_name)
             plt.ylabel("Count")
-            plt.title(f"{cur_name} - Histogram")
+            plt.title(f"{cur_name}")
 
             plt.grid()
 
