@@ -173,7 +173,7 @@ for ix in range(n_evals):
     cur_config["training_config"]["optimizer"] = optimizer
 
     # Running the training
-    train_result, cur_output_dir, *_ = nn_gmm.train(
+    train_result, cur_output_dir, *_ = nn_gmm.train_single_output(
         INPUT_CONFIG, cur_config, model_fn=nn_gmm.create_reg_model, verbose=1
     )
 

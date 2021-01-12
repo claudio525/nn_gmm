@@ -68,7 +68,53 @@ def load_datasets(
     return train_ds, val_ds
 
 
-def train(
+def _create_output_dir(input_config: Dict):
+    run_id = input_config["run_id"] if "run_id" in input_config.keys() else create_run_id()
+    output_dir = (
+        Path(input_config["output_dir"])
+        if input_config["output_dir"] is not None
+        else Path(input_config["base_output_dir"]) / run_id
+    )
+    if output_dir.is_dir():
+        print(f"Ouput dir {output_dir} already exists, quitting!")
+    output_dir.mkdir()
+
+    return output_dir
+
+
+def _save_configs(
+    input_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
+):
+    with open(os.path.join(output_dir, "input_config.json"), "w") as f:
+        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder)
+
+    with open(os.path.join(output_dir, "model_config.json"), "w") as f:
+        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
+
+    with open(os.path.join(output_dir, "train_config.json"), "w") as f:
+        json.dump(training_config, f, cls=utils.GenericObjJSONEncoder)
+
+
+def _save_model_data(output_dir: Path, model_dir: Path, input_config: Dict, config: Dict, history: object):
+    # Save the input (for the model)
+    with open(model_dir / "input_config.json", "w") as f:
+        json.dump(input_config, f)
+
+    # Save the model and training config
+    with open(model_dir / "config.json", "w") as f:
+        json.dump({key: str(value) for key, value in config.items()}, f)
+
+    # Save the loss
+    loss_df = pd.DataFrame.from_dict(history.history)
+    loss_df.index = history.epoch
+    loss_df.to_csv(os.path.join(output_dir, "loss.csv"))
+
+    return loss_df
+
+
+# def train_multi_output()
+
+def train_single_output(
     input_config: Dict,
     config: Dict,
     model_fn: Callable = model.create_reg_model,
@@ -77,6 +123,7 @@ def train(
 ) -> Tuple[TrainingResult, str]:
     """
     Runs the training based on the specified configs
+    Note: Only supports training of a "single" output node model
 
     Parameters
     ----------
@@ -88,6 +135,8 @@ def train(
         Function that returns a keras model to train,
         must take 3 inputs: model_config, n_inputs, n_outputs
         Defaults to "create_reg_model"
+    callbacks: list of keras callbacks
+        Callbacks to include during training
     verbose: int, optional
         Model fitting verbosity for details, see
         https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
@@ -106,24 +155,10 @@ def train(
     batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
 
     # Create the output directory
-    output_dir = (
-        Path(input_config["output_dir"])
-        if input_config["output_dir"] is not None
-        else Path(input_config["base_output_dir"]) / create_run_id()
-    )
-    if output_dir.is_dir():
-        print(f"Ouput dir {output_dir} already exists, quitting!")
-    output_dir.mkdir()
+    output_dir = _create_output_dir(input_config)
 
     # Save the input, model & training config
-    with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder)
-
-    with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
-
-    with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        json.dump(config, f, cls=utils.GenericObjJSONEncoder)
+    _save_configs(input_config, model_config, training_config, output_dir)
 
     train_ds, val_ds = load_datasets(
         utils.to_path(input_config["train_data_dirs"]),
@@ -140,7 +175,10 @@ def train(
     )
     n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
     train_ds = data_processing.preprocess_ds(
-        train_ds, feature_config, im_config, use_sample_weights=training_config["use_sample_weights"]
+        train_ds,
+        feature_config,
+        im_config,
+        use_sample_weights=training_config["use_sample_weights"],
     )
     val_ds = (
         val_ds
@@ -186,17 +224,8 @@ def train(
         verbose=verbose,
     )
 
-    # Save the input (for the model)
-    with open(model_dir / "input_config.json", "w") as f:
-        json.dump(input_config, f)
-
-    # Save the model and training config
-    with open(model_dir / "config.json", "w") as f:
-        json.dump({key: str(value) for key, value in config.items()}, f)
-
-    # Save the loss
-    loss_df = pd.DataFrame.from_dict(history.history)
-    loss_df.to_csv(os.path.join(output_dir, "loss.csv"))
+    # Save model data
+    loss_df = _save_model_data(output_dir, model_dir, input_config, config, history)
 
     # Create loss plot
     plt.figure()

@@ -92,6 +92,7 @@ def preprocess_ds(
     feature_config: Dict,
     im_config: Dict = None,
     use_sample_weights: bool = False,
+    as_dict: bool = False,
 ):
     """Performs pre-processing on the specified tf.data.Dataset
     using the functions in the feature & IM config
@@ -104,24 +105,33 @@ def preprocess_ds(
         features = []
         for name, func in feature_config.items():
             features.append(func(item[name]) if func is not None else item[name])
+        features = tf.stack(features, axis=1)
 
         if im_config is not None:
-            target_values = []
+            target_dict = {}
             for name, func in im_config.items():
-                target_values.append(
+                target_dict[name] = (
                     func(item[name]) if func is not None else item[name]
                 )
 
             if use_sample_weights:
+                if as_dict:
+                    raise NotImplementedError(
+                        "Sample weights and dictionary "
+                        "format is currently not supported."
+                    )
+
                 return (
-                    tf.stack(features, axis=1),
-                    tf.stack(target_values, axis=1),
+                    features,
+                    tf.stack([target_dict[im] for im in im_config], axis=1),
                     item["sample_weight"],
                 )
 
-            return tf.stack(features, axis=1), tf.stack(target_values, axis=1)
+            if as_dict:
+                return {**{"inputs": features}, **target_dict}
+            return features, tf.stack([target_dict[im] for im in im_config], axis=1)
 
-        return tf.stack(features, axis=1)
+        return {"inputs": features} if as_dict else features
 
     return ds.map(
         tf.function(_apply_pre_config), num_parallel_calls=tf.data.experimental.AUTOTUNE

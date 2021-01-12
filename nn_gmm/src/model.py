@@ -25,6 +25,7 @@ class GMM:
         self.feature_config_prcd = data_processing.convert_to_transform_fn(
             self.feature_config.copy(), tf_fn=False
         )
+        self.im_config_prcd = data_processing.convert_to_inv_transform_fn(self.im_config.copy(), tf_fn=False)
 
         self.features = np.asarray(list(self.feature_config.keys()))
         self.outputs = np.asarray(list(self.im_config.keys()))
@@ -44,15 +45,23 @@ class GMM:
         # Run estimation
         y_est = self.model.predict(X.loc[:, self.features].values.astype(float))
 
+
         # Convert to dataframes
         result_df_index = (
             result_df_index if result_df_index is not None else X.index.values
         )
         mean_df = pd.DataFrame(
-            data=np.exp(y_est[:, : self.outputs.size]),
+            data=y_est[:, : self.outputs.size],
             columns=self.outputs,
             index=result_df_index,
         )
+
+        # Apply inverse pre-processing for outputs if required
+        mean_df = self._post_process(mean_df)
+
+        # Convert to non-logged output
+        mean_df = mean_df.apply(np.exp)
+
         if y_est.shape[1] == 2 * self.outputs.size:
             std_df = pd.DataFrame(
                 data=y_est[:, self.outputs.size :],
@@ -132,8 +141,6 @@ class GMM:
 
         mean_df = pd.concat(mean_dfs)
         std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
-
-        mean_df = self._post_process(mean_df)
         return pd.concat(sim_dfs), mean_df, std_df
 
     def _pre_process(self, X: pd.DataFrame):
@@ -151,10 +158,9 @@ class GMM:
     def _post_process(self, mean_df: pd.DataFrame):
         """Performs inverse pre-processing for the model outputs
         Note: Currently only supported when predicting the mean"""
-        inv_config = data_processing.convert_to_inv_transform_fn(self.im_config, tf_fn=False)
         for im in mean_df.columns.values.astype(str):
-            if inv_config[im] is not None:
-                mean_df[im] = inv_config[im](mean_df[im].values)
+            if self.im_config_prcd[im] is not None:
+                mean_df[im] = self.im_config_prcd[im](mean_df[im].values)
 
         return mean_df
 
@@ -236,6 +242,43 @@ def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras
         x = hidden_layer_func(x, unit, **hidden_layer_config)
 
     outputs = keras.layers.Dense(units=n_outputs, activation=None)(x)
+
+    return keras.Model(inputs=input, outputs=outputs)
+
+def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_names: List[str]):
+    """Creates a functional keras model from the model config,
+    with multiple linear outputs and possible sub-nets per output
+
+    Parameters
+    ----------
+    model_config: dictionary
+        Model config,
+    n_inputs
+    n_outputs
+
+    Returns
+    -------
+    keras.Model
+    """
+    hidden_layer_func = model_config["hidden_layer_func"]
+    hidden_layer_config = model_config["hidden_layer_config"]
+    units = model_config["units"]
+    output_units = model_config.get("output_units")
+
+    input = keras.Input(n_inputs)
+
+    x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    for unit in units[1:]:
+        x = hidden_layer_func(x, unit, **hidden_layer_config)
+
+    outputs = []
+    for cur_output_name in output_names:
+        if output_units is not None:
+            cur_x = hidden_layer_func(x, output_units[0], **hidden_layer_config)
+            for cur_out_units in output_units[1:]:
+                cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
+
+            outputs.append(keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x))
 
     return keras.Model(inputs=input, outputs=outputs)
 
