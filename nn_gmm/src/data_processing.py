@@ -128,7 +128,7 @@ def preprocess_ds(
                 )
 
             if as_dict:
-                return {**{"inputs": features}, **target_dict}
+                return {"inputs": features}, target_dict
             return features, tf.stack([target_dict[im] for im in im_config], axis=1)
 
         return {"inputs": features} if as_dict else features

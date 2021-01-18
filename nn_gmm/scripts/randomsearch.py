@@ -140,16 +140,16 @@ INPUT_CONFIG["base_output_dir"] = str(output_dir)
 
 # Save the configs
 with open(output_dir / "input_config.json", "w") as f:
-    json.dump(INPUT_CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
+    json.dump(INPUT_CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder, indent=4)
 
 with open(output_dir / "base_config.json", "w") as f:
-    json.dump(CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
+    json.dump(CONFIG, f, cls=nn_gmm.utils.GenericObjJSONEncoder, indent=4)
 
 with open(output_dir / "param_eval_config.json", "w") as f:
-    json.dump(param_config, f, cls=nn_gmm.utils.GenericObjJSONEncoder)
+    json.dump(param_config, f, cls=nn_gmm.utils.GenericObjJSONEncoder, indent=4)
 
 with open(output_dir / "metadata.json", "w") as f:
-    json.dump({"commit_hash": nn_gmm.utils.get_repo_version()}, f)
+    json.dump({"commit_hash": nn_gmm.utils.get_repo_version()}, f, indent=4)
 
 result_dfs = []
 for ix in range(n_evals):
@@ -173,7 +173,7 @@ for ix in range(n_evals):
     cur_config["training_config"]["optimizer"] = optimizer
 
     # Running the training
-    train_result, cur_output_dir, *_ = nn_gmm.train_single_output(
+    train_result, cur_output_dir, *_ = nn_gmm.train(
         INPUT_CONFIG, cur_config, model_fn=nn_gmm.create_reg_model, verbose=1
     )
 

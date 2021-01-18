@@ -10,7 +10,6 @@ import seaborn as sns
 from .. import GMM
 from .. import utils
 from .. import data
-from .. import eval
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}

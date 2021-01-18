@@ -69,7 +69,9 @@ def load_datasets(
 
 
 def _create_output_dir(input_config: Dict):
-    run_id = input_config["run_id"] if "run_id" in input_config.keys() else create_run_id()
+    run_id = (
+        input_config["run_id"] if "run_id" in input_config.keys() else create_run_id()
+    )
     output_dir = (
         Path(input_config["output_dir"])
         if input_config["output_dir"] is not None
@@ -86,23 +88,25 @@ def _save_configs(
     input_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
 ):
     with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder)
+        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder)
+        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        json.dump(training_config, f, cls=utils.GenericObjJSONEncoder)
+        json.dump(training_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
 
-def _save_model_data(output_dir: Path, model_dir: Path, input_config: Dict, config: Dict, history: object):
+def _save_model_data(
+    output_dir: Path, model_dir: Path, input_config: Dict, config: Dict, history: object
+):
     # Save the input (for the model)
     with open(model_dir / "input_config.json", "w") as f:
-        json.dump(input_config, f)
+        json.dump(input_config, f, indent=4)
 
     # Save the model and training config
     with open(model_dir / "config.json", "w") as f:
-        json.dump({key: str(value) for key, value in config.items()}, f)
+        json.dump({key: str(value) for key, value in config.items()}, f, indent=4)
 
     # Save the loss
     loss_df = pd.DataFrame.from_dict(history.history)
@@ -112,15 +116,14 @@ def _save_model_data(output_dir: Path, model_dir: Path, input_config: Dict, conf
     return loss_df
 
 
-# def train_multi_output()
-
-def train_single_output(
+def train(
     input_config: Dict,
     config: Dict,
     model_fn: Callable = model.create_reg_model,
     callbacks: List[keras.callbacks.Callback] = None,
     verbose: int = 2,
-) -> Tuple[TrainingResult, str]:
+    multi_output: bool = False,
+) -> Tuple[TrainingResult, Path]:
     """
     Runs the training based on the specified configs
     Note: Only supports training of a "single" output node model
@@ -179,16 +182,23 @@ def train_single_output(
         feature_config,
         im_config,
         use_sample_weights=training_config["use_sample_weights"],
+        as_dict=multi_output,
     )
     val_ds = (
         val_ds
         if val_ds is None
-        else data_processing.preprocess_ds(val_ds, feature_config, im_config)
+        else data_processing.preprocess_ds(
+            val_ds, feature_config, im_config, as_dict=multi_output
+        )
     )
 
     # Create the model
     print(f"Creating model")
-    model = model_fn(model_config, n_features, n_outputs)
+    model = (
+        model_fn(model_config, n_features, list(im_config.keys()))
+        if multi_output
+        else model_fn(model_config, n_features, n_outputs)
+    )
     model.compile(
         optimizer=training_config["optimizer"],
         loss=training_config["loss"],
@@ -207,6 +217,7 @@ def train_single_output(
         keras.callbacks.ModelCheckpoint(
             str(model_dir), monitor="val_loss", save_best_only=True
         ),
+
         # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
@@ -246,5 +257,5 @@ def train_single_output(
 
     return (
         TrainingResult(input_config, training_config, output_dir, model_dir),
-        output_dir,
+        Path(output_dir),
     )

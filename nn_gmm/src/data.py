@@ -158,6 +158,13 @@ def sel_rand_locations(
     )
 
 
+def load_basin_stations(basin_dir: Path):
+    basin_dict = {}
+    for cur_ffp in basin_dir.glob("*.txt"):
+         basin_dict[cur_ffp.stem] = np.loadtxt(cur_ffp, dtype=str)
+
+    return basin_dict
+
 def load_feature_details(data_dir: Path):
     with (data_dir / "feature_details.pickle").open("rb") as f:
         return pickle.load(f)

@@ -56,7 +56,7 @@ class EventPlotGen(plt_utils.ModelEventBasePlotGen):
             else f"{im}_{feature_key}_log_ratio.png"
         )
 
-        plt_funcs.residual_hist_plot(
+        plt_funcs.residual_scatter_hist_plot(
             sim_df.loc[:, feature_key].values,
             residual.values,
             feature_key,
@@ -251,7 +251,9 @@ class EventPlotGen(plt_utils.ModelEventBasePlotGen):
                 raise ValueError(f"Invalid data_type: {data_type}")
 
             cb_options = (
-                plt_utils.compute_GMT_std_ticks(cb_df[im], n_std=n_std, non_negative=True)
+                plt_utils.compute_GMT_std_ticks(
+                    cb_df[im], n_std=n_std, non_negative=True
+                )
                 if cb_options is None
                 else cb_options[im]
             )
@@ -339,7 +341,9 @@ class EventPlotGen(plt_utils.ModelEventBasePlotGen):
 
         suffix = suffix if len(suffix) == 0 else f"_{suffix}"
         plot_csv_ffp = event_out_dir / f"{im_name}_{data_type}{suffix}"
-        plot_csv_ffp = plt_utils.gmt_save(agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options)
+        plot_csv_ffp = plt_utils.gmt_save(
+            agg_df, im, str(plot_csv_ffp), gmt_options=gmt_options
+        )
 
         return plot_csv_ffp, cb_options
 

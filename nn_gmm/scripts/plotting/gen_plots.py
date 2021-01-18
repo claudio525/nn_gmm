@@ -40,7 +40,6 @@ PLOTTING_CONFIG = {
     # "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/small_mod_events_sample_files/val",],
     "output_dir": None,
     # Plot type flags
-    "gen_generic_IM_plots": True,
     "gen_bin_plots": True,
     "gen_scatter_res_bin_plots": True,
     "gen_event_plots": True,
@@ -49,17 +48,11 @@ PLOTTING_CONFIG = {
 
     "gen_agg_plots_train": False,
     "gen_agg_plots_val": False,
-    # Generic IM vs feature plots
-    "im_plots_feature_dict": {
-        "rrup": np.arange(10, 210, 10),
-        "mag": np.arange(4, 8.1, 0.1),
-    },
     # Event based plots
-    "event_plot_types": ["sim", "est_mean"],
+    "event_plot_types": [],
     "train_rep_events": None,
     "val_rep_events": None,
     # Realisation plots
-    # "rel_plot_types": ["sim", "est_mean", "est_std", "res_mean"],
     "rel_plot_types": ["sim", "est_mean", "res_mean"],
     "train_rel_rep_events": ["AlpineF2K"],
     "val_rel_rep_events": ["HopeConway", "AlpineR"],
@@ -226,6 +219,7 @@ def gen_event_plots(events, ims, model, data_dirs, output_dir, config):
     plot_gen = nn_gmm.EventPlotGen(plot_items_ffp, model, data_dirs, output_dir)
 
     plot_gen.gen_IM_feature_plots(events, ims, "rrup")
+    plot_gen.gen_IM_feature_plots(events, ims, "mag")
 
     event_plot_types = config["event_plot_types"]
     if "sim" in event_plot_types and "est_mean" in event_plot_types:
@@ -246,7 +240,6 @@ def gen_event_plots(events, ims, model, data_dirs, output_dir, config):
                 events, ims, data_type=cur_plot_type, n_procs=n_procs
             )
 
-    plot_gen.gen_IM_feature_plots(events, ims, "rrup")
 
 
 if __name__ == "__main__":

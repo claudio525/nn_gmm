@@ -45,6 +45,9 @@ class GMM:
         # Run estimation
         y_est = self.model.predict(X.loc[:, self.features].values.astype(float))
 
+        # Multi-output model
+        if isinstance(y_est, list):
+            y_est = np.stack(y_est, axis=1).reshape(-1, self.outputs.size)
 
         # Convert to dataframes
         result_df_index = (
@@ -245,6 +248,7 @@ def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras
 
     return keras.Model(inputs=input, outputs=outputs)
 
+
 def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_names: List[str]):
     """Creates a functional keras model from the model config,
     with multiple linear outputs and possible sub-nets per output
@@ -265,7 +269,7 @@ def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_name
     units = model_config["units"]
     output_units = model_config.get("output_units")
 
-    input = keras.Input(n_inputs)
+    input = keras.Input(n_inputs, name="inputs")
 
     x = hidden_layer_func(input, units[0], **hidden_layer_config)
     for unit in units[1:]:

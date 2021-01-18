@@ -16,10 +16,9 @@ import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
 from visualization.gmt.plotting import plot_multiple, plot_single
 
-from nn_gmm.src.model import GMM
-from nn_gmm.src.utils import get_station_from_id, get_station_lookup, to_path, to_list
-from nn_gmm.src import data
-from nn_gmm.src.eval import get_realisation_residuals
+from ..model import GMM
+from ..utils import get_station_from_id, get_station_lookup, to_path, to_list
+from .. import data
 from .plotting_funcs import *
 
 DataSpec = namedtuple("DataSpec", ["name", "fn", "fn_name"])

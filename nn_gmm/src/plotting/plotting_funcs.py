@@ -124,7 +124,7 @@ def plot_mag_vs30_res_bins(
                 f"N: {df.loc[cur_mask].shape[0]} - {title}"
             )
 
-            residual_hist_plot(
+            residual_scatter_hist_plot(
                 df.loc[cur_mask, "rrup"].values,
                 residual.values,
                 "rrup",
@@ -301,7 +301,7 @@ def scatter_hist(
     ax_histy.hist(y, bins=n_bins, orientation="horizontal", color="k")
 
 
-def residual_hist_plot(
+def residual_scatter_hist_plot(
     x: np.ndarray,
     residual: np.ndarray,
     x_label: str,
@@ -315,7 +315,7 @@ def residual_hist_plot(
     log_hist_y: bool = False,
     log_hist_x: bool = False,
 ):
-
+    """Creates a scatter + hist (x/y axis) plot"""
     gs = fig.add_gridspec(
         2,
         2,
@@ -381,3 +381,4 @@ def residual_hist_plot(
     if output_ffp is not None:
         fig.savefig(output_ffp)
         plt.close()
+
