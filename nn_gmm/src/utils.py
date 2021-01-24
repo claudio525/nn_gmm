@@ -123,8 +123,8 @@ def interpolate_pSA_periods(im_df: pd.DataFrame, target_ims: np.ndarray):
     return result_df
 
 
-def convert_input_config(config: Dict, stats_df: pd.DataFrame):
-    """Adds the correct stats parameters to the input config"""
+def convert_pre_config(config: Dict, stats_df: pd.DataFrame):
+    """Adds the correct stats parameters to a input or output config"""
     for key, item in config.items():
         if item is None:
             continue
@@ -138,6 +138,21 @@ def convert_input_config(config: Dict, stats_df: pd.DataFrame):
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
     return config
+
+
+def convert_io_config(io_config: Dict, stats_df: pd.DataFrame):
+    """Converts an input & output config"""
+    if io_config["multi_input"]:
+        feature_config_dict = io_config["feature_config"]
+        for cur_input_name, cur_config in feature_config_dict.items():
+             feature_config_dict[cur_input_name] = convert_pre_config(cur_config, stats_df)
+        io_config["feature_config"] = feature_config_dict
+    else:
+        io_config["feature_config"] = convert_pre_config(io_config["feature_config"], stats_df)
+
+    io_config["im_config"] = convert_pre_config(io_config["im_config"], stats_df)
+
+    return io_config
 
 
 def get_repo_version():

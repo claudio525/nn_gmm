@@ -13,7 +13,6 @@ import tensorflow.keras as keras
 from . import utils
 from . import data_processing
 from . import data
-from . import model
 
 
 def create_run_id() -> str:
@@ -68,7 +67,7 @@ def load_datasets(
     return train_ds, val_ds
 
 
-def _create_output_dir(input_config: Dict):
+def create_output_dir(input_config: Dict):
     run_id = (
         input_config["run_id"] if "run_id" in input_config.keys() else create_run_id()
     )
@@ -85,16 +84,22 @@ def _create_output_dir(input_config: Dict):
 
 
 def _save_configs(
-    input_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
+    io_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
 ):
     with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-        json.dump(input_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
+        json.dump(io_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
-    with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
+    if model_config is not None:
+        with open(os.path.join(output_dir, "model_config.json"), "w") as f:
+            json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     with open(os.path.join(output_dir, "train_config.json"), "w") as f:
         json.dump(training_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
+
+
+def save_to_json(data_dict: Dict, ffp: Path):
+    with open(ffp, "w") as f:
+        json.dump(data_dict, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
 
 def _save_model_data(
@@ -117,12 +122,14 @@ def _save_model_data(
 
 
 def train(
-    input_config: Dict,
-    config: Dict,
-    model_fn: Callable = model.create_reg_model,
-    callbacks: List[keras.callbacks.Callback] = None,
+    io_config: Dict,
+    training_config: Dict,
+    model: keras.Model = None,
+    model_fn: Callable = None,
+    model_config: Dict = None,
     verbose: int = 2,
     multi_output: bool = False,
+    output_dir: Path = None,
 ) -> Tuple[TrainingResult, Path]:
     """
     Runs the training based on the specified configs
@@ -130,14 +137,22 @@ def train(
 
     Parameters
     ----------
-    input_config: dictionary
-        For an example see EXAMPLE_INPUT_CONFIG
-    config: dictionary
-        For an example see EXAMPLE_TRAIN_CONFIG
+    io_config: dictionary
+        The inputs and outputs config
+    training_config: dictionary
+        The training config
+    model: keras model, optional
+        The model to train
+        Either the model or model_specs parameter has to be specified
     model_fn: callabel, optional
-        Function that returns a keras model to train,
-        must take 3 inputs: model_config, n_inputs, n_outputs
-        Defaults to "create_reg_model"
+        The callable must be a function that returns the keras model to train 
+        and takes 3 inputs: model_config, n_inputs, n_outputs
+        Either the model or model_specs parameter has to be specified
+    model_config: dictionary
+        The dictionary specifies the details of the model, as required
+        by the model creation function
+        If a model is passed then this config is not used, only saved
+        with the model
     callbacks: list of keras callbacks
         Callbacks to include during training
     verbose: int, optional
@@ -152,35 +167,54 @@ def train(
         f"================================ Training ================================="
     )
 
-    # Load configs
-    model_config = config["model_config"]
-    training_config = config["training_config"]
+    assert (
+        model is not None or model_fn is not None
+    ), "Either the model or model_specs parameter has to be specified"
+
+    assert (model_fn is None) or (
+        model_fn is not None and model_config is not None
+    ), "If a model creation function is used, then a model config has to be specified"
+
+    # Load hyperparamters
     batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
 
     # Create the output directory
-    output_dir = _create_output_dir(input_config)
+    output_dir = create_output_dir(io_config) if output_dir is None else output_dir
 
     # Save the input, model & training config
-    _save_configs(input_config, model_config, training_config, output_dir)
+    _save_configs(io_config, model_config, training_config, output_dir)
 
     train_ds, val_ds = load_datasets(
-        utils.to_path(input_config["train_data_dirs"]),
+        utils.to_path(io_config["train_data_dirs"]),
         training_config["batch_size"],
-        val_dirs=utils.to_path(input_config["val_data_dirs"]),
+        val_dirs=utils.to_path(io_config["val_data_dirs"]),
         shuffle_buffer_size=training_config["shuffle_buffer_size"],
     )
 
-    feature_config = data_processing.convert_to_transform_fn(
-        input_config["feature_config"].copy()
-    )
-    im_config = data_processing.convert_to_transform_fn(
-        input_config["im_config"].copy()
-    )
-    n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
+    # Pre-processing
+    if io_config["multi_input"]:
+        feature_config_dict, feature_config = (
+            {
+                cur_input_name: data_processing.convert_to_transform_fn(
+                    cur_feature_config.copy()
+                )
+                for cur_input_name, cur_feature_config in io_config[
+                    "feature_config"
+                ].items()
+            },
+            None,
+        )
+    else:
+        feature_config_dict, feature_config = (
+            None,
+            data_processing.convert_to_transform_fn(io_config["feature_config"].copy()),
+        )
+    im_config = data_processing.convert_to_transform_fn(io_config["im_config"].copy())
     train_ds = data_processing.preprocess_ds(
         train_ds,
-        feature_config,
-        im_config,
+        feature_config=feature_config,
+        feature_config_dict=feature_config_dict,
+        im_config=im_config,
         use_sample_weights=training_config["use_sample_weights"],
         as_dict=multi_output,
     )
@@ -188,17 +222,25 @@ def train(
         val_ds
         if val_ds is None
         else data_processing.preprocess_ds(
-            val_ds, feature_config, im_config, as_dict=multi_output
+            val_ds,
+            feature_config=feature_config,
+            feature_config_dict=feature_config_dict,
+            im_config=im_config,
+            as_dict=multi_output,
         )
     )
 
     # Create the model
-    print(f"Creating model")
-    model = (
-        model_fn(model_config, n_features, list(im_config.keys()))
-        if multi_output
-        else model_fn(model_config, n_features, n_outputs)
-    )
+    if model is None:
+        print(f"Creating model")
+        n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
+        model = (
+            model_fn(model_config, n_features, list(im_config.keys()))
+            if multi_output
+            else model_fn(model_config, n_features, n_outputs)
+        )
+
+    # Compile the model
     model.compile(
         optimizer=training_config["optimizer"],
         loss=training_config["loss"],
@@ -211,13 +253,14 @@ def train(
     # Callbacks
     model_dir = output_dir / "best_model"
     model_dir.mkdir()
-    callbacks = [] if callbacks is None else callbacks
+    callbacks = (
+        [] if training_config["callbacks"] is None else training_config["callbacks"]
+    )
     callbacks += [
         # Saves the best model (based on the validation loss)
         keras.callbacks.ModelCheckpoint(
             str(model_dir), monitor="val_loss", save_best_only=True
         ),
-
         # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
@@ -236,7 +279,9 @@ def train(
     )
 
     # Save model data
-    loss_df = _save_model_data(output_dir, model_dir, input_config, config, history)
+    loss_df = _save_model_data(
+        output_dir, model_dir, io_config, training_config, history
+    )
 
     # Create loss plot
     plt.figure()
@@ -256,6 +301,6 @@ def train(
     plt.close()
 
     return (
-        TrainingResult(input_config, training_config, output_dir, model_dir),
+        TrainingResult(io_config, training_config, output_dir, model_dir),
         Path(output_dir),
     )

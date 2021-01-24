@@ -89,31 +89,93 @@ def preprocess_df(df: pd.DataFrame, config: Dict):
 
 def preprocess_ds(
     ds: tf.data.Dataset,
-    feature_config: Dict,
+    feature_config: Dict[str, tf.function] = None,
+    feature_config_dict: Dict[str, Dict[str, tf.function]] = None,
     im_config: Dict = None,
     use_sample_weights: bool = False,
     as_dict: bool = False,
 ):
-    """Performs pre-processing on the specified tf.data.Dataset
+    """
+    Performs pre-processing on the specified tf.data.Dataset
     using the functions in the feature & IM config
 
     Items in those dictionaries have to be tf functions taking
     and returning a single tensor
+    
+    Parameters
+    ----------
+    ds: dataset
+        The dataset to pre-process 
+    feature_config: dictionary[string, tf.function], optional
+        The config that specifies the pre-processing functions
+        to apply to each feature, each function has to take 
+        and return a single tensor
+    feature_config_dict: dictionary[string, dictionary[string, tf.function]], optional
+        Use this instead of the feature_config when there are multiple
+        inputs dictionaries to be returned. 
+        The inner dictionaries have the same requirements as given
+        in feature_config parameter docstring.
+        Only suitable when data is returned as dictionary (i.e. as_dict, 
+        has to be true when using this parameter)
+    im_config: dictionary[string, tf.function], optional
+        Config that specifies the pre-processing of the target variable
+    use_sample_weights: bool, optional
+        If true then sample weights are also returned for each sample
+        Can only be used with as_dict=False and feature_config (not with 
+        feature_dict as that requires as_dict=True)
+    as_dict: bool, optional
+        If True then the data is returned as dictionary
+        with feature_config, format: {inputs: X, output_name_1: y1, output_name_2: y2, ..}
+        with feature_dict, format: {input_name_1: X1, input_name_2: X2, ..., 
+            output_name_1: y1, output_name_2: y2, ...} 
+            where input_name_1 = list(feature_dict.keys())[0]
+
+    Returns
+    -------
+    dictionary or tuple
     """
+    # Some sanity checks
+    assert (
+        feature_config is not None or feature_config_dict is not None
+    ), "One of feature_config or feature_config_dict has to be specified"
+
+    assert not (
+        feature_config_dict is not None and feature_config is not None
+    ), "Only one of feature_config_dict and feature_config can be set"
+
+    assert feature_config_dict is None or (
+        feature_config_dict is not None and as_dict is True
+    ), "If feature_config_dict is given, then as_dict has to be True"
 
     def _apply_pre_config(item):
-        features = []
-        for name, func in feature_config.items():
-            features.append(func(item[name]) if func is not None else item[name])
-        features = tf.stack(features, axis=1)
+        # Single input
+        if feature_config is not None:
+            features = []
+            for name, func in feature_config.items():
+                features.append(func(item[name]) if func is not None else item[name])
 
+            feature_dict = {"inputs": tf.stack(features, axis=1)}
+        # Multi-input
+        else:
+            feature_dict = {}
+            for cur_input_key, cur_feature_config in feature_config_dict.items():
+                cur_features = []
+                for cur_name, cur_func in cur_feature_config.items():
+                    cur_features.append(
+                        cur_func(item[cur_name])
+                        if cur_func is not None
+                        else item[cur_name]
+                    )
+
+                feature_dict[cur_input_key] = tf.stack(cur_features, axis=1)
+
+        # Also return the target variable
         if im_config is not None:
             target_dict = {}
             for name, func in im_config.items():
-                target_dict[name] = (
-                    func(item[name]) if func is not None else item[name]
-                )
+                target_dict[name] = func(item[name]) if func is not None else item[name]
 
+            # Include sample weights, returns tuple (X, y, sample_weights)
             if use_sample_weights:
                 if as_dict:
                     raise NotImplementedError(
@@ -122,16 +184,20 @@ def preprocess_ds(
                     )
 
                 return (
-                    features,
+                    feature_dict["inputs"],
                     tf.stack([target_dict[im] for im in im_config], axis=1),
                     item["sample_weight"],
                 )
 
+            # Return tuple of two dictionary, (input_dict, output_dict)
             if as_dict:
-                return {"inputs": features}, target_dict
-            return features, tf.stack([target_dict[im] for im in im_config], axis=1)
+                return feature_dict, target_dict
 
-        return {"inputs": features} if as_dict else features
+            # Return as tuple of two Tensors (X, y)
+            return feature_dict["inputs"], tf.stack([target_dict[im] for im in im_config], axis=1)
+
+        # Only return the features (either as dictionary or Tensor)
+        return feature_dict if as_dict else feature_dict["inputs"]
 
     return ds.map(
         tf.function(_apply_pre_config), num_parallel_calls=tf.data.experimental.AUTOTUNE

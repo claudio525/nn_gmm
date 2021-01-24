@@ -86,10 +86,10 @@ INPUT_CONFIG = {
 stats_df = pd.read_csv(
     INPUT_CONFIG["stats_df"], index_col="feature"
 )
-INPUT_CONFIG["feature_config"] = nn_gmm.convert_input_config(
+INPUT_CONFIG["feature_config"] = nn_gmm.convert_pre_config(
     INPUT_CONFIG["feature_config"], stats_df
 )
-INPUT_CONFIG["im_config"] = nn_gmm.convert_input_config(INPUT_CONFIG["im_config"], stats_df)
+INPUT_CONFIG["im_config"] = nn_gmm.convert_pre_config(INPUT_CONFIG["im_config"], stats_df)
 
 # -------- Generic model config -------------
 

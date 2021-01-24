@@ -75,23 +75,23 @@ def create_plots(config):
     val_data_dirs = nn_gmm.utils.to_path(config["val_data_dirs"])
     output_dir = nn_gmm.utils.to_path(config["output_dir"])
 
-    feature_details = nn_gmm.load_feature_details(train_data_dirs[0])
 
-    # Generic IM vs feature plots
-    im_plots_features = config["im_plots_feature_dict"]
-    if config["gen_generic_IM_plots"]:
-        print(f"Generating generic IM vs feature plots")
-        # Get locations
-        sel_loc_df = nn_gmm.sel_rand_locations(val_data_dirs, feature_details, 10000)
-
-        im_plot_gen = nn_gmm.IMvsPlotGen(model)
-        im_plot_gen.gen_plots(
-            ims,
-            im_plots_features,
-            output_dir=output_dir / "im_plots",
-            locations=sel_loc_df,
-        )
-        sel_loc_df.to_csv(output_dir / "im_plots" / "locations.csv")
+    # # Generic IM vs feature plots
+    # feature_details = nn_gmm.load_feature_details(train_data_dirs[0])
+    # im_plots_features = config["im_plots_feature_dict"]
+    # if config["gen_generic_IM_plots"]:
+    #     print(f"Generating generic IM vs feature plots")
+    #     # Get locations
+    #     sel_loc_df = nn_gmm.sel_rand_locations(val_data_dirs, feature_details, 10000)
+    #
+    #     im_plot_gen = nn_gmm.IMvsPlotGen(model)
+    #     im_plot_gen.gen_plots(
+    #         ims,
+    #         im_plots_features,
+    #         output_dir=output_dir / "im_plots",
+    #         locations=sel_loc_df,
+    #     )
+    #     sel_loc_df.to_csv(output_dir / "im_plots" / "locations.csv")
 
     if config["gen_bin_plots"] or config["gen_scatter_res_bin_plots"]:
         bin_plot_gen = nn_gmm.BinPlotGen(

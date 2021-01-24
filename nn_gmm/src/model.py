@@ -269,9 +269,9 @@ def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_name
     units = model_config["units"]
     output_units = model_config.get("output_units")
 
-    input = keras.Input(n_inputs, name="inputs")
+    inputs = keras.Input(n_inputs, name="inputs")
 
-    x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    x = hidden_layer_func(inputs, units[0], **hidden_layer_config)
     for unit in units[1:]:
         x = hidden_layer_func(x, unit, **hidden_layer_config)
 
@@ -284,7 +284,36 @@ def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_name
 
             outputs.append(keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x))
 
-    return keras.Model(inputs=input, outputs=outputs)
+    return keras.Model(inputs=inputs, outputs=outputs)
+
+
+def add_multi_output_head(core_model: keras.Model, core_model_input_name: str, model_config: Dict, output_names: List[str], hydra_input_t: Tuple[str, int] = None):
+    hidden_layer_func = model_config["hidden_layer_func"]
+    hidden_layer_config = model_config["hidden_layer_config"]
+    output_units = model_config.get("output_units")
+
+    core_input = keras.Input(core_model.input.shape[1:], name=core_model_input_name)
+    x = core_model(core_input, training=False)
+
+    if hydra_input_t is not None:
+        hydra_input = keras.Input(hydra_input_t[1], name=hydra_input_t[0])
+        x = keras.layers.concatenate([x, hydra_input])
+
+        inputs = [core_input, hydra_input]
+    else:
+        inputs = core_input
+
+    outputs = []
+    for cur_output_name in output_names:
+        if output_units is not None:
+            cur_x = hidden_layer_func(x, output_units[0], **hidden_layer_config)
+            for cur_out_units in output_units[1:]:
+                cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
+
+            outputs.append(keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x))
+
+    return keras.Model(inputs=inputs, outputs=outputs)
+
 
 
 def nnelu(input):
