@@ -28,6 +28,7 @@ if gpus:
         # Memory growth must be set before GPUs have been initialized
         print(e)
 
+
 ## -------- Input Config ------------
 
 INPUT_CONFIG = {
