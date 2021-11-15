@@ -18,6 +18,7 @@ import nn_gmm
 import matplotlib
 matplotlib.use("Agg")
 
+
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
 if gpus:
@@ -32,19 +33,24 @@ if gpus:
         print(e)
 
 
+BASIN_DIR = Path(
+    # "/home/claudy/dev/work/data/nn_gmm/input_data/site_data/basin_stations"
+    "/mnt/win/image/clus/ml_data/nn_gmm/basin_stations"
+)
+
 ## -------- Input Config ------------
 
 IO_CONFIG = {
-    "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train"],
-    "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
-    "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
-    # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/gridsearch",
-    "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/tmp",
+    # "train_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train"],
+    # "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
+    # "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
+    # # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/gridsearch",
+    # "base_output_dir": "/home/claudy/dev/work/data/nn_gmm/results/tmp",
 
-    # "train_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train"],
-    # "val_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/val"],
-    # "stats_df": "/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train/stats.csv",
-    # "base_output_dir": "/home/cbs51/code/nn_gmm/results/gridsearch",
+    "train_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train"],
+    "val_data_dirs": ["/mnt/win/image/clus/ml_data/nn_gmm/sample_files/val"],
+    "stats_df": "/mnt/win/image/clus/ml_data/nn_gmm/sample_files/train/stats.csv",
+    "base_output_dir": "/home/cbs51/code/nn_gmm/results/gridsearch",
 
     "output_dir": None,
     "multi_input": False,
@@ -195,7 +201,7 @@ for ix in range(n_evals):
             else "location-independence"
         )
 
-        wandb.init(
+        wandb_run = wandb.init(
             project="nn-gmm",
             entity="cbs51",
             tags=["multi_output", loc_tag, "random_search", search_id],
@@ -229,6 +235,29 @@ for ix in range(n_evals):
 
     result_df = pd.concat(result_dfs)
     result_df.to_csv(output_dir / "results.csv", index_label="id")
+
+    # Location specific eval
+    model = nn_gmm.GMM.load(train_result.best_model_dir)
+    loc_vis_dir = cur_output_dir / "visualisation" / "location"
+    loc_vis_dir.mkdir(parents=True)
+    basin_mean_abs_ln_res = nn_gmm.run_location_eval(
+        model, Path(IO_CONFIG["val_data_dirs"][0]), BASIN_DIR, loc_vis_dir, suffix="val"
+    )
+
+    if use_wandb:
+        # Upload the Basin residuals
+        for cur_basin, cur_series in basin_mean_abs_ln_res.items():
+            for cur_im, cur_value in cur_series.iteritems():
+                wandb.run.summary[
+                    f"mean_abs_ln_res_{cur_basin}_{cur_im.replace('.', 'p')}"
+                ] = cur_value
+
+        wandb.save(str(cur_output_dir / "input_config.json"))
+        wandb.save(str(cur_output_dir / "model_config.json"))
+        wandb.save(str(cur_output_dir / "train_config.json"))
+
+        wandb_run.finish()
+
 
 
 

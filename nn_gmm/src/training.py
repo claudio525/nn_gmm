@@ -250,6 +250,15 @@ def train(
     # Model architecture summary
     model.summary()
 
+    # Save a plot of the model
+    keras.utils.plot_model(
+        model,
+        output_dir / "model.png",
+        expand_nested=True,
+        show_dtype=True,
+        show_shapes=True,
+    )
+
     # Callbacks
     model_dir = output_dir / "best_model"
     model_dir.mkdir()

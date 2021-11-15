@@ -1,6 +1,6 @@
 from .agg_utils import *
 from .training import *
-from .hidden_layers import *
+from src.hidden_layers import *
 from .model import *
 from .data_processing import *
 from .data import *

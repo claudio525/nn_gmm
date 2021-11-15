@@ -100,15 +100,16 @@ IO_CONFIG["im_config"] = nn_gmm.convert_pre_config(IO_CONFIG["im_config"], stats
 # Config
 CONFIG = {
     "model_config": {
-        "hidden_layer_config": {"dropout": 0.3},
-        "hidden_layer_func": nn_gmm.relu_dropout,
-        "units": [256,256,256],
-        "output_units": [64, 64],
+        # "hidden_layer_config": {"dropout": 0.1},
+        "hidden_layer_config": {"l2": 0.1},
+        "hidden_layer_func": nn_gmm.relu_bn,
+        "units": [32, 32, 32, 32],
+        "output_units": [64, 64, 64, 64],
     },
     "training_config": {
-        "batch_size": 512,
+        "batch_size": 2048,
         "shuffle_buffer_size": int(7e6),
-        "n_epochs": 25,
+        "n_epochs": 100,
         "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
         "loss": "mse",
         # "loss": nn_gmm.MargNLLLoss(len(list(INPUT_CONFIG["im_config"].keys()))),
@@ -117,7 +118,7 @@ CONFIG = {
             keras.callbacks.ReduceLROnPlateau(
                 monitor="loss",
                 factor=0.5,
-                patience=4,
+                patience=10,
                 verbose=1,
                 min_lr=1e-6,
                 min_delta=0.001,
@@ -127,8 +128,7 @@ CONFIG = {
 }
 
 if __name__ == "__main__":
-    use_wandb = False
-    callbacks = CONFIG["training_config"]["callbacks"]
+    use_wandb = True
 
     # Create a run ID
     run_id = nn_gmm.create_run_id()
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         wandb.config.input_config = IO_CONFIG
         wandb.config.model_config = CONFIG["model_config"]
         wandb.config.training_config = CONFIG["training_config"]
-        callbacks.append(WandbCallback())
+        CONFIG["training_config"]["callbacks"].append(WandbCallback())
 
     train_result, output_dir, *_ = nn_gmm.train(
         IO_CONFIG,
@@ -159,7 +159,6 @@ if __name__ == "__main__":
         model_fn=nn_gmm.create_reg_multi_output_model,
         model_config=CONFIG["model_config"],
         verbose=2,
-        callbacks=callbacks,
         multi_output=True,
     )
 
@@ -182,5 +181,6 @@ if __name__ == "__main__":
         wandb.save(str(output_dir / "input_config.json"))
         wandb.save(str(output_dir / "model_config.json"))
         wandb.save(str(output_dir / "train_config.json"))
+        wandb.save(str(output_dir / "model.png"))
 
     exit()

@@ -111,7 +111,7 @@ CORE_CONFIG = {
     "model_config": {
         "hidden_layer_config": {"dropout": 0.3},
         "hidden_layer_func": nn_gmm.relu_dropout,
-        "units": [256, 256, 128, 64],
+        "units": [256, 256, 256],
     },
     "training_config": {
         "batch_size": 512,
@@ -129,7 +129,7 @@ HYDRA_CONFIG = {
     "model_config": {
         "hidden_layer_config": {"dropout": 0.3},
         "hidden_layer_func": nn_gmm.relu_dropout,
-        "output_units": [128, 128, 64, 32],
+        "output_units": [64, 64],
     },
     "training_config": {
         "batch_size": 512,
@@ -146,7 +146,7 @@ HYDRA_CONFIG = {
 
 TUNING_TRAINING_CONFIG = {
         "batch_size": 512,
-        "shuffle_buffer_size": int(7e6),
+        "shuffle_buffer_size": int(7e3),
         "n_epochs": 1,
         "optimizer": tf.keras.optimizers.Adam(learning_rate=0.0001),
         "loss": "mse",
@@ -156,7 +156,7 @@ TUNING_TRAINING_CONFIG = {
 
 
 if __name__ == "__main__":
-    use_wandb = True
+    use_wandb = False
 
     # Create a run ID
     run_id = nn_gmm.create_run_id()
@@ -164,37 +164,35 @@ if __name__ == "__main__":
 
     base_output_dir = nn_gmm.create_output_dir(IO_CONFIG)
 
-
-
-    # Train the core network
-    core_model_dir = base_output_dir / "core_model"
-    core_model_dir.mkdir(exist_ok=False, parents=False)
-    core_train_result, core_output_dir, *_ = nn_gmm.train(
-        CORE_IO_CONFIG,
-        CORE_CONFIG["training_config"],
-        model_fn=nn_gmm.create_reg_model,
-        model_config=CORE_CONFIG["model_config"],
-        verbose=1,
-        output_dir=core_model_dir,
-    )
-
-    # Load the best model
-    core_model = keras.Sequential(
-        keras.models.load_model(core_model_dir / "best_model").layers[:-2]
-    )
-    core_model.trainable = False
-
-    # Add the subnetworks for the different IM outputs
-    hydra_model = nn_gmm.add_multi_output_head(
-        core_model, "core_inputs", HYDRA_CONFIG["model_config"], list(IO_CONFIG["im_config"].keys()), hydra_input_t=("hydra_inputs", 2)
-    )
-
-    # Train the hydra heads (keep the core model weights fixed
-    hydra_model_dir = base_output_dir / "hydra_model"
-    hydra_model_dir.mkdir(exist_ok=False, parents=False)
-    hydra_train_result, hydra_output_dir, *_ = nn_gmm.train(IO_CONFIG, HYDRA_CONFIG["training_config"], model=hydra_model,
-                                                            model_config=HYDRA_CONFIG["model_config"], multi_output=True,
-                                                            output_dir=hydra_model_dir)
+    # # Train the core network
+    # core_model_dir = base_output_dir / "core_model"
+    # core_model_dir.mkdir(exist_ok=False, parents=False)
+    # core_train_result, core_output_dir, *_ = nn_gmm.train(
+    #     CORE_IO_CONFIG,
+    #     CORE_CONFIG["training_config"],
+    #     model_fn=nn_gmm.create_reg_model,
+    #     model_config=CORE_CONFIG["model_config"],
+    #     verbose=1,
+    #     output_dir=core_model_dir,
+    # )
+    #
+    # # Load the best model
+    # core_model = keras.Sequential(
+    #     keras.models.load_model(core_model_dir / "best_model").layers[:-2]
+    # )
+    # core_model.trainable = False
+    #
+    # # Add the subnetworks for the different IM outputs
+    # hydra_model = nn_gmm.add_multi_output_head(
+    #     core_model, "core_inputs", HYDRA_CONFIG["model_config"], list(IO_CONFIG["im_config"].keys()), hydra_input_t=("hydra_inputs", 2)
+    # )
+    #
+    # # Train the hydra heads (keep the core model weights fixed
+    # hydra_model_dir = base_output_dir / "hydra_model"
+    # hydra_model_dir.mkdir(exist_ok=False, parents=False)
+    # hydra_train_result, hydra_output_dir, *_ = nn_gmm.train(IO_CONFIG, HYDRA_CONFIG["training_config"], model=hydra_model,
+    #                                                         model_config=HYDRA_CONFIG["model_config"], multi_output=True,
+    #                                                         output_dir=hydra_model_dir)
 
     # Fine tuning
     if use_wandb:
@@ -211,9 +209,11 @@ if __name__ == "__main__":
         TUNING_TRAINING_CONFIG["callbacks"] = WandbCallback()
 
     # Load the model
-    model = keras.models.load_model(hydra_model_dir)
+    # model = keras.models.load_model(hydra_model_dir / "best_model")
+    model = keras.models.load_model("/home/claudy/dev/work/data/nn_gmm/results/test/0127_2040/hydra_model/best_model")
 
     model_output_dir = base_output_dir / "complete_model"
+    model_output_dir.mkdir()
     train_result, output_dir, *_ = nn_gmm.train(
         IO_CONFIG,
         TUNING_TRAINING_CONFIG,
