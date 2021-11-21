@@ -12,6 +12,7 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 
+import ml_tools
 import nn_gmm
 
 
@@ -50,7 +51,7 @@ INPUT_CONFIG = {
         # "ztor": "standard",
         # "zbot": "standard",
         "mag": "standard",
-        "hdepth": "standard",
+        # "hdepth": "standard",
         # "hlon": "min_max",
         # "hlat": "min_max",
         # "width": "standard",
@@ -68,11 +69,11 @@ INPUT_CONFIG = {
         # "z2p5": "standard",
         # "vs500": "standard",
 
-        "rrup": "standard",
-        "rx": "standard",
-        "rjb": "standard",
-        "ry": "standard",
-        # "rrup": "ln",
+        # "rrup": "standard",
+        # "rx": "standard",
+        # "rjb": "standard",
+        # "ry": "standard",
+        "rrup": "ln",
         # "rx": "ln",
         # "rjb": "ln",
         # "ry": "ln",
@@ -81,11 +82,11 @@ INPUT_CONFIG = {
         "volcanic": None,
     },
     "im_config": {
-        "Ds595": "standard",
+        # "Ds595": "standard",
         "PGA": "standard",
-        "pSA_0.5": "standard",
-        "pSA_10.0": "standard",
-        "pSA_5.0": "standard",
+        # "pSA_0.5": "standard",
+        # "pSA_10.0": "standard",
+        # "pSA_5.0": "standard",
 
         # "Ds595": None,
         # "PGA": None,
@@ -107,7 +108,7 @@ INPUT_CONFIG["im_config"] = nn_gmm.convert_pre_config(INPUT_CONFIG["im_config"],
 CONFIG = {
     "model_config": {
         "hidden_layer_config": {"dropout": 0.3},
-        "hidden_layer_func": nn_gmm.relu_dropout,
+        "hidden_layer_func": ml_tools.hidden_layers.relu_dropout,
         "units": [256, 256, 256, 256, 256],
     },
     "training_config": {
@@ -116,7 +117,6 @@ CONFIG = {
         "n_epochs": 25,
         "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
         "loss": "mse",
-        # "loss": nn_gmm.MargNLLLoss(len(list(INPUT_CONFIG["im_config"].keys()))),
         "use_sample_weights": False
     },
 }

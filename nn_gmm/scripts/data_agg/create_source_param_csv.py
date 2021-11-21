@@ -1,4 +1,5 @@
-"""Creates a source attribute csv file for a given Cybershake sources directory
+"""
+Creates a source attribute csv file for a given Cybershake sources directory
 """
 import os
 import glob

@@ -192,7 +192,7 @@ def train(
     )
 
     # Pre-processing
-    if io_config["multi_input"]:
+    if io_config.get("multi_input") is not None:
         feature_config_dict, feature_config = (
             {
                 cur_input_name: data_processing.convert_to_transform_fn(
@@ -263,7 +263,7 @@ def train(
     model_dir = output_dir / "best_model"
     model_dir.mkdir()
     callbacks = (
-        [] if training_config["callbacks"] is None else training_config["callbacks"]
+        [] if training_config.get("callbacks") is None else training_config["callbacks"]
     )
     callbacks += [
         # Saves the best model (based on the validation loss)

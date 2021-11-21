@@ -8,7 +8,6 @@ import tensorflow as tf
 def get_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     """Returns a function for standardising
     data using the specified mean and standard deviation"""
-
     def standard_fn(data):
         return (data - mean) / std
 
@@ -17,7 +16,6 @@ def get_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
 
 def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     """Returns a function for computing the pre-standardised values"""
-
     def inv_standard_fn(scald_data):
         return (scald_data * std) + mean
 

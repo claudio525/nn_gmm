@@ -6,7 +6,7 @@ from typing import Union, Dict, List, Tuple
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import tensorflow_probability as tfp
+# import tensorflow_probability as tfp
 from tensorflow import keras
 
 from . import data
@@ -321,20 +321,20 @@ def nnelu(input):
     return tf.add(tf.constant(1.0, dtype=tf.float32), tf.nn.elu(input))
 
 
-class MargNLLLoss(keras.losses.Loss):
-    def __init__(self, n_outputs: int, **kwargs):
-        super().__init__(**kwargs)
-        self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
-
-    def call(self, y_true, parameters):
-        means = parameters[:, : self.n_outputs]
-        stds = parameters[:, self.n_outputs :]
-
-        gaussians = tfp.distributions.Normal(loc=means, scale=stds)
-        log_likelihood = gaussians.log_prob(y_true)
-
-        return -tf.reduce_mean(log_likelihood, axis=-1)
-
-    def get_config(self):
-        base_config = super().get_config()
-        return {**base_config, "n_outputs": int(self.n_outputs)}
+# class MargNLLLoss(keras.losses.Loss):
+#     def __init__(self, n_outputs: int, **kwargs):
+#         super().__init__(**kwargs)
+#         self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
+#
+#     def call(self, y_true, parameters):
+#         means = parameters[:, : self.n_outputs]
+#         stds = parameters[:, self.n_outputs :]
+#
+#         gaussians = tfp.distributions.Normal(loc=means, scale=stds)
+#         log_likelihood = gaussians.log_prob(y_true)
+#
+#         return -tf.reduce_mean(log_likelihood, axis=-1)
+#
+#     def get_config(self):
+#         base_config = super().get_config()
+#         return {**base_config, "n_outputs": int(self.n_outputs)}
