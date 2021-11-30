@@ -7,9 +7,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from .. import GMM
-from .. import utils
-from .. import data
+# from .. import GMM
+# from .. import utils
+# from .. import data
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
@@ -53,40 +53,40 @@ PLOT_TYPE_OPTIONS_MAPPING = {
 
 DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
 
-class ModelEventBasePlotGen:
-    """Base class for generating plots that use NN-GMM model
-    predictions for an event from the training or validation dataset"""
-
-    def __init__(
-        self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
-    ):
-        self.plot_items_ffp = plot_items_ffp
-
-        self.model = model
-
-        self.data_dirs = data_dirs
-        self.output_dir = output_dir
-
-        self._estimates = {}
-
-    def _get_event_estimates(
-        self, event: str,
-    ):
-        """Get estimates for the specified event"""
-        if event in self._estimates.keys():
-            return self._estimates[event]
-        else:
-            # Find the .tfrecord file
-            record_ffp, feature_details = utils.find_record_ffp(self.data_dirs, event)
-
-            # Load the data
-            df = data.load_tfrecord(str(record_ffp), feature_details)
-
-            # Get the estimates
-            mean_est, std_est = self.model.predict(df.loc[:, self.model.features])
-
-            self._estimates[event] = (df, mean_est, std_est)
-            return df, mean_est, std_est
+# class ModelEventBasePlotGen:
+#     """Base class for generating plots that use NN-GMM model
+#     predictions for an event from the training or validation dataset"""
+#
+#     def __init__(
+#         self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
+#     ):
+#         self.plot_items_ffp = plot_items_ffp
+#
+#         self.model = model
+#
+#         self.data_dirs = data_dirs
+#         self.output_dir = output_dir
+#
+#         self._estimates = {}
+#
+#     def _get_event_estimates(
+#         self, event: str,
+#     ):
+#         """Get estimates for the specified event"""
+#         if event in self._estimates.keys():
+#             return self._estimates[event]
+#         else:
+#             # Find the .tfrecord file
+#             record_ffp, feature_details = utils.find_record_ffp(self.data_dirs, event)
+#
+#             # Load the data
+#             df = data.load_tfrecord(str(record_ffp), feature_details)
+#
+#             # Get the estimates
+#             mean_est, std_est = self.model.predict(df.loc[:, self.model.features])
+#
+#             self._estimates[event] = (df, mean_est, std_est)
+#             return df, mean_est, std_est
 
 
 

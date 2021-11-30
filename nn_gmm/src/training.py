@@ -5,6 +5,7 @@ import datetime
 from typing import List, Dict, Tuple, Callable, Union
 from pathlib import Path
 
+import ml_tools.utils
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -46,6 +47,7 @@ def load_datasets(
     batch_size: int,
     val_dirs: Union[Path, List[Path]] = None,
     shuffle_buffer_size: int = None,
+    n_open_files: int = 512,
 ):
     """Loads the training and validation (if specified) datasets
     from the .tfrecord files in the given directories"""
@@ -54,11 +56,19 @@ def load_datasets(
         feature_details = pickle.load(f)
 
     train_ds = data.load_dataset(
-        train_dirs, feature_details, batch_size, shuffle_buffer=shuffle_buffer_size
+        train_dirs,
+        feature_details,
+        batch_size,
+        shuffle_buffer=shuffle_buffer_size,
+        n_open_files=n_open_files,
     )
     val_ds = (
         data.load_dataset(
-            val_dirs, feature_details, batch_size, shuffle_buffer=shuffle_buffer_size
+            val_dirs,
+            feature_details,
+            batch_size,
+            shuffle_buffer=shuffle_buffer_size,
+            n_open_files=n_open_files,
         )
         if val_dirs is not None
         else None
@@ -86,20 +96,18 @@ def create_output_dir(input_config: Dict):
 def _save_configs(
     io_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
 ):
-    with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-        json.dump(io_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
+    ml_tools.utils.write_to_json(io_config, output_dir / "input_config.json")
+    # with open(os.path.join(output_dir, "input_config.json"), "w") as f:
+    #     json.dump(io_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     if model_config is not None:
-        with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-            json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
+        ml_tools.utils.write_to_json(model_config, output_dir / "model_config.json")
+        # with open(os.path.join(output_dir, "model_config.json"), "w") as f:
+        #     json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
-    with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-        json.dump(training_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
-
-
-def save_to_json(data_dict: Dict, ffp: Path):
-    with open(ffp, "w") as f:
-        json.dump(data_dict, f, cls=utils.GenericObjJSONEncoder, indent=4)
+    ml_tools.utils.write_to_json(training_config, output_dir / "train_config.json")
+    # with open(os.path.join(output_dir, "train_config.json"), "w") as f:
+    #     json.dump(training_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
 
 def _save_model_data(
@@ -189,6 +197,7 @@ def train(
         training_config["batch_size"],
         val_dirs=utils.to_path(io_config["val_data_dirs"]),
         shuffle_buffer_size=training_config["shuffle_buffer_size"],
+        n_open_files=512,
     )
 
     # Pre-processing

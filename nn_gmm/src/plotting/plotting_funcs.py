@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from visualization.gmt.plotting import plot_single, plot_multiple
+# from visualization.gmt.plotting import plot_single, plot_multiple
 
 from .. import data
 from .. import utils
@@ -199,56 +199,56 @@ def plot_mag_vs30_bins(
     plt.close()
 
 
-def plot_n_records_map(
-    data_dirs: List[Union[Path, str]],
-    plot_items_ffp: Union[Path, str],
-    output_ffp: str,
-    title: str = "Number-of-records",
-):
-    """Generates a spatial map that shows number of records at each station"""
-    data_dirs, plot_items_ffp = utils.to_path(data_dirs), utils.to_path(plot_items_ffp)
-
-    ds = data.load_dataset(
-        data_dirs,
-        data.load_feature_details(data_dirs[0]),
-        5_000_000,
-        shuffle_buffer=None,
-        block_size=1024,
-    )
-
-    dfs = []
-    for cur_batch in ds.as_numpy_iterator():
-        cur_df = pd.DataFrame.from_dict(
-            {key: cur_batch[key] for key in ["id", "lat", "lon"]}
-        )
-        cur_df["id"] = cur_df.id.str.decode("UTF-8")
-        cur_df.set_index("id", inplace=True)
-
-        dfs.append(cur_df)
-
-    df = pd.concat(dfs)
-    df["station"] = utils.get_station_from_id(df.index.values.astype(str))
-
-    station_lookup_df = utils.get_station_lookup(df)
-
-    n_records_df = df.groupby("station").count()
-    n_records_df["count"] = n_records_df["lat"]
-    n_records_df.drop(columns=["lat", "lon"], inplace=True)
-
-    n_records_df = pd.merge(
-        n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
-    )
-
-    cb_options = plt_utils.compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
-    gmt_options = plt_utils.get_gmt_options_dict(
-        options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
-    )
-    csv_ffp = plt_utils.gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        plot_single(plot_items_ffp, csv_ffp, plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
-
-    return
+# def plot_n_records_map(
+#     data_dirs: List[Union[Path, str]],
+#     plot_items_ffp: Union[Path, str],
+#     output_ffp: str,
+#     title: str = "Number-of-records",
+# ):
+#     """Generates a spatial map that shows number of records at each station"""
+#     data_dirs, plot_items_ffp = utils.to_path(data_dirs), utils.to_path(plot_items_ffp)
+#
+#     ds = data.load_dataset(
+#         data_dirs,
+#         data.load_feature_details(data_dirs[0]),
+#         5_000_000,
+#         shuffle_buffer=None,
+#         block_size=1024,
+#     )
+#
+#     dfs = []
+#     for cur_batch in ds.as_numpy_iterator():
+#         cur_df = pd.DataFrame.from_dict(
+#             {key: cur_batch[key] for key in ["id", "lat", "lon"]}
+#         )
+#         cur_df["id"] = cur_df.id.str.decode("UTF-8")
+#         cur_df.set_index("id", inplace=True)
+#
+#         dfs.append(cur_df)
+#
+#     df = pd.concat(dfs)
+#     df["station"] = utils.get_station_from_id(df.index.values.astype(str))
+#
+#     station_lookup_df = utils.get_station_lookup(df)
+#
+#     n_records_df = df.groupby("station").count()
+#     n_records_df["count"] = n_records_df["lat"]
+#     n_records_df.drop(columns=["lat", "lon"], inplace=True)
+#
+#     n_records_df = pd.merge(
+#         n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
+#     )
+#
+#     cb_options = plt_utils.compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
+#     gmt_options = plt_utils.get_gmt_options_dict(
+#         options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
+#     )
+#     csv_ffp = plt_utils.gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
+#
+#     with tempfile.TemporaryDirectory() as tmp_dir:
+#         plot_single(plot_items_ffp, csv_ffp, plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
+#
+#     return
 
 
 def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = None):

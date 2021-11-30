@@ -14,7 +14,6 @@ import matplotlib
 
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
-from visualization.gmt.plotting import plot_multiple, plot_single
 
 from ..model import GMM
 from ..utils import get_station_from_id, get_station_lookup, to_path, to_list

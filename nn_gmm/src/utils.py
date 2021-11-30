@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
-from typing import Any, List, Union, Dict
+from typing import Any, List, Union, Dict, Type
 from PIL import Image
 
-import git
+import pyarrow as pa
 import numpy as np
 import pandas as pd
 from scipy import interpolate
@@ -20,12 +19,12 @@ def pandas_isin(array_1: np.ndarray, array_2: np.ndarray) -> np.ndarray:
     return pd.Index(pd.unique(array_2)).get_indexer(array_1) >= 0
 
 
-class GenericObjJSONEncoder(json.JSONEncoder):
-    def default(self, obj: Any) -> Any:
-        try:
-            return json.JSONEncoder.default(self, obj)
-        except TypeError as ex:
-            return str(obj)
+# class GenericObjJSONEncoder(json.JSONEncoder):
+#     def default(self, obj: Any) -> Any:
+#         try:
+#             return json.JSONEncoder.default(self, obj)
+#         except TypeError as ex:
+#             return str(obj)
 
 
 def get_station_lookup(X: pd.DataFrame):
@@ -145,10 +144,14 @@ def convert_io_config(io_config: Dict, stats_df: pd.DataFrame):
     if io_config["multi_input"]:
         feature_config_dict = io_config["feature_config"]
         for cur_input_name, cur_config in feature_config_dict.items():
-             feature_config_dict[cur_input_name] = convert_pre_config(cur_config, stats_df)
+            feature_config_dict[cur_input_name] = convert_pre_config(
+                cur_config, stats_df
+            )
         io_config["feature_config"] = feature_config_dict
     else:
-        io_config["feature_config"] = convert_pre_config(io_config["feature_config"], stats_df)
+        io_config["feature_config"] = convert_pre_config(
+            io_config["feature_config"], stats_df
+        )
 
     io_config["im_config"] = convert_pre_config(io_config["im_config"], stats_df)
 
@@ -157,8 +160,10 @@ def convert_io_config(io_config: Dict, stats_df: pd.DataFrame):
 
 def get_repo_version():
     """Gets the current commit hash"""
+    import git
     repo = git.Repo(search_parent_directories=True)
     return repo.head.object.hexsha
+
 
 def find_record_ffp(data_dirs: List[Path], event: str):
     """Finds the tfrecord file for the given event in
@@ -181,3 +186,27 @@ def find_record_ffp(data_dirs: List[Path], event: str):
     assert len(results) == 1, "More than one tfrecord file found"
 
     return results[0]
+
+
+def pa_column_types(column_types: Dict[str, Type]):
+    pa_column_types = {}
+    for cur_key, cur_type in column_types.items():
+        if cur_type is None or cur_type is np.dtype(object):
+            continue
+        elif cur_type in (np.float64, np.dtype(np.float64)):
+            pa_column_types[cur_key] = pa.float64()
+        elif cur_type in (float, np.float32, np.dtype(np.float32)):
+            pa_column_types[cur_key] = pa.float32()
+        elif cur_type in (np.float16, np.dtype(np.float16)):
+            pa_column_types[cur_key] = pa.float16()
+        elif cur_type in (np.int64, np.dtype(np.int64)):
+            pa_column_types[cur_key] = pa.int64()
+        elif cur_type in (int, np.int32, np.dtype(np.int32)):
+            pa_column_types[cur_key] = pa.int32()
+        elif cur_type in (np.int16, np.dtype(np.int16)):
+            pa_column_types[cur_key] = pa.int16()
+        elif cur_type in [bool, np.dtype(bool)]:
+            pa_column_types[cur_key] = pa.bool_()
+        else:
+            raise NotImplementedError(f"No converstion type for type {cur_type} specified")
+    return pa_column_types

@@ -25,10 +25,10 @@ import nn_gmm
 
 io_config = {
     "train_data_dirs": [
-        "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train"
+        "/home/claudy/dev/work/data/nn_gmm/training_data/train"
     ],
-    "val_data_dirs": ["/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/val"],
-    "stats_df": "/home/cbs51/dev/work/data/nn_gmm/input_data/sample_files/train/stats.csv",
+    "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/val"],
+    "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/train/stats.csv",
     "base_output_dir": "/home/cbs51/dev/work/data/nn_gmm/results/test",
 
     "output_dir": None,
@@ -74,9 +74,9 @@ outputs = keras.layers.Dense(1, activation="linear")(x)
 model = keras.Model(inputs=inputs, outputs=outputs)
 
 train_config = {
-    "batch_size": 512,
-    "shuffle_buffer_size": int(7e6),
-    "n_epochs": 25,
+    "batch_size": 1024,
+    "shuffle_buffer_size": int(5e6),
+    "n_epochs": 5,
     "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
     "loss": "mse",
     "use_sample_weights": False
