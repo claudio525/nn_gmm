@@ -76,7 +76,7 @@ model = keras.Model(inputs=inputs, outputs=outputs)
 train_config = {
     "batch_size": 1024,
     "shuffle_buffer_size": int(5e6),
-    "n_epochs": 5,
+    "n_epochs": 3,
     "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
     "loss": "mse",
     "use_sample_weights": False

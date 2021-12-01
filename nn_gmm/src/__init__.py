@@ -13,7 +13,7 @@ from .training import (
     train,
 )
 
-from .model import TECT_TYPE_ONE_HOT_DICT
+from .model import TECT_TYPE_ONE_HOT_DICT, GMM
 from .console import console
 from .data_processing import (
     get_standard_scaling_fn,
@@ -63,4 +63,3 @@ from .utils import (
     convert_pre_config,
     pa_column_types,
 )
-from .TableDB import TableDB

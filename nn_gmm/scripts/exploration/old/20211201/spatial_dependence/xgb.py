@@ -1,14 +1,10 @@
 #%% Imports
 import xgboost as xgb
-import numpy as np
 import pandas as pd
 import tensorflow as tf
-import tensorflow.keras as keras
-import matplotlib.pyplot as plt
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 
 import nn_gmm.scripts.exploration.spatial_dependence.utils as utils
@@ -25,8 +21,6 @@ if gpus:
     except RuntimeError as e:
         # Memory growth must be set before GPUs have been initialized
         print(e)
-
-import ml_tools
 
 pd.set_option('display.max_columns', None)
 

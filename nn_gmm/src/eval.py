@@ -15,8 +15,8 @@ def get_realisation_residuals(
     model: Union[GMM, Path],
     abs_residual: bool = True,
 ):
-    """Computes realisation residuals for all realisations found in the
-    specified data directories"""
+    """Computes realisation residuals for all realisations
+    found in the specified data directories"""
     # Find all .tfrecord files
     if isinstance(data_dirs, list):
         tf_files = []

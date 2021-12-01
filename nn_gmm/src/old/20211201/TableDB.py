@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from .console import console
+from nn_gmm.src.console import console
 
 def _load_column(db_ffp: Path, column: str):
     with h5py.File(db_ffp, "r") as db:

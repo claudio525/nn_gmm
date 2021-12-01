@@ -6,6 +6,7 @@ from typing import Union, Dict, List, Tuple
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+
 # import tensorflow_probability as tfp
 from tensorflow import keras
 
@@ -25,7 +26,9 @@ class GMM:
         self.feature_config_prcd = data_processing.convert_to_transform_fn(
             self.feature_config.copy(), tf_fn=False
         )
-        self.im_config_prcd = data_processing.convert_to_inv_transform_fn(self.im_config.copy(), tf_fn=False)
+        self.im_config_prcd = data_processing.convert_to_inv_transform_fn(
+            self.im_config.copy(), tf_fn=False
+        )
 
         self.features = np.asarray(list(self.feature_config.keys()))
         self.outputs = np.asarray(list(self.im_config.keys()))
@@ -119,7 +122,7 @@ class GMM:
 
         ds = data.load_dataset(
             data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
-        ).prefetch(tf.data.experimental.AUTOTUNE)
+        ).prefetch(tf.data.AUTOTUNE)
 
         ims = ims if ims is not None else list(self.outputs)
         sim_dfs, mean_dfs, std_dfs = [], [], []
@@ -171,9 +174,7 @@ class GMM:
     def load(cls, model_dir: Union[str, Path]):
         model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
 
-        model = keras.models.load_model(
-            str(model_dir), custom_objects={"MargNLLLoss": MargNLLLoss}
-        )
+        model = keras.models.load_model(str(model_dir))
 
         with open(model_dir / "input_config.json", "r") as f:
             input_config = json.load(f)
@@ -249,7 +250,9 @@ def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras
     return keras.Model(inputs=input, outputs=outputs)
 
 
-def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_names: List[str]):
+def create_reg_multi_output_model(
+    model_config: Dict, n_inputs: int, output_names: List[str]
+):
     """Creates a functional keras model from the model config,
     with multiple linear outputs and possible sub-nets per output
 
@@ -282,12 +285,20 @@ def create_reg_multi_output_model(model_config: Dict, n_inputs: int, output_name
             for cur_out_units in output_units[1:]:
                 cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
 
-            outputs.append(keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x))
+            outputs.append(
+                keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
+            )
 
     return keras.Model(inputs=inputs, outputs=outputs)
 
 
-def add_multi_output_head(core_model: keras.Model, core_model_input_name: str, model_config: Dict, output_names: List[str], hydra_input_t: Tuple[str, int] = None):
+def add_multi_output_head(
+    core_model: keras.Model,
+    core_model_input_name: str,
+    model_config: Dict,
+    output_names: List[str],
+    hydra_input_t: Tuple[str, int] = None,
+):
     hidden_layer_func = model_config["hidden_layer_func"]
     hidden_layer_config = model_config["hidden_layer_config"]
     output_units = model_config.get("output_units")
@@ -310,10 +321,11 @@ def add_multi_output_head(core_model: keras.Model, core_model_input_name: str, m
             for cur_out_units in output_units[1:]:
                 cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
 
-            outputs.append(keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x))
+            outputs.append(
+                keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
+            )
 
     return keras.Model(inputs=inputs, outputs=outputs)
-
 
 
 def nnelu(input):
