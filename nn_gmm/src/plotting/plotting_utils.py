@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from nn_gmm.src.model import GMM
+from nn_gmm.src.model import NeuralNetworkGMM
 from nn_gmm.src import utils
 from nn_gmm.src import data
 
@@ -58,7 +58,7 @@ class ModelEventBasePlotGen:
     predictions for an event from the training or validation dataset"""
 
     def __init__(
-        self, plot_items_ffp: str, model: GMM, data_dirs: List[Path], output_dir: Path
+        self, plot_items_ffp: str, model: NeuralNetworkGMM, data_dirs: List[Path], output_dir: Path
     ):
         self.plot_items_ffp = plot_items_ffp
 

@@ -68,7 +68,7 @@ PLOTTING_CONFIG = {
 def create_plots(config):
     if config["model_dir"] is None or config["output_dir"] is None:
         raise ValueError("No model directory or output directory specified")
-    model = nn_gmm.GMM.load(config["model_dir"])
+    model = nn_gmm.NeuralNetworkGMM.load(config["model_dir"])
 
     ims = config["ims"]
     train_data_dirs = nn_gmm.utils.to_path(config["train_data_dirs"])

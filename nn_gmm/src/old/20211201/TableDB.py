@@ -56,16 +56,16 @@ class TableDB:
         use_int32: bool = True,
     ):
         if db_ffp.exists():
-            console.print(f"[red]File {db_ffp} already exists, quitting![/]")
+            console.log(f"[red]File {db_ffp} already exists, quitting![/]")
             return
 
         column_types = None
         with h5py.File(db_ffp, "w") as db:
             for ix, cur_csv_ffp in enumerate(csv_ffps):
-                console.print(f"Processing {ix+1}/{len(csv_ffps)}")
+                console.log(f"Processing {ix+1}/{len(csv_ffps)}")
 
                 if not cur_csv_ffp.exists():
-                    console.print(f"[orange]CSV file {cur_csv_ffp} does not exist, skipping[/]")
+                    console.log(f"[orange]CSV file {cur_csv_ffp} does not exist, skipping[/]")
                     continue
                 cur_df = pd.read_csv(cur_csv_ffp)
 

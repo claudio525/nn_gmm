@@ -1,187 +1,251 @@
 from pathlib import Path
-from typing import List, Union, Dict
+from typing import List, Union, Dict, Sequence
 
+import wandb
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .data import load_tfrecord, load_feature_details, load_dataset, load_basin_stations
+import ml_tools
+from . import data
 from .model import GMM
-from .plotting import plotting_utils as plt_utils
+from .ResultDB import ResultDB
+from .console import console
+from . import utils
+from nn_gmm.src.plotting.BinPlotGen import BinPlotGen
+
+MAGNITUDE_BINS = np.arange(3, 10)
+
+DEFAULT_METRICS = ("malr")
 
 
-def get_realisation_residuals(
-    data_dirs: Union[List[Path], Path],
-    model: Union[GMM, Path],
-    abs_residual: bool = True,
+def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
+    """
+    Runs predictions for the specified directory and model, and saves
+    as a ResultDB
+
+    Parameters
+    ----------
+    model_dir: Path
+    data_dir: Path
+        Directory that contains the tfrecord files to run prediction on
+    output_ffp: Path
+    """
+    gmm = GMM.load(model_dir)
+
+    console.log("Running predictions")
+    sim_df, est_df, *_ = gmm.predict_dirs([data_dir], features=list(gmm.features))
+    assert np.all(sim_df.index == est_df.index)
+
+    for cur_col, cur_data in est_df.iteritems():
+        sim_df[f"{cur_col}_est"] = cur_data
+    del est_df
+
+    console.log("Computing station names")
+    sim_df["site"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(1)
+    # sim_df["site"] = utils.get_station_from_id(
+    #     sim_df.index.values.astype(str)
+    # )
+
+    console.log("Writing database")
+    ResultDB.write_data(sim_df, output_ffp)
+
+
+def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool = True):
+    """Writes the estimated value (along with "true" values and features)
+     for the specified training data directory
+
+     Note: The data directory is expected to have
+     two subdirectories "train" and "val" which each contain
+     their respective tfrecord files
+     """
+    train_data_dir = data_dir / "train"
+    val_data_dir = data_dir / "val"
+    if not train_data_dir.exists() or not val_data_dir.exists():
+        console.log("[red]Training or Validation directory missing[/]")
+        return
+
+    if verbose:
+        console.log("Running training data predictions")
+    write_predictions(model_dir, train_data_dir, model_dir / "train_predictions.hdf5")
+
+    if verbose:
+        console.log("Running validation data predictions")
+    write_predictions(model_dir, val_data_dir, model_dir / "val_predictions.hdf5")
+
+
+def mse(y: np.ndarray, y_est: np.ndarray):
+    """Computes MSE"""
+    return np.mean(np.power(y - y_est, 2))
+
+
+def mean_absolute_ln_ratio(y: np.ndarray, y_est: np.ndarray):
+    """Computes the mean absolute log ratio
+
+    Note: Assumes y & y_est are already in log-space
+    """
+    return np.mean(np.abs(y - y_est))
+
+
+def compute_metrics(
+    data_df: pd.DataFrame,
+    ims: Sequence[str],
+    mag_bins: Sequence[float] = MAGNITUDE_BINS,
+    metrics: Sequence[str] = DEFAULT_METRICS,
 ):
-    """Computes realisation residuals for all realisations
-    found in the specified data directories"""
-    # Find all .tfrecord files
-    if isinstance(data_dirs, list):
-        tf_files = []
-        for cur_dir in data_dirs:
-            tf_files.extend(list(cur_dir.glob("*.tfrecord")))
-    else:
-        tf_files = list(data_dirs.glob("*.tfrecord"))
+    """
+    Computes a bunch of metrics for the specified IMs
 
-    # Load the model
-    model = model if isinstance(model, GMM) else GMM.load(model)
+    Parameters
+    ----------
+    data_df: Dataframe
+    ims: list of strings
+    mag_bins: Sequence of floats
+        Magnitude bins for which to compute MSE
 
-    feature_details = (
-        load_feature_details(data_dirs[0])
-        if isinstance(data_dirs, list)
-        else load_feature_details(data_dirs)
+    Returns
+    -------
+    Dictionary of evaluation metrics
+    """
+    # Compute the statistics
+    metric_results = {}
+    for cur_im in ims:
+        cur_metrics = {}
+        y, y_est = data_df[cur_im], data_df[f"{cur_im}_est"]
+
+        # Standard MSE
+        if "mse" in metrics:
+            cur_metrics["mse"] = mse(y, y_est)
+
+        # Mean absolute log ratio
+        if "malr" in metrics:
+            cur_metrics["malr"] = mean_absolute_ln_ratio(y, y_est)
+
+        # Compute MSE per magnitude bin
+        mag_bin_ind = np.digitize(data_df.mag, bins=mag_bins)
+        for cur_bin_ind in np.unique(mag_bin_ind):
+            cur_mask = mag_bin_ind == cur_bin_ind
+
+            # MSE
+            if "mse" in metrics:
+                cur_metrics[
+                    f"mse_mag_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                ] = mse(y[cur_mask], y_est[cur_mask])
+
+            # Mean absolute log ratio
+            if "malr" in metrics:
+                cur_metrics[
+                    f"malr_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                ] = mean_absolute_ln_ratio(y[cur_mask], y_est[cur_mask])
+
+        metric_results[cur_im] = cur_metrics
+
+    return pd.DataFrame.from_dict(metric_results)
+
+
+def train_val_metrics(model_dir: Path, save: bool = False):
+    """Computes training & validation metrics"""
+    input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
+
+    ims = list(input_config["im_config"].keys())
+    columns = [f"{im}_est" for im in ims] + ims + ["mag"]
+
+    train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
+    val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
+
+    train_metrics = compute_metrics(train_df, ims)
+    val_metrics = compute_metrics(val_df, ims)
+
+    console.rule("Training")
+    console.log(train_metrics)
+
+    console.rule("Validation")
+    console.log(val_metrics)
+
+    if save:
+        train_metrics.to_csv(model_dir / "train_metrics.csv")
+        val_metrics.to_csv(model_dir / "val_metrics.csv")
+
+    return train_metrics, val_metrics
+
+
+def gen_rrup_bin_plot(model_dir: Path, im: str):
+    """Creates a Rrup based plot for the specified IM"""
+    output_dir = model_dir / "plots" / "bin_plots"
+    val_result_db_ffp = model_dir / f"val_predictions.hdf5"
+    train_result_db_ffp = model_dir / f"train_predictions.hdf5"
+
+    bin_plot_gen = BinPlotGen()
+    console.log("Generating training plots")
+    bin_plot_gen.create_IM_bin_plot(
+        im, output_dir, train_result_db_ffp, feature="rrup", prefix="train"
+    )
+    console.log("Generating validation plots")
+    bin_plot_gen.create_IM_bin_plot(
+        im, output_dir, val_result_db_ffp, feature="rrup", prefix="val"
     )
 
-    rel_res_dfs = []
-    for ix, cur_tf_ffp in enumerate(tf_files):
-        print(f"Processing {ix + 1}/{len(tf_files)}")
 
-        cur_data = load_tfrecord(str(cur_tf_ffp), feature_details)
-        cur_mean_df, _ = model.predict(cur_data)
-        assert np.all(cur_mean_df.index == cur_data.index)
-
-        ims = cur_mean_df.columns.values.astype(str)
-
-        split_ids = np.stack(np.char.split(cur_mean_df.index.values.astype(str), "_"))
-        cur_mean_df["realisation"] = np.char.add(
-            np.char.add(split_ids[:, 0], "_"), split_ids[:, 1]
-        )
-        cur_data["realisation"] = cur_mean_df.realisation
-
-        cur_data["station"] = cur_mean_df["station"] = split_ids[:, -1]
-
-        cur_mean_df["fault"] = split_ids[:, 0]
-        rel_fault = cur_mean_df.groupby("realisation").first()["fault"].to_frame()
-
-        rel_mag = cur_data.groupby("realisation").first()["mag"]
-        rel_n_stations = cur_data.groupby("realisation").count()["station"]
-        rel_n_stations.name = "n_stations"
-
-        cur_rel_res_dfs = []
-        for im in ims:
-            res = (
-                cur_data.loc[:, im] - cur_mean_df.loc[:, im].apply(np.log)
-            ).to_frame()
-            if abs_residual:
-                res[im] = res[im].apply(np.abs)
-
-            res["realisation"] = cur_mean_df.realisation
-
-            cur_rel_res_dfs.append(res.groupby("realisation").mean())
-
-        cur_rel_res_df = pd.concat(cur_rel_res_dfs, axis=1)
-        cur_rel_res_df = cur_rel_res_df.merge(
-            rel_mag, left_index=True, right_index=True
-        )
-        cur_rel_res_df = cur_rel_res_df.merge(
-            rel_fault, left_index=True, right_index=True
-        )
-        cur_rel_res_df = cur_rel_res_df.merge(
-            rel_n_stations, left_index=True, right_index=True
-        )
-        rel_res_dfs.append(cur_rel_res_df)
-
-    rel_res_df = pd.concat(rel_res_dfs)
-    return rel_res_df
-
-
-def get_loc_predictions(
-    model: GMM, data_dir: Path, station_names: Union[List[str], np.ndarray]
+def compute_basin_metrics(
+    data_df: pd.DataFrame, basin_dict: Dict[str, np.ndarray], ims: Sequence[str]
 ):
-    """Gets prediction for the locations of interest from the specified data directory"""
-    ds = load_dataset(
-        [data_dir],
-        load_feature_details(data_dir),
-        100_000,
-        shuffle_buffer=None,
-        block_size=10_000,
-    )
-
-    dfs = []
-    for cur_batch in ds.as_numpy_iterator():
-        cur_station_names = np.stack(np.char.split(cur_batch["id"].astype(str), "_"))[
-            :, -1
+    """Computes basin metrics"""
+    metrics = {}
+    for cur_basin, cur_stations in basin_dict.items():
+        cur_basin_data = data_df.loc[
+            utils.pandas_isin(data_df.site.values, cur_stations)
         ]
-        cur_mask = np.isin(cur_station_names, station_names)
+        cur_basin_metrics = compute_metrics(cur_basin_data, ims)
 
-        cur_df = pd.DataFrame(cur_batch, index=cur_batch["id"].astype(str)).loc[
-            cur_mask
-        ]
-        cur_df["station"] = cur_station_names[cur_mask]
-        dfs.append(cur_df)
+        metrics[cur_basin] = cur_basin_metrics
 
-    df = pd.concat(dfs)
-
-    mean_df, std_df = model.predict(df)
-
-    return mean_df, std_df, df
+    return metrics
 
 
-def get_basin_predictions(
-    model: GMM, data_dir: Path, basins_stations: Dict[str, np.ndarray]
-):
-    """Gets model predictions for the specified basins"""
-    stations = np.concatenate(
-        [cur_stations for cur_stations in basins_stations.values()]
+def train_val_basin_metrics(model_dir: Path, basin_dir: Path, save: bool = False):
+    """Computes basin metrics for the training & validation data"""
+    # Get the model IMs
+    ims = list(
+        ml_tools.utils.load_json(model_dir / "input_config.json")["im_config"].keys()
+    )
+    columns = ims + [f"{im}_est" for im in ims] + ["site", "mag"]
+
+    # Get the basin stations
+    basin_dict = data.load_basin_stations(basin_dir)
+
+    # Retrieve model predictions
+    console.log("Loading training model predictions")
+    train_data_df = ResultDB.get_data_static(
+        model_dir / "train_predictions.hdf5", columns
     )
 
-    mean_df, std_df, df = get_loc_predictions(model, data_dir, stations)
-    assert np.all(mean_df.index == df.index)
+    console.log("Loading validation model predictions")
+    val_data_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 
-    df["basin"] = ""
-    for cur_basin, cur_stations in basins_stations.items():
-        cur_mask = np.isin(df.station, cur_stations)
-        df.loc[cur_mask, "basin"] = cur_basin
+    # Compute the basin metrics
+    console.log("Compute metrics")
+    train_metrics = compute_basin_metrics(train_data_df, basin_dict, ims)
+    val_metrics = compute_basin_metrics(val_data_df, basin_dict, ims)
 
-    mean_df["station"], mean_df["basin"] = df.station, df.basin
-
-    return mean_df, std_df, df
-
-
-def run_location_eval(
-    model: GMM,
-    data_dir: Path,
-    basin_dir: Path,
-    fig_output_dir: Path = None,
-    suffix: str = None,
-):
-    from .plotting.plotting_funcs import residual_scatter_hist_plot
-
-    basin_dict = load_basin_stations(basin_dir)
-
-    mean_df, _, df = get_basin_predictions(model, data_dir, basin_dict)
-
-    ims = model.outputs
-    suffix = "" if suffix is None else f"_{suffix}"
-
-    # Compute mean absolute ln residual
-    basin_mean_abs_ln_res = {}
     for cur_basin in basin_dict.keys():
-        cur_mask = mean_df.basin == cur_basin
-        cur_ln_res = df.loc[cur_mask, ims] - mean_df.loc[cur_mask, ims].apply(np.log)
+        console.rule(cur_basin)
+        console.log(
+            pd.merge(
+                train_metrics[cur_basin],
+                val_metrics[cur_basin],
+                left_index=True,
+                right_index=True,
+                suffixes=("_train", "_val"),
+            )
+        )
 
-        basin_mean_abs_ln_res[cur_basin] = cur_ln_res.apply(np.abs).mean(axis=0)
+    return train_metrics, val_metrics
 
-        # Create histogram plots of residual for each IM
-        if fig_output_dir is not None:
-            for ix, cur_im in enumerate(ims):
-                plt.figure()
-                plt.hist(cur_ln_res[cur_im], bins=25)
-                plt.xlabel(cur_im)
-                plt.text(
-                    0.99,
-                    0.99,
-                    f"Mean abs ln res: {basin_mean_abs_ln_res[cur_basin][cur_im]:.4f}",
-                    horizontalalignment="right",
-                    verticalalignment="top",
-                    transform=plt.gca().transAxes,
-                )
-                plt.xlim((-1.75, 1.75))
 
-                plt.tight_layout()
-                plt.savefig(fig_output_dir / f"{cur_basin}_{cur_im.replace('.', 'p')}_ln_res{suffix}.png")
-                plt.close()
-
-    return basin_mean_abs_ln_res
+def wandb_log_metrics(
+    wandb_run: object,
+    general_metrics: pd.DataFrame,
+    basin_metrics: Dict[str, pd.DataFrame],
+    metrics: Sequence[str] = DEFAULT_METRICS,
+):
+    print("wtf")

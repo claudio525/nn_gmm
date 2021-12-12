@@ -1,60 +1,61 @@
-from .plotting_funcs import *
-from .plotting_utils import *
+from typing import List, Dict
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from nn_gmm.src.console import console
+from nn_gmm.src.ResultDB import ResultDB
+from . import plotting_funcs as pf
+from . import plotting_utils as pu
 
 
-class BinPlotGen(ModelEventBasePlotGen):
-    """Creates plots for the binned dataset"""
+class BinPlotGen:
+    """Creates multi-plot figures with different
+    data bins (split based on vs30 & magnitude)"""
 
     def __init__(
         self,
-        plot_items_ffp: str,
-        model: GMM,
-        data_sets: Dict[str, Path],
-        output_dir: Path,
         mag_bins: List[float] = None,
         vs30_bins: List[float] = None,
     ):
-        super().__init__(plot_items_ffp, model, list(data_sets.values()), output_dir)
-
         self.mag_bins = mag_bins
-        self.vs30_bins = vs30_bins if vs30_bins is not None else DEFAULT_VS30_BINS
+        self.vs30_bins = vs30_bins if vs30_bins is not None else pu.DEFAULT_VS30_BINS
 
-        self.data_sets = data_sets
 
+    def create_IM_bin_plot(
+        self,
+        im: str,
+        output_dir: Path,
+        result_db_ffp: Path,
+        feature: str = "rrup",
+        prefix: str = None,
+    ):
+        """Creates a multi-plot figure, with the
+        specified feature on the x-axis"""
         if not output_dir.exists():
             output_dir.mkdir(parents=True)
 
-    def create_IM_bin_plot(self, dataset: str, im: str):
-        dataset_dir = self.data_sets[dataset]
+        # Get the data
+        columns = [im, f"{im}_est", feature, "mag", "vs30"]
+        data_df = ResultDB.get_data_static(result_db_ffp, columns)
 
-        # Get the events of the dataset
-        events = [
-            event_record.name.split(".")[0]
-            for event_record in dataset_dir.glob("*.tfrecord")
-        ]
-
-        # Get the required data
-        data_dfs, mean_est_dfs = [], []
-        for event in events:
-            df, mean_est, std_est = self._get_event_estimates(event)
-            data_dfs.append(df.loc[:, ["mag", "vs30", "rrup", im]])
-            mean_est_dfs.append(mean_est.loc[:, im])
-
-        df, mean_est = pd.concat(data_dfs), pd.concat(mean_est_dfs)
-
+        # Generate magnitude bins if not specified
         mag_bins = (
             self.mag_bins
             if self.mag_bins is not None
-            else self._get_default_mag_bins(df.mag.values)
+            else self._get_default_mag_bins(data_df.mag.values)
         )
 
-        plot_mag_vs30_bins(
-            df,
-            mean_est,
+        # Generate the plot
+        prefix = f"{prefix}_" if prefix is not None else ""
+        pf.plot_mag_vs30_bins(
+            data_df,
+            data_df[f"{im}_est"],
             im,
             np.asarray(mag_bins),
             np.asarray(self.vs30_bins),
-            self.output_dir / f"{dataset}_{im.replace('.', 'p')}.png",
+            output_dir / f"{prefix}{feature}_{im.replace('.', 'p')}.png",
         )
 
     def create_IM_res_scatter_bin_plot(
@@ -93,7 +94,7 @@ class BinPlotGen(ModelEventBasePlotGen):
             else f"{dataset}_{im.replace('.', 'p')}_binned_log_ratio_plots.png"
         )
 
-        plot_mag_vs30_res_bins(
+        pf.plot_mag_vs30_res_bins(
             df,
             mean_est,
             im,

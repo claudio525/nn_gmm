@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 
 # from visualization.gmt.plotting import plot_single, plot_multiple
 
-from .. import data
-from .. import utils
 from . import plotting_utils as plt_utils
 
 
@@ -145,20 +143,20 @@ def plot_mag_vs30_res_bins(
 
 def plot_mag_vs30_bins(
     df: pd.DataFrame,
-    mean_est_df: pd.DataFrame,
+    mean_est_df: pd.Series,
     im: str,
     mag_bins: np.ndarray,
     vs30_bins: np.ndarray,
     output_ffp: Path,
 ):
-    """Creates IM value vs rrup scatter plots for each of the
-    magnitude and vs30 bins
+    """Creates a IM vs Rrup scatter plot
+    for each of the specified magnitude and vs30 bins
     """
     mag_ind = np.digitize(df.mag.values, mag_bins)
     vs_30_ind = np.digitize(df.vs30.values, vs30_bins)
 
     n_rows, n_cols = len(mag_bins) - 1, len(vs30_bins) - 1
-    fig = plt_utils.multi_fig((8, 6), n_rows, n_cols)
+    fig = plt_utils.multi_fig((16, 10), n_rows, n_cols)
     ax_ix = 1
     for cur_mag_bin_ix in range(n_rows):
         # Bin indices start from 1
@@ -177,8 +175,8 @@ def plot_mag_vs30_bins(
 
             cur_mask = (mag_ind == cur_mag_bin_ix) & (vs_30_ind == cur_vs30_bin_ix)
 
-            cur_ax.scatter(df.rrup[cur_mask], np.exp(df.loc[cur_mask, im]), s=1.0)
-            cur_ax.scatter(df.rrup[cur_mask], mean_est_df.loc[cur_mask], s=1.0)
+            cur_ax.scatter(df.rrup[cur_mask], np.exp(df.loc[cur_mask, im]), s=1.0, c="royalblue")
+            cur_ax.scatter(df.rrup[cur_mask], np.exp(mean_est_df.loc[cur_mask].values), s=1.0, c="darkorange")
             cur_ax.set_yscale("log")
 
             cur_ax.text(

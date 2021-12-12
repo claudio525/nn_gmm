@@ -10,10 +10,11 @@ from .training import (
     TrainingResult,
     load_datasets,
     create_output_dir,
-    train,
+    train_nn,
+    train_xgb,
 )
 
-from .model import TECT_TYPE_ONE_HOT_DICT, GMM
+from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, XGBoostGMM
 from .console import console
 from .data_processing import (
     get_standard_scaling_fn,
@@ -41,10 +42,15 @@ from .directivity import (
     FaultDirectivityProcessor,
 )
 from .eval import (
-    get_realisation_residuals,
-    get_loc_predictions,
-    get_basin_predictions,
-    run_location_eval,
+    MAGNITUDE_BINS,
+    compute_metrics,
+    gen_rrup_bin_plot,
+    train_val_metrics,
+    write_predictions,
+    write_train_val_predictions,
+    train_val_basin_metrics,
+    compute_basin_metrics,
+    wandb_log_metrics,
 )
 from .plotting import *
 
@@ -61,5 +67,7 @@ from .utils import (
     find_record_ffp,
     convert_io_config,
     convert_pre_config,
-    pa_column_types,
+    # pa_column_types,
 )
+from .ResultDB import ResultDB
+from nn_gmm.src.plotting.BinPlotGen import BinPlotGen

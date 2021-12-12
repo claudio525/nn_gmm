@@ -247,7 +247,8 @@ def gen_tf_records(
 
 def gen_bin_weights(distance_df: pd.DataFrame, rel_df: pd.DataFrame, sources: np.ndarray, imdb_ffps: List[Path], n_rrup_bins: int = 10,
                     n_mag_bins: int = 10):
-    """Computes samples weights based on rrup and magnitude distribution of the samples using
+    """
+    Computes samples weights based on rrup and magnitude distribution of the samples using
     a n_rrup_bins x n_mag_bins grid
     """
     mag_bins = np.linspace(rel_df.mag.min(), rel_df.mag.max(), n_mag_bins)

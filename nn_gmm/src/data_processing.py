@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
+from .console import console
 
 def get_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     """Returns a function for standardising
@@ -11,7 +12,7 @@ def get_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     def standard_fn(data):
         return (data - mean) / std
 
-    return tf.function(standard_fn) if tf_fn is True else standard_fn
+    return tf.function(standard_fn, experimental_relax_shapes=True) if tf_fn is True else standard_fn
 
 
 def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
@@ -19,7 +20,7 @@ def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     def inv_standard_fn(scald_data):
         return (scald_data * std) + mean
 
-    return tf.function(inv_standard_fn) if tf_fn is True else inv_standard_fn
+    return tf.function(inv_standard_fn, experimental_relax_shapes=True) if tf_fn is True else inv_standard_fn
 
 
 def get_min_max_scaling_fn(
@@ -80,7 +81,7 @@ def preprocess_df(df: pd.DataFrame, config: Dict):
             print(f"Ignoring feature {name} as this is not in the dataframe!")
             continue
 
-        df[name] = func(df[name].values.astype(float)) if func is not None else df[name]
+        df[name] = func(tf.convert_to_tensor(df[name].values.astype(float))) if func is not None else df[name]
 
     return df
 

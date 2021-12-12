@@ -5,6 +5,8 @@ import datetime
 from typing import List, Dict, Tuple, Callable, Union
 from pathlib import Path
 
+import numpy as np
+import xgboost as xgb
 import ml_tools.utils
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -14,6 +16,8 @@ import tensorflow.keras as keras
 from . import utils
 from . import data_processing
 from . import data
+from . import eval
+from .console import console
 
 
 def create_run_id() -> str:
@@ -35,7 +39,7 @@ class TrainingResult:
         self.training_config = training_config
         self.output_dir = output_dir
 
-        self.best_model_dir = best_model_dir
+        self.model_location = best_model_dir
 
     def save(self, output_ffp: str):
         with open(output_ffp, "wb") as f:
@@ -129,7 +133,143 @@ def _save_model_data(
     return loss_df
 
 
-def train(
+class XGBDataIterator(xgb.DataIter):
+    def __init__(self, tf_ds: tf.data.Dataset):
+        super().__init__()
+
+        self.ds = tf_ds
+        self.cur_gen = self.batch_iterator()
+
+    def batch_iterator(self):
+        for cur_batch in self.ds.as_numpy_iterator():
+            yield cur_batch
+
+    def next(self, input_data: Callable) -> int:
+        try:
+            X, y = next(self.cur_gen)
+        except StopIteration:
+            return 0
+
+        input_data(data=X, label=y.ravel())
+        return 1
+
+    def reset(self) -> None:
+        self.cur_gen.close()
+
+        self.cur_gen = self.batch_iterator()
+
+
+def train_xgb(
+    io_config: Dict, training_config: Dict, model_params: Dict, output_dir: Path = None,
+):
+    def xgb_mse_metric(pred: np.ndarray, dtrain: xgb.DMatrix) -> Tuple[str, float]:
+        y = dtrain.get_label()
+        return "MSE", eval.mse(y, pred)
+
+    # Load hyperparamters
+    # batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
+
+    # Create the output directory
+    output_dir = create_output_dir(io_config) if output_dir is None else output_dir
+
+    # Save the input, model & training config
+    _save_configs(io_config, model_params, training_config, output_dir)
+
+    train_ds, val_ds = load_datasets(
+        utils.to_path(io_config["train_data_dirs"]),
+        training_config["batch_size"],
+        val_dirs=utils.to_path(io_config["val_data_dirs"]),
+        shuffle_buffer_size=training_config["shuffle_buffer_size"],
+        n_open_files=512,
+    )
+
+    # Pre-processing
+    console.log("Preprocessing")
+    if io_config.get("multi_input") is not None:
+        feature_config_dict, feature_config = (
+            {
+                cur_input_name: data_processing.convert_to_transform_fn(
+                    cur_feature_config.copy()
+                )
+                for cur_input_name, cur_feature_config in io_config[
+                    "feature_config"
+                ].items()
+            },
+            None,
+        )
+    else:
+        feature_config_dict, feature_config = (
+            None,
+            data_processing.convert_to_transform_fn(io_config["feature_config"].copy()),
+        )
+    im_config = data_processing.convert_to_transform_fn(io_config["im_config"].copy())
+    train_ds = data_processing.preprocess_ds(
+        train_ds,
+        feature_config=feature_config,
+        feature_config_dict=feature_config_dict,
+        im_config=im_config,
+        use_sample_weights=training_config["use_sample_weights"],
+    )
+    val_ds = (
+        val_ds
+        if val_ds is None
+        else data_processing.preprocess_ds(
+            val_ds,
+            feature_config=feature_config,
+            feature_config_dict=feature_config_dict,
+            im_config=im_config,
+        )
+    )
+
+    # Preparing dataset for XGBoost
+    console.log(f"Preparing datasets")
+    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
+
+    console.log("Loading data for XGBoost")
+    train_iter = XGBDataIterator(train_ds)
+    train_Xy = xgb.DMatrix(train_iter)
+
+    val_iter = XGBDataIterator(val_ds)
+    val_Xy = xgb.DMatrix(val_iter)
+
+    # Training
+    console.log("Running training")
+    eval_dict = {}
+    model = xgb.train(
+        model_params,
+        train_Xy,
+        feval=xgb_mse_metric,
+        num_boost_round=training_config["n_epochs"],
+        evals=[(train_Xy, "train"), (val_Xy, "val")],
+        evals_result=eval_dict,
+    )
+
+    # Save the model
+    model_ffp = output_dir / "xgb.model"
+    model.save_model(model_ffp)
+
+    # Generate importance plot
+    model.feature_names = list(feature_config.keys())
+    fig = plt.figure(figsize=(16, 10), dpi=200)
+    ax = fig.add_subplot(1, 1, 1)
+    xgb.plot_importance(model, ax=ax)
+    fig.savefig(output_dir / "feature_importance.png")
+    plt.close()
+
+    eval_key = "MSE"
+    fig = ml_tools.plotting.plot_loss(
+        dict(loss=eval_dict["train"][eval_key], val_loss=eval_dict["train"][eval_key]),
+        y_lim=(0.0, 1.0),
+        y_label=eval_key,
+    )
+    fig.savefig(output_dir / "loss_plot.png")
+    plt.close()
+
+    return TrainingResult(io_config, training_config, output_dir, model_ffp)
+
+
+def train_nn(
     io_config: Dict,
     training_config: Dict,
     model: keras.Model = None,
@@ -138,7 +278,7 @@ def train(
     verbose: int = 2,
     multi_output: bool = False,
     output_dir: Path = None,
-) -> Tuple[TrainingResult, Path]:
+) -> TrainingResult:
     """
     Runs the training based on the specified configs
     Note: Only supports training of a "single" output node model
@@ -161,8 +301,6 @@ def train(
         by the model creation function
         If a model is passed then this config is not used, only saved
         with the model
-    callbacks: list of keras callbacks
-        Callbacks to include during training
     verbose: int, optional
         Model fitting verbosity for details, see
         https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
@@ -282,12 +420,12 @@ def train(
         # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
-    print(f"Preparing datasets")
+    console.log(f"Preparing datasets")
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
     # Train
-    print(f"Training...")
+    console.log(f"Training...")
     history = model.fit(
         train_ds,
         epochs=n_epochs,
@@ -318,7 +456,4 @@ def train(
     plt.savefig(os.path.join(output_dir, "loss.png"))
     plt.close()
 
-    return (
-        TrainingResult(io_config, training_config, output_dir, model_dir),
-        Path(output_dir),
-    )
+    return TrainingResult(io_config, training_config, output_dir, model_dir)
