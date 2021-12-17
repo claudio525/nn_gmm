@@ -4,6 +4,7 @@ from typing import List, Union, Dict, Sequence
 import wandb
 import pandas as pd
 import numpy as np
+import tensorflow as tf
 import matplotlib.pyplot as plt
 
 import ml_tools
@@ -13,10 +14,15 @@ from .ResultDB import ResultDB
 from .console import console
 from . import utils
 from nn_gmm.src.plotting.BinPlotGen import BinPlotGen
+from nn_gmm.src.plotting.TrendPlotGen import TrendPlotGen
+from nn_gmm.src.plotting.ResPlotGen import ResPlotGen
 
 MAGNITUDE_BINS = np.arange(3, 10)
 
-DEFAULT_METRICS = ("malr")
+DEFAULT_METRICS = ["bias", "sigma"]
+
+
+DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0)
 
 
 def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
@@ -34,7 +40,9 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     gmm = GMM.load(model_dir)
 
     console.log("Running predictions")
-    sim_df, est_df, *_ = gmm.predict_dirs([data_dir], features=list(gmm.features))
+    sim_df, est_df, _ = gmm.predict_dirs(
+        [data_dir], features=list(gmm.features)
+    )
     assert np.all(sim_df.index == est_df.index)
 
     for cur_col, cur_data in est_df.iteritems():
@@ -43,9 +51,9 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
 
     console.log("Computing station names")
     sim_df["site"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(1)
-    # sim_df["site"] = utils.get_station_from_id(
-    #     sim_df.index.values.astype(str)
-    # )
+
+    console.log("Computing event names")
+    sim_df["event"] = sim_df.index.str.split("_REL", n=1, expand=True).get_level_values(0)
 
     console.log("Writing database")
     ResultDB.write_data(sim_df, output_ffp)
@@ -79,6 +87,11 @@ def mse(y: np.ndarray, y_est: np.ndarray):
     return np.mean(np.power(y - y_est, 2))
 
 
+@tf.function
+def tf_mse(y: tf.Tensor, y_est: tf.Tensor):
+    return tf.square(y - y_est)
+
+
 def mean_absolute_ln_ratio(y: np.ndarray, y_est: np.ndarray):
     """Computes the mean absolute log ratio
 
@@ -87,11 +100,25 @@ def mean_absolute_ln_ratio(y: np.ndarray, y_est: np.ndarray):
     return np.mean(np.abs(y - y_est))
 
 
+def sigma_ln_ratio(y: np.ndarray, y_est: np.ndarray):
+    """Computes the standard deviation of the residual (in log-space)
+
+    Note: Assumes both y & y_est are already in log-space
+    """
+    return np.std(y - y_est)
+
+
+def bias(y: np.ndarray, y_est: np.ndarray):
+    """Computes the average bias, i.e. mean of residual"""
+    return np.mean(y - y_est)
+
+
 def compute_metrics(
     data_df: pd.DataFrame,
     ims: Sequence[str],
     mag_bins: Sequence[float] = MAGNITUDE_BINS,
     metrics: Sequence[str] = DEFAULT_METRICS,
+    n_samples: int = None,
 ):
     """
     Computes a bunch of metrics for the specified IMs
@@ -100,16 +127,21 @@ def compute_metrics(
     ----------
     data_df: Dataframe
     ims: list of strings
-    mag_bins: Sequence of floats
-        Magnitude bins for which to compute MSE
-
+    mag_bins: Sequence of floats, optional
+        Magnitude bins for which to compute the metrics
+    metrics: Sequence of strings, optional
+        Metrics to compute
+    n_samples: int, optional
+        Number of samples to use for computing relative count
     Returns
     -------
     Dictionary of evaluation metrics
     """
     # Compute the statistics
     metric_results = {}
-    for cur_im in ims:
+    counts = {}
+    n_samples = data_df.shape[0] if n_samples is None else n_samples
+    for ix, cur_im in enumerate(ims):
         cur_metrics = {}
         y, y_est = data_df[cur_im], data_df[f"{cur_im}_est"]
 
@@ -117,33 +149,78 @@ def compute_metrics(
         if "mse" in metrics:
             cur_metrics["mse"] = mse(y, y_est)
 
+            if ix == 0:
+                counts["mse"] = y.shape[0] / n_samples
+
         # Mean absolute log ratio
         if "malr" in metrics:
             cur_metrics["malr"] = mean_absolute_ln_ratio(y, y_est)
 
-        # Compute MSE per magnitude bin
+            if ix == 0:
+                counts["malr"] = y.shape[0] / n_samples
+
+        # Standard deviation of residual (in log-space)
+        if "sigma" in metrics:
+            cur_metrics["sigma"] = sigma_ln_ratio(y, y_est)
+
+            if ix == 0:
+                counts["sigma"] = y.shape[0] / n_samples
+
+        # Bias of predictions (i.e. mean of residuals)
+        if "bias" in metrics:
+            cur_metrics["bias"] = bias(y, y_est)
+
+            if ix == 0:
+                counts["bias"] = y.shape[0] / n_samples
+
+        # Compute metric per magnitude bin
         mag_bin_ind = np.digitize(data_df.mag, bins=mag_bins)
         for cur_bin_ind in np.unique(mag_bin_ind):
             cur_mask = mag_bin_ind == cur_bin_ind
 
             # MSE
             if "mse" in metrics:
-                cur_metrics[
-                    f"mse_mag_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                ] = mse(y[cur_mask], y_est[cur_mask])
+                cur_key = f"mse_mag_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                cur_metrics[cur_key] = mse(y[cur_mask], y_est[cur_mask])
+
+                if ix == 0:
+                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
 
             # Mean absolute log ratio
             if "malr" in metrics:
-                cur_metrics[
-                    f"malr_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                ] = mean_absolute_ln_ratio(y[cur_mask], y_est[cur_mask])
+                cur_key = f"malr_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                cur_metrics[cur_key] = mean_absolute_ln_ratio(
+                    y[cur_mask], y_est[cur_mask]
+                )
 
-        metric_results[cur_im] = cur_metrics
+                if ix == 0:
+                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
+
+            # Standard deviation of residual (in log-space)
+            if "sigma" in metrics:
+                cur_key = f"sigma_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                cur_metrics[cur_key] = sigma_ln_ratio(y[cur_mask], y_est[cur_mask])
+
+                if ix == 0:
+                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
+
+            # Bias of predictions (i.e. mean of residuals)
+            if "bias" in metrics:
+                cur_key = f"bias_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
+                cur_metrics[cur_key] = bias(y[cur_mask], y_est[cur_mask])
+
+                if ix == 0:
+                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
+
+        metric_results["count"] = counts
+        metric_results[cur_im.replace(".", "p")] = cur_metrics
 
     return pd.DataFrame.from_dict(metric_results)
 
 
-def train_val_metrics(model_dir: Path, save: bool = False):
+def train_val_metrics(
+    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS
+):
     """Computes training & validation metrics"""
     input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
 
@@ -153,8 +230,8 @@ def train_val_metrics(model_dir: Path, save: bool = False):
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
     val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 
-    train_metrics = compute_metrics(train_df, ims)
-    val_metrics = compute_metrics(val_df, ims)
+    train_metrics = compute_metrics(train_df, ims, metrics=metrics)
+    val_metrics = compute_metrics(val_df, ims, metrics=metrics)
 
     console.rule("Training")
     console.log(train_metrics)
@@ -176,14 +253,24 @@ def gen_rrup_bin_plot(model_dir: Path, im: str):
     train_result_db_ffp = model_dir / f"train_predictions.hdf5"
 
     bin_plot_gen = BinPlotGen()
-    console.log("Generating training plots")
+    # console.log("Generating training plots")
     bin_plot_gen.create_IM_bin_plot(
         im, output_dir, train_result_db_ffp, feature="rrup", prefix="train"
     )
-    console.log("Generating validation plots")
+    # console.log("Generating validation plots")
     bin_plot_gen.create_IM_bin_plot(
         im, output_dir, val_result_db_ffp, feature="rrup", prefix="val"
     )
+
+
+def gen_rrup_trend_plot(
+    model_dir: Path, im: str, const_features: Dict = DEFAULT_CONST_FEATURES
+):
+    fig_output_dir = model_dir / "plots" / "trend_plots"
+
+    gmm = GMM.load(model_dir)
+    tplot = TrendPlotGen(gmm, "rrup", np.linspace(20, 200, 1000))
+    tplot.gen_trend_plot(const_features, im, fig_output_dir, model_dir=model_dir)
 
 
 def compute_basin_metrics(
@@ -195,7 +282,9 @@ def compute_basin_metrics(
         cur_basin_data = data_df.loc[
             utils.pandas_isin(data_df.site.values, cur_stations)
         ]
-        cur_basin_metrics = compute_metrics(cur_basin_data, ims)
+        cur_basin_metrics = compute_metrics(
+            cur_basin_data, ims, n_samples=data_df.shape[0]
+        )
 
         metrics[cur_basin] = cur_basin_metrics
 
@@ -244,8 +333,86 @@ def train_val_basin_metrics(model_dir: Path, basin_dir: Path, save: bool = False
 
 def wandb_log_metrics(
     wandb_run: object,
+    ims: Sequence[str],
+    prefix: str,
     general_metrics: pd.DataFrame,
     basin_metrics: Dict[str, pd.DataFrame],
-    metrics: Sequence[str] = DEFAULT_METRICS,
 ):
-    print("wtf")
+    """Logs the given metrics to wandb"""
+    for cur_im in ims:
+        cur_im_name = cur_im.replace('.', 'p')
+
+        # Write general metrics
+        cur_metrics = general_metrics[cur_im_name]
+        cur_metrics.index = np.char.add(
+            f"{prefix}_{cur_im}_", cur_metrics.index.values.astype(str)
+        )
+        wandb_run.summary.update(cur_metrics.to_dict())
+
+        # Write basin metrics
+        for cur_basin in basin_metrics.keys():
+            cur_metrics = basin_metrics[cur_basin][cur_im_name]
+            cur_metrics.index = np.char.add(
+                f"{prefix}_{cur_im}_{cur_basin}_", cur_metrics.index.values.astype(str)
+            )
+            wandb_run.summary.update(cur_metrics.to_dict())
+
+
+def gen_residual_plots(model_dir: Path, im: str):
+    """Generates residual plots for the specified model and IM"""
+    # Setup
+    fig_output_dir = model_dir / "plots" / "residual_plots"
+    model = GMM.load(model_dir)
+    plt_gen = ResPlotGen(model)
+
+    # General residual distribution
+    plt_gen.gen_res_plot(
+        model_dir / "train_predictions.hdf5", im, fig_output_dir, prefix="train"
+    )
+    plt_gen.gen_res_plot(
+        model_dir / "val_predictions.hdf5", im, fig_output_dir, prefix="val"
+    )
+
+    # Magnitude
+    plt_gen.gen_binned_res_plot(
+        model_dir / "train_predictions.hdf5",
+        im,
+        "mag",
+        np.asarray([3, 4, 5, 6, 7, 8, 9]),
+        3,
+        2,
+        fig_output_dir,
+        prefix="train",
+    )
+    plt_gen.gen_binned_res_plot(
+        model_dir / "val_predictions.hdf5",
+        im,
+        "mag",
+        np.asarray([3, 4, 5, 6, 7, 8, 9]),
+        3,
+        2,
+        fig_output_dir,
+        prefix="val",
+    )
+
+    # Rrup
+    plt_gen.gen_binned_res_plot(
+        model_dir / "train_predictions.hdf5",
+        im,
+        "rrup",
+        np.linspace(0, 200, 11),
+        5,
+        2,
+        fig_output_dir,
+        prefix="train",
+    )
+    plt_gen.gen_binned_res_plot(
+        model_dir / "val_predictions.hdf5",
+        im,
+        "rrup",
+        np.linspace(0, 200, 11),
+        5,
+        2,
+        fig_output_dir,
+        prefix="val",
+    )

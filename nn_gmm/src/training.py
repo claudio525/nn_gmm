@@ -31,8 +31,8 @@ class TrainingResult:
         self,
         input_config: Dict,
         training_config: Dict,
-        output_dir: str,
-        best_model_dir: str,
+        output_dir: Path,
+        best_model_dir: Path,
     ):
 
         self.input_config = input_config
@@ -81,7 +81,7 @@ def load_datasets(
     return train_ds, val_ds
 
 
-def create_output_dir(input_config: Dict):
+def create_output_dir(input_config: Dict) -> Path:
     run_id = (
         input_config["run_id"] if "run_id" in input_config.keys() else create_run_id()
     )
@@ -94,7 +94,7 @@ def create_output_dir(input_config: Dict):
         print(f"Ouput dir {output_dir} already exists, quitting!")
     output_dir.mkdir()
 
-    return output_dir
+    return Path(output_dir)
 
 
 def _save_configs(
@@ -160,7 +160,7 @@ class XGBDataIterator(xgb.DataIter):
 
 
 def train_xgb(
-    io_config: Dict, training_config: Dict, model_params: Dict, output_dir: Path = None,
+    io_config: Dict, train_config: Dict, model_params: Dict, output_dir: Path = None,
 ):
     def xgb_mse_metric(pred: np.ndarray, dtrain: xgb.DMatrix) -> Tuple[str, float]:
         y = dtrain.get_label()
@@ -173,13 +173,13 @@ def train_xgb(
     output_dir = create_output_dir(io_config) if output_dir is None else output_dir
 
     # Save the input, model & training config
-    _save_configs(io_config, model_params, training_config, output_dir)
+    _save_configs(io_config, model_params, train_config, output_dir)
 
     train_ds, val_ds = load_datasets(
         utils.to_path(io_config["train_data_dirs"]),
-        training_config["batch_size"],
+        train_config["batch_size"],
         val_dirs=utils.to_path(io_config["val_data_dirs"]),
-        shuffle_buffer_size=training_config["shuffle_buffer_size"],
+        shuffle_buffer_size=train_config["shuffle_buffer_size"],
         n_open_files=512,
     )
 
@@ -208,7 +208,7 @@ def train_xgb(
         feature_config=feature_config,
         feature_config_dict=feature_config_dict,
         im_config=im_config,
-        use_sample_weights=training_config["use_sample_weights"],
+        use_sample_weights=train_config["use_sample_weights"],
     )
     val_ds = (
         val_ds
@@ -226,6 +226,10 @@ def train_xgb(
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
+    if train_config["cache"]:
+        train_ds = train_ds.cache()
+        val_ds = val_ds.cache()
+
     console.log("Loading data for XGBoost")
     train_iter = XGBDataIterator(train_ds)
     train_Xy = xgb.DMatrix(train_iter)
@@ -240,9 +244,10 @@ def train_xgb(
         model_params,
         train_Xy,
         feval=xgb_mse_metric,
-        num_boost_round=training_config["n_epochs"],
+        num_boost_round=train_config["n_epochs"],
         evals=[(train_Xy, "train"), (val_Xy, "val")],
         evals_result=eval_dict,
+        callbacks=train_config["callbacks"]
     )
 
     # Save the model
@@ -266,12 +271,12 @@ def train_xgb(
     fig.savefig(output_dir / "loss_plot.png")
     plt.close()
 
-    return TrainingResult(io_config, training_config, output_dir, model_ffp)
+    return TrainingResult(io_config, train_config, output_dir, model_ffp)
 
 
 def train_nn(
     io_config: Dict,
-    training_config: Dict,
+    train_config: Dict,
     model: keras.Model = None,
     model_fn: Callable = None,
     model_config: Dict = None,
@@ -287,7 +292,7 @@ def train_nn(
     ----------
     io_config: dictionary
         The inputs and outputs config
-    training_config: dictionary
+    train_config: dictionary
         The training config
     model: keras model, optional
         The model to train
@@ -322,19 +327,19 @@ def train_nn(
     ), "If a model creation function is used, then a model config has to be specified"
 
     # Load hyperparamters
-    batch_size, n_epochs = training_config["batch_size"], training_config["n_epochs"]
+    batch_size, n_epochs = train_config["batch_size"], train_config["n_epochs"]
 
     # Create the output directory
     output_dir = create_output_dir(io_config) if output_dir is None else output_dir
 
     # Save the input, model & training config
-    _save_configs(io_config, model_config, training_config, output_dir)
+    _save_configs(io_config, model_config, train_config, output_dir)
 
     train_ds, val_ds = load_datasets(
         utils.to_path(io_config["train_data_dirs"]),
-        training_config["batch_size"],
+        train_config["batch_size"],
         val_dirs=utils.to_path(io_config["val_data_dirs"]),
-        shuffle_buffer_size=training_config["shuffle_buffer_size"],
+        shuffle_buffer_size=train_config["shuffle_buffer_size"],
         n_open_files=512,
     )
 
@@ -362,7 +367,7 @@ def train_nn(
         feature_config=feature_config,
         feature_config_dict=feature_config_dict,
         im_config=im_config,
-        use_sample_weights=training_config["use_sample_weights"],
+        use_sample_weights=train_config["use_sample_weights"],
         as_dict=multi_output,
     )
     val_ds = (
@@ -389,8 +394,8 @@ def train_nn(
 
     # Compile the model
     model.compile(
-        optimizer=training_config["optimizer"],
-        loss=training_config["loss"],
+        optimizer=train_config["optimizer"],
+        loss=train_config["loss"],
         run_eagerly=False,
     )
 
@@ -410,7 +415,7 @@ def train_nn(
     model_dir = output_dir / "best_model"
     model_dir.mkdir()
     callbacks = (
-        [] if training_config.get("callbacks") is None else training_config["callbacks"]
+        [] if train_config.get("callbacks") is None else train_config["callbacks"]
     )
     callbacks += [
         # Saves the best model (based on the validation loss)
@@ -424,6 +429,10 @@ def train_nn(
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
+    if train_config["cache"]:
+        train_ds = train_ds.cache()
+        val_ds = val_ds.cache()
+
     # Train
     console.log(f"Training...")
     history = model.fit(
@@ -436,7 +445,7 @@ def train_nn(
 
     # Save model data
     loss_df = _save_model_data(
-        output_dir, model_dir, io_config, training_config, history
+        output_dir, model_dir, io_config, train_config, history
     )
 
     # Create loss plot
@@ -448,7 +457,7 @@ def train_nn(
         label=f"Validation loss - {loss_df.val_loss.min():.4f}",
     )
 
-    plt.ylabel(training_config["loss"])
+    plt.ylabel(train_config["loss"])
     plt.xlabel("Epoch")
 
     plt.legend()
@@ -456,4 +465,4 @@ def train_nn(
     plt.savefig(os.path.join(output_dir, "loss.png"))
     plt.close()
 
-    return TrainingResult(io_config, training_config, output_dir, model_dir)
+    return TrainingResult(io_config, train_config, output_dir, model_dir)

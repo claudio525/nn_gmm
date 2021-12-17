@@ -25,6 +25,7 @@ if gpus:
         print(e)
 
 import nn_gmm
+from nn_gmm import console
 
 io_config = {
     "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/train"],
@@ -50,7 +51,7 @@ io_config = {
         # "active_shallow": None,
         # "volcanic": None,
     },
-    "im_config": {"PGA": None,},
+    "im_config": {"pSA_3.0": None,},
 }
 
 
@@ -63,8 +64,8 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
 
     # Create the model
     inputs = keras.Input(shape=len(io_config["feature_config"]))
-    x = ml_tools.hidden_layers.selu_dropout(inputs, 16, dropout=0.05)
-    x = ml_tools.hidden_layers.selu_dropout(x, 16, dropout=0.05)
+    x = ml_tools.hidden_layers.selu_dropout(inputs, 16, dropout=None)
+    x = ml_tools.hidden_layers.selu_dropout(x, 16, dropout=None)
     outputs = keras.layers.Dense(1, activation="linear")(x)
 
     model = keras.Model(inputs=inputs, outputs=outputs)
@@ -72,10 +73,12 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
     train_config = {
         "batch_size": 1024,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 3,
+        "n_epochs": 20,
         "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
-        "loss": "mse",
+        "loss": tf.losses.MeanSquaredError(),
+        # "loss": nn_gmm.tf_mse,
         "use_sample_weights": False,
+        "cache": True,
     }
 
     if n_epochs is not None:
@@ -111,6 +114,8 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
 
     # Write predictions
     if eval:
+        im = list(io_config["im_config"].keys())[0]
+
         nn_gmm.write_train_val_predictions(
             Path(io_config["train_data_dirs"][0]).parent, output_dir, verbose=False
         )
@@ -118,19 +123,24 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
         # Print and compute general metrics
         train_metrics, val_metrics = nn_gmm.train_val_metrics(output_dir, save=True)
 
-        if use_wandb:
-            for cur_metric, cur_row in train_metrics.iterrows():
-                for cur_im, cur_val in cur_row.iteritems():
-                    wandb.run.summary[f"train_{cur_im}_{cur_metric}"] = float(cur_val)
-            for cur_metric, cur_row in val_metrics.iterrows():
-                for cur_im, cur_val in cur_row.iteritems():
-                    wandb.run.summary[f"val_{cur_im}_{cur_metric}"] = float(cur_val)
-
         # Print and compute basin metrics
         train_basin_metrics, val_basin_metrics = nn_gmm.train_val_basin_metrics(
             output_dir, Path(io_config["basin_dir"])
         )
 
+        # Write metrics to wandb
+        if use_wandb:
+            nn_gmm.wandb_log_metrics(wandb.run, [im], "train", train_metrics, train_basin_metrics)
+            nn_gmm.wandb_log_metrics(wandb.run, [im], "val", val_metrics, val_basin_metrics)
+
+        console.log("Generating binned Rrup plot")
+        nn_gmm.gen_rrup_bin_plot(output_dir, im)
+
+        console.log("Generating Rrup trend plot")
+        nn_gmm.gen_rrup_trend_plot(output_dir, im)
+
+        console.log("Generating residual plots")
+        nn_gmm.gen_residual_plots(output_dir, im)
 
 if __name__ == "__main__":
     typer.run(main)

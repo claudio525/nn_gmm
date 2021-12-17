@@ -14,7 +14,7 @@ from .training import (
     train_xgb,
 )
 
-from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, XGBoostGMM
+from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, XGBoostGMM, GMM
 from .console import console
 from .data_processing import (
     get_standard_scaling_fn,
@@ -51,6 +51,9 @@ from .eval import (
     train_val_basin_metrics,
     compute_basin_metrics,
     wandb_log_metrics,
+    tf_mse,
+    gen_rrup_trend_plot,
+    gen_residual_plots,
 )
 from .plotting import *
 

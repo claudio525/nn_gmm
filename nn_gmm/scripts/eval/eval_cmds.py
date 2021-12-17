@@ -29,6 +29,7 @@ app = typer.Typer()
 
 @app.command("write")
 def write_train_val_predictions(data_dir: Path, model_dir: Path):
+    """Write the training & validation predictions to hdf5 databases"""
     nn_gmm.write_train_val_predictions(data_dir, model_dir)
 
 
@@ -46,10 +47,20 @@ def gen_rrup_bin_plot(model_dir: Path, im: str):
 
 @app.command("basin")
 def basin_eval(model_dir: Path, basin_dir: Path):
-    fig_output_dir = model_dir / "plots" / "basin"
-    fig_output_dir.mkdir(parents=True, exist_ok=True)
-
+    """Computes basin metrics"""
     nn_gmm.train_val_basin_metrics(model_dir, basin_dir)
+
+
+@app.command("trend")
+def trend_plot(model_dir: Path, im: str):
+    """Generates an Rrup trend plot"""
+    nn_gmm.gen_rrup_trend_plot(model_dir, im)
+
+
+@app.command("residuals")
+def residual_plots(model_dir: Path, im: str):
+    """Generates residual plots"""
+    nn_gmm.gen_residual_plots(model_dir, im)
 
 
 

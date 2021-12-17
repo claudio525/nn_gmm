@@ -51,6 +51,7 @@ MARKERS = [
     11,
 ]
 
+
 def plot_mag_vs30_res_bins(
     df: pd.DataFrame,
     mean_est_df: pd.DataFrame,
@@ -148,6 +149,7 @@ def plot_mag_vs30_bins(
     mag_bins: np.ndarray,
     vs30_bins: np.ndarray,
     output_ffp: Path,
+    alpha: float = 0.7,
 ):
     """Creates a IM vs Rrup scatter plot
     for each of the specified magnitude and vs30 bins
@@ -175,8 +177,20 @@ def plot_mag_vs30_bins(
 
             cur_mask = (mag_ind == cur_mag_bin_ix) & (vs_30_ind == cur_vs30_bin_ix)
 
-            cur_ax.scatter(df.rrup[cur_mask], np.exp(df.loc[cur_mask, im]), s=1.0, c="royalblue")
-            cur_ax.scatter(df.rrup[cur_mask], np.exp(mean_est_df.loc[cur_mask].values), s=1.0, c="darkorange")
+            cur_ax.scatter(
+                df.rrup[cur_mask],
+                np.exp(df.loc[cur_mask, im]),
+                s=1.0,
+                c="royalblue",
+                alpha=alpha,
+            )
+            cur_ax.scatter(
+                df.rrup[cur_mask],
+                np.exp(mean_est_df.loc[cur_mask].values),
+                s=1.0,
+                c="darkorange",
+                alpha=alpha,
+            )
             cur_ax.set_yscale("log")
 
             cur_ax.text(
@@ -263,22 +277,22 @@ def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = No
         ax = plt.gca()
 
     # mean prediction
-    ax.plot(
-        emp_df.index.values, emp_df["mu"].values, c="r", label=f"Mean {label}"
-    )
+    ax.plot(emp_df.index.values, emp_df["mu"].values, c="r", label=f"{label}", linewidth=0.75)
     # +- sigma
     ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(emp_df["sigma"].values),
         c="r",
         linestyle="--",
-        label=f"Std {label}",
+        # label=f"Std {label}",
+        linewidth=0.75
     )
     ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
         c="r",
         linestyle="--",
+        linewidth=0.75
     )
 
 
@@ -379,4 +393,3 @@ def residual_scatter_hist_plot(
     if output_ffp is not None:
         fig.savefig(output_ffp)
         plt.close()
-

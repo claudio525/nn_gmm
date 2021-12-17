@@ -10,6 +10,15 @@ import seaborn as sns
 from nn_gmm.src.model import NeuralNetworkGMM
 from nn_gmm.src import utils
 from nn_gmm.src import data
+from nn_gmm.src.plotting import plotting_utils as plt_utils
+
+FEATUER_NAME_LOOKUP = {
+    "rrup": r"$R_{rup}$",
+    "vs30": r"$V_{S30}$",
+    "mag": r"$M_w$"
+}
+
+IM_NAME_LOOKUP = {}
 
 IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
 TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
@@ -53,12 +62,35 @@ PLOT_TYPE_OPTIONS_MAPPING = {
 
 DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
 
+
+def get_feature_name(id: str):
+    """Gets the proper feature name for the specified 'id'"""
+    name = FEATUER_NAME_LOOKUP.get(id)
+
+    if name is None:
+        return id
+    return name
+
+
+def get_im_name(id: str):
+    """Gets the proper feature name for the specified 'id'"""
+    name = IM_NAME_LOOKUP.get(id)
+
+    if name is None:
+        return id
+    return name
+
+
 class ModelEventBasePlotGen:
     """Base class for generating plots that use NN-GMM model
     predictions for an event from the training or validation dataset"""
 
     def __init__(
-        self, plot_items_ffp: str, model: NeuralNetworkGMM, data_dirs: List[Path], output_dir: Path
+        self,
+        plot_items_ffp: str,
+        model: NeuralNetworkGMM,
+        data_dirs: List[Path],
+        output_dir: Path,
     ):
         self.plot_items_ffp = plot_items_ffp
 
@@ -87,7 +119,6 @@ class ModelEventBasePlotGen:
 
             self._estimates[event] = (df, mean_est, std_est)
             return df, mean_est, std_est
-
 
 
 def multi_fig(

@@ -16,8 +16,8 @@ from .console import console
 
 TECT_TYPE_ONE_HOT_DICT = {"ACTIVE_SHALLOW": "active_shallow", "VOLCANIC": "volcanic"}
 
-class GMM:
 
+class GMM:
     def __init__(self, input_config: Dict):
         self.input_config = input_config
         self.feature_config = input_config["feature_config"]
@@ -34,20 +34,53 @@ class GMM:
         self.outputs = np.asarray(list(self.im_config.keys()))
 
     def predict(
-            self,
-            X: pd.DataFrame,
-            pre_process: bool = True,
-            result_df_index: np.ndarray = None,
+        self,
+        X: pd.DataFrame,
+        pre_process: bool = True,
+        result_df_index: np.ndarray = None,
     ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
         raise NotImplementedError()
 
     def predict_dirs(
-            self,
-            data_dirs: List[Path],
-            batch_size: int = 1_000_000,
-            ims: List[str] = None,
-            features: List[str] = None,
-    ) -> Tuple[pd.DataFrame, ...]:
+        self,
+        data_dirs: List[Path],
+        batch_size: int = 1_000_000,
+        ims: List[str] = None,
+        features: List[str] = None,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
+        """
+        Performs prediction using the tfrecord files in
+        the specified directories
+
+        Should mainly be used when getting predictions
+        for the training or validation dataset
+
+        Parameters
+        ----------
+        data_dirs: list of Path
+            Directories from which to read the tfrecord files
+        batch_size: int, optional
+            How many records to predict in a single batch,
+            larger will be faster, however requires more memory
+        ims: list of strings
+            The IMs to keep, defaults to all supported IMs of the model
+            Note: If the number of IMs is large, then this will result in
+            large memory usage
+        features: list of strings
+            The features to keep. Unless the computer used has a large
+            amount of memory, keeping all is probably not the greatest idea
+            Default is to return no features
+
+        Returns
+        -------
+        sim_df: dataframe
+            The simulation IM values and the features (specified in features argument)
+        est_df: dataframe
+            The estimated IM values
+        std_df: dataframe
+            The standard deviation of the estimated IM values, only valid for
+            a NN that uses MCDropout
+        """
         raise NotImplementedError()
 
     @classmethod
@@ -79,15 +112,17 @@ class GMM:
 
 
 class XGBoostGMM(GMM):
-
     def __init__(self, model: xgb.Booster, input_config: Dict):
         super().__init__(input_config)
 
         self.model = model
 
-    def predict(self, X: pd.DataFrame, pre_process: bool = True,
-                result_df_index: np.ndarray = None) -> Tuple[
-        pd.DataFrame, Union[pd.DataFrame, None]]:
+    def predict(
+        self,
+        X: pd.DataFrame,
+        pre_process: bool = True,
+        result_df_index: np.ndarray = None,
+    ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
         X = self._pre_process(X.copy()) if pre_process else X
 
         # Ensure that all the required features exist
@@ -101,21 +136,20 @@ class XGBoostGMM(GMM):
         result_df_index = (
             result_df_index if result_df_index is not None else X.index.values
         )
-        mean_df = pd.DataFrame(
-            data=y_est,
-            columns=self.outputs,
-            index=result_df_index,
-        )
+        mean_df = pd.DataFrame(data=y_est, columns=self.outputs, index=result_df_index,)
 
         # Apply inverse pre-processing for outputs if required
         mean_df = self._post_process(mean_df)
 
-        return mean_df
+        return mean_df, None
 
-
-    def predict_dirs(self, data_dirs: List[Path], batch_size: int = 1_000_000,
-                     ims: List[str] = None, features: List[str] = None) -> Tuple[
-        pd.DataFrame, pd.DataFrame]:
+    def predict_dirs(
+        self,
+        data_dirs: List[Path],
+        batch_size: int = 1_000_000,
+        ims: List[str] = None,
+        features: List[str] = None,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, None]:
         """See GMM base class for the full docstring"""
         if ims is not None:
             assert len(ims) == 1, "XGBoost models are only single-output"
@@ -144,14 +178,14 @@ class XGBoostGMM(GMM):
                 }
             )
             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
-            cur_est_df = self.predict(cur_df, pre_process=True)
+            cur_est_df, _ = self.predict(cur_df, pre_process=True)
 
             sim_dfs.append(cur_df[ims + features])
             est_dfs.append(cur_est_df)
             del cur_df
 
         est_df = pd.concat(est_dfs)
-        return pd.concat(sim_dfs), est_df
+        return pd.concat(sim_dfs), est_df, None
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):
@@ -166,7 +200,6 @@ class XGBoostGMM(GMM):
 
 
 class NeuralNetworkGMM(GMM):
-
     def __init__(self, model: keras.Model, input_config: Dict):
         super().__init__(input_config)
         self.model = model
@@ -226,34 +259,7 @@ class NeuralNetworkGMM(GMM):
         ims: List[str] = None,
         features: List[str] = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
-        """
-        Performs prediction using the tfrecord files in
-        the specified directories
-
-        Should mainly be used when getting predictions
-        for the training or validation dataset
-
-        Parameters
-        ----------
-        data_dirs: list of Path
-            Directories from which to read the tfrecord files
-        batch_size: int, optional
-            How many records to predict in a single batch,
-            larger will be faster, however requires more memory
-        ims: list of strings
-            The IMs to keep, defaults to all supported IMs of the model
-            Note: If the number of IMs is large, then this will result in
-            large memory usage
-        features: list of strings
-            The features to keep. Unless the computer used has a large
-            amount of memory, keeping all is probably not the greatest idea
-            Default is to return no features
-
-        Returns
-        -------
-        sim_df: dataframe
-            The simulation IM values and the features (specified in features argument)
-        """
+        """See GMM base class for the full docstring"""
         features = [] if features is None else features
 
         # Get feature details, have to be same across all directories anyways
@@ -294,7 +300,6 @@ class NeuralNetworkGMM(GMM):
         mean_df = pd.concat(mean_dfs)
         std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
         return pd.concat(sim_dfs), mean_df, std_df
-
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):

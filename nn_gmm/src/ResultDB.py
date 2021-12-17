@@ -30,11 +30,18 @@ class ResultDB:
 
             df = pd.DataFrame(data=data, index=ids, columns=self.columns[column_ind])
 
-            if "site" in columns:
-                site_values = db["site"][:]
-                df["site"] = site_values
+            if "event" in columns:
+                event_names = db["event_names"][:]
+                event_ids = db["event_ids"][:]
+                df["event"] = event_names[event_ids]
 
-        return df
+
+            if "site" in columns:
+                event_names = db["site_names"][:]
+                event_ids = db["site_ids"][:]
+                df["site"] = event_names[event_ids]
+
+        return df.sort_index()
 
     @classmethod
     def get_data_static(cls, db_ffp: Path, columns: Sequence[str]):
@@ -47,12 +54,22 @@ class ResultDB:
     @staticmethod
     def write_data(result_df: pd.DataFrame, db_ffp: Path):
         ids = result_df.index.values.astype(str)
-        data_columns = np.asarray([col for col in result_df.columns.values if col not in ["site"]])
+        data_columns = np.asarray([col for col in result_df.columns.values if col not in ["site", "event"]])
         data = result_df.loc[:, data_columns].values
 
         with h5py.File(db_ffp, "w") as db:
             id_ds = db.create_dataset("ids", data=ids.astype(h5py.string_dtype()))
+
             if "site" in result_df.columns:
-                site_ds = db.create_dataset("site", data=result_df.site.values.astype(h5py.string_dtype()))
+                unique_sites, site_ids = np.unique(result_df["site"], return_inverse=True)
+                site_ids_ds = db.create_dataset("site_ids", data=site_ids, dtype=np.int32)
+                site_names_ds = db.create_dataset("site_names", data=unique_sites.astype(h5py.string_dtype()))
+
+            if "event" in result_df.columns:
+                unique_events, event_ids = np.unique(result_df["event"], return_inverse=True)
+                event_ids_ds = db.create_dataset("event_ids", data=event_ids, dtype=np.int32)
+                event_names_ds = db.create_dataset("event_names", data=unique_events.astype(h5py.string_dtype()))
+
             data_ds = db.create_dataset("data", data=data)
             data_ds.attrs["columns"] = data_columns.astype(str).astype(h5py.string_dtype())
+
