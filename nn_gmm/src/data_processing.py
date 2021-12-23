@@ -6,21 +6,37 @@ import tensorflow as tf
 
 from .console import console
 
+
 def get_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     """Returns a function for standardising
     data using the specified mean and standard deviation"""
+
     def standard_fn(data):
         return (data - mean) / std
 
-    return tf.function(standard_fn, experimental_relax_shapes=True) if tf_fn is True else standard_fn
+    return (
+        tf.function(standard_fn, experimental_relax_shapes=True)
+        if tf_fn is True
+        else standard_fn
+    )
 
 
 def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
     """Returns a function for computing the pre-standardised values"""
+    mean, std = tf.constant(mean), tf.constant(std)
+
     def inv_standard_fn(scald_data):
         return (scald_data * std) + mean
 
-    return tf.function(inv_standard_fn, experimental_relax_shapes=True) if tf_fn is True else inv_standard_fn
+    return (
+        tf.function(
+            inv_standard_fn,
+            experimental_relax_shapes=True,
+            input_signature=(tf.TensorSpec(shape=[None], dtype=tf.float32), ),
+        )
+        if tf_fn is True
+        else inv_standard_fn
+    )
 
 
 def get_min_max_scaling_fn(
@@ -81,7 +97,11 @@ def preprocess_df(df: pd.DataFrame, config: Dict):
             print(f"Ignoring feature {name} as this is not in the dataframe!")
             continue
 
-        df[name] = func(tf.convert_to_tensor(df[name].values.astype(float))) if func is not None else df[name]
+        df[name] = (
+            func(tf.convert_to_tensor(df[name].values.astype(float)))
+            if func is not None
+            else df[name]
+        )
 
     return df
 
@@ -193,7 +213,10 @@ def preprocess_ds(
                 return feature_dict, target_dict
 
             # Return as tuple of two Tensors (X, y)
-            return feature_dict["inputs"], tf.stack([target_dict[im] for im in im_config], axis=1)
+            return (
+                feature_dict["inputs"],
+                tf.stack([target_dict[im] for im in im_config], axis=1),
+            )
 
         # Only return the features (either as dictionary or Tensor)
         return feature_dict if as_dict else feature_dict["inputs"]

@@ -22,7 +22,7 @@ MAGNITUDE_BINS = np.arange(3, 10)
 DEFAULT_METRICS = ["bias", "sigma"]
 
 
-DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0)
+DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0, vs500=1.5, z1p0=0.05, z2p5=0.25, theta=45, s=30)
 
 
 def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
@@ -246,31 +246,31 @@ def train_val_metrics(
     return train_metrics, val_metrics
 
 
-def gen_rrup_bin_plot(model_dir: Path, im: str):
+def gen_rrup_bin_plot(model_dir: Path, ims: Sequence[str]):
     """Creates a Rrup based plot for the specified IM"""
     output_dir = model_dir / "plots" / "bin_plots"
     val_result_db_ffp = model_dir / f"val_predictions.hdf5"
     train_result_db_ffp = model_dir / f"train_predictions.hdf5"
 
     bin_plot_gen = BinPlotGen()
-    # console.log("Generating training plots")
-    bin_plot_gen.create_IM_bin_plot(
-        im, output_dir, train_result_db_ffp, feature="rrup", prefix="train"
-    )
-    # console.log("Generating validation plots")
-    bin_plot_gen.create_IM_bin_plot(
-        im, output_dir, val_result_db_ffp, feature="rrup", prefix="val"
-    )
+    for im in ims:
+        bin_plot_gen.create_IM_bin_plot(
+            im, output_dir, train_result_db_ffp, feature="rrup", prefix="train"
+        )
+        bin_plot_gen.create_IM_bin_plot(
+            im, output_dir, val_result_db_ffp, feature="rrup", prefix="val"
+        )
 
 
 def gen_rrup_trend_plot(
-    model_dir: Path, im: str, const_features: Dict = DEFAULT_CONST_FEATURES
+    model_dir: Path, ims: Sequence[str], const_features: Dict = DEFAULT_CONST_FEATURES
 ):
     fig_output_dir = model_dir / "plots" / "trend_plots"
 
     gmm = GMM.load(model_dir)
     tplot = TrendPlotGen(gmm, "rrup", np.linspace(20, 200, 1000))
-    tplot.gen_trend_plot(const_features, im, fig_output_dir, model_dir=model_dir)
+    for im in ims:
+        tplot.gen_trend_plot(const_features, im, fig_output_dir, model_dir=model_dir)
 
 
 def compute_basin_metrics(
@@ -358,61 +358,70 @@ def wandb_log_metrics(
             wandb_run.summary.update(cur_metrics.to_dict())
 
 
-def gen_residual_plots(model_dir: Path, im: str):
+def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
     """Generates residual plots for the specified model and IM"""
     # Setup
     fig_output_dir = model_dir / "plots" / "residual_plots"
     model = GMM.load(model_dir)
     plt_gen = ResPlotGen(model)
 
+    ims = model.ims if ims is None else ims
+
+    train_db_ffp = model_dir / "train_predictions.hdf5"
+    val_db_ffp = model_dir / "val_predictions.hdf5"
+
+    # plt_gen.gen_spectral_bias_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
+    plt_gen.gen_spectral_bias_std_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
+
     # General residual distribution
-    plt_gen.gen_res_plot(
-        model_dir / "train_predictions.hdf5", im, fig_output_dir, prefix="train"
-    )
-    plt_gen.gen_res_plot(
-        model_dir / "val_predictions.hdf5", im, fig_output_dir, prefix="val"
-    )
+    for im in ims:
+        plt_gen.gen_res_plot(
+            train_db_ffp, im, fig_output_dir, prefix="train"
+        )
+        plt_gen.gen_res_plot(
+            val_db_ffp, im, fig_output_dir, prefix="val"
+        )
 
-    # Magnitude
-    plt_gen.gen_binned_res_plot(
-        model_dir / "train_predictions.hdf5",
-        im,
-        "mag",
-        np.asarray([3, 4, 5, 6, 7, 8, 9]),
-        3,
-        2,
-        fig_output_dir,
-        prefix="train",
-    )
-    plt_gen.gen_binned_res_plot(
-        model_dir / "val_predictions.hdf5",
-        im,
-        "mag",
-        np.asarray([3, 4, 5, 6, 7, 8, 9]),
-        3,
-        2,
-        fig_output_dir,
-        prefix="val",
-    )
+        # Magnitude
+        plt_gen.gen_binned_res_plot(
+            train_db_ffp,
+            im,
+            "mag",
+            np.asarray([3, 4, 5, 6, 7, 8, 9]),
+            3,
+            2,
+            fig_output_dir,
+            prefix="train",
+        )
+        plt_gen.gen_binned_res_plot(
+            val_db_ffp,
+            im,
+            "mag",
+            np.asarray([3, 4, 5, 6, 7, 8, 9]),
+            3,
+            2,
+            fig_output_dir,
+            prefix="val",
+        )
 
-    # Rrup
-    plt_gen.gen_binned_res_plot(
-        model_dir / "train_predictions.hdf5",
-        im,
-        "rrup",
-        np.linspace(0, 200, 11),
-        5,
-        2,
-        fig_output_dir,
-        prefix="train",
-    )
-    plt_gen.gen_binned_res_plot(
-        model_dir / "val_predictions.hdf5",
-        im,
-        "rrup",
-        np.linspace(0, 200, 11),
-        5,
-        2,
-        fig_output_dir,
-        prefix="val",
-    )
+        # Rrup
+        plt_gen.gen_binned_res_plot(
+            train_db_ffp,
+            im,
+            "rrup",
+            np.linspace(0, 200, 11),
+            5,
+            2,
+            fig_output_dir,
+            prefix="train",
+        )
+        plt_gen.gen_binned_res_plot(
+            val_db_ffp,
+            im,
+            "rrup",
+            np.linspace(0, 200, 11),
+            5,
+            2,
+            fig_output_dir,
+            prefix="val",
+        )

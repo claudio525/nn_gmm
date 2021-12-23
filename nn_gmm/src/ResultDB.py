@@ -35,7 +35,6 @@ class ResultDB:
                 event_ids = db["event_ids"][:]
                 df["event"] = event_names[event_ids]
 
-
             if "site" in columns:
                 event_names = db["site_names"][:]
                 event_ids = db["site_ids"][:]

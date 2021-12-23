@@ -1,3 +1,4 @@
+import time
 from typing import Sequence, List
 from pathlib import Path
 
@@ -32,7 +33,6 @@ def write_train_val_predictions(data_dir: Path, model_dir: Path):
     """Write the training & validation predictions to hdf5 databases"""
     nn_gmm.write_train_val_predictions(data_dir, model_dir)
 
-
 @app.command("metrics")
 def train_val_metrics(model_dir: Path, save: bool = False):
     """Computes training & validation metrics"""
@@ -58,9 +58,9 @@ def trend_plot(model_dir: Path, im: str):
 
 
 @app.command("residuals")
-def residual_plots(model_dir: Path, im: str):
+def residual_plots(model_dir: Path, ims: List[str] = None):
     """Generates residual plots"""
-    nn_gmm.gen_residual_plots(model_dir, im)
+    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else ims)
 
 
 

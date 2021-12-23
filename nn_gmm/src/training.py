@@ -2,7 +2,7 @@ import pickle
 import json
 import os
 import datetime
-from typing import List, Dict, Tuple, Callable, Union
+from typing import List, Dict, Tuple, Callable, Union, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -20,9 +20,13 @@ from . import eval
 from .console import console
 
 
-def create_run_id() -> str:
+def create_run_id(tags: Sequence[str]) -> str:
     """Creates a run ID based on the month, day & time"""
-    id = datetime.datetime.now().strftime("%m%d_%H%M")
+    id = datetime.datetime.now().strftime("%m%d_%H%M%S")
+
+    if tags is not None:
+        id = id + "_" + "_".join(tags)
+
     return id
 
 
@@ -101,17 +105,11 @@ def _save_configs(
     io_config: Dict, model_config: Dict, training_config: Dict, output_dir: Path
 ):
     ml_tools.utils.write_to_json(io_config, output_dir / "input_config.json")
-    # with open(os.path.join(output_dir, "input_config.json"), "w") as f:
-    #     json.dump(io_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     if model_config is not None:
         ml_tools.utils.write_to_json(model_config, output_dir / "model_config.json")
-        # with open(os.path.join(output_dir, "model_config.json"), "w") as f:
-        #     json.dump(model_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
     ml_tools.utils.write_to_json(training_config, output_dir / "train_config.json")
-    # with open(os.path.join(output_dir, "train_config.json"), "w") as f:
-    #     json.dump(training_config, f, cls=utils.GenericObjJSONEncoder, indent=4)
 
 
 def _save_model_data(
@@ -247,7 +245,7 @@ def train_xgb(
         num_boost_round=train_config["n_epochs"],
         evals=[(train_Xy, "train"), (val_Xy, "val")],
         evals_result=eval_dict,
-        callbacks=train_config["callbacks"]
+        callbacks=train_config["callbacks"],
     )
 
     # Save the model
@@ -444,25 +442,17 @@ def train_nn(
     )
 
     # Save model data
-    loss_df = _save_model_data(
-        output_dir, model_dir, io_config, train_config, history
-    )
+    loss_df = _save_model_data(output_dir, model_dir, io_config, train_config, history)
 
     # Create loss plot
-    plt.figure()
-    plt.plot(history.epoch, loss_df.loss, label=f"Loss - {loss_df.loss.min():.4f}")
-    plt.plot(
-        history.epoch,
-        loss_df.val_loss,
-        label=f"Validation loss - {loss_df.val_loss.min():.4f}",
+    history = history.history
+    ims = list(im_config.keys())
+    fig = ml_tools.plotting.plot_loss(
+        history,
+        y_lim=(0.0, 1.0),
+        y_label="MSE",
+        multi_keys=ims if len(ims) > 1 else None,
     )
-
-    plt.ylabel(train_config["loss"])
-    plt.xlabel("Epoch")
-
-    plt.legend()
-
-    plt.savefig(os.path.join(output_dir, "loss.png"))
-    plt.close()
+    fig.savefig(os.path.join(output_dir, "loss.png"))
 
     return TrainingResult(io_config, train_config, output_dir, model_dir)

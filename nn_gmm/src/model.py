@@ -1,5 +1,6 @@
 import json
 import pickle
+import time
 from pathlib import Path
 from typing import Union, Dict, List, Tuple
 
@@ -32,6 +33,10 @@ class GMM:
 
         self.features = np.asarray(list(self.feature_config.keys()))
         self.outputs = np.asarray(list(self.im_config.keys()))
+
+    @property
+    def ims(self):
+        return list(self.im_config.keys())
 
     def predict(
         self,
@@ -106,7 +111,11 @@ class GMM:
         Note: Currently only supported when predicting the mean"""
         for im in mean_df.columns.values.astype(str):
             if self.im_config_prcd[im] is not None:
-                mean_df[im] = self.im_config_prcd[im](mean_df[im].values)
+                mean_df[im] = self.im_config_prcd[im](
+                    tf.convert_to_tensor(
+                        mean_df[im].values.astype(float), dtype=tf.float32
+                    )
+                )
 
         return mean_df
 
@@ -217,7 +226,8 @@ class NeuralNetworkGMM(GMM):
             raise ValueError("Not all required features exist in the given dataframe")
 
         # Run estimation
-        y_est = self.model.predict(X.loc[:, self.features].values.astype(float))
+        y_est = self.model(X.loc[:, self.features].values.astype(float))
+        # y_est = self.model.predict(X.loc[:, self.features].values.astype(float), batch_size=1024)
 
         # Multi-output model
         if isinstance(y_est, list):

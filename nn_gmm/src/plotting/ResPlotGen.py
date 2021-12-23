@@ -5,6 +5,7 @@ from typing import Union, Tuple, Dict, Sequence
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import empirical.util.classdef as classdef
 import empirical.util.empirical_factory as emp_factory
 
@@ -22,6 +23,186 @@ class ResPlotGen:
 
         self.n_bins = n_bins
 
+    def __compute_residuals(
+        self, data_df: pd.DataFrame, im: str
+    ) -> Tuple[np.ndarray, float, float]:
+        """
+        Computes the residuals, and mean and standard deviation,
+        for the given data
+        """
+        residual = data_df[im].values - data_df[f"{im}_est"].values
+        mean, std = np.mean(residual), np.std(residual)
+
+        return residual, mean, std
+
+    def __compute_residual_stats(
+        self, data_df: pd.DataFrame, ims: Sequence[str]
+    ) -> pd.DataFrame:
+        # Only interested in pSA or PGA
+        ims = [im for im in ims if im.startswith("pSA") or im == "PGA"]
+
+        # Get the periods
+        periods = np.asarray(
+            [float(im.split("_")[-1]) if im.startswith("pSA") else 0 for im in ims]
+        )
+
+        # Compute the bias and standard deviation
+        bias_values, std_values = [], []
+        for cur_im in ims:
+            _, cur_bias, cur_std = self.__compute_residuals(data_df, cur_im)
+            bias_values.append(cur_bias)
+            std_values.append(cur_std)
+
+        # Create dataframe
+        res_stats_df = pd.DataFrame(
+            data=np.stack((bias_values, std_values, periods), axis=1),
+            columns=["bias", "std", "period"],
+            index=ims,
+        )
+        return res_stats_df
+
+    def gen_spectral_bias_std_plot(
+        self, db_ffps: Sequence[Path], ims: Sequence[str], output_ffp: Path
+    ):
+        """Creates a figure with two plots:
+        - pSA period vs Bias
+        - pSA period vs Std
+        """
+        # Create plot
+        fig = plt.figure(figsize=(16, 10), dpi=200)
+        bias_ax = fig.add_subplot(1, 2, 1)
+        std_ax = fig.add_subplot(1, 2, 2)
+
+        # Setup run colours
+        run_ids = np.unique([cur_db_ffp.parent.stem for cur_db_ffp in db_ffps])
+        run_colours = {
+            cur_run_id: cur_color
+            for cur_run_id, cur_color in zip(
+                run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
+            )
+        }
+
+        bias_max_values = []
+        for ix, cur_db_ffp in enumerate(db_ffps):
+            # Get the data
+            columns = ims + [f"{im}_est" for im in ims]
+            data_df = ResultDB.get_data_static(cur_db_ffp, columns)
+
+            # Compute residual statistics
+            res_stats_df = self.__compute_residual_stats(
+                data_df,
+                ims,
+            )
+
+            # Plot line
+            cur_suffix = cur_db_ffp.stem.split("_")[0]
+            cur_run_id = cur_db_ffp.parent.stem
+            bias_ax.plot(
+                res_stats_df.period,
+                res_stats_df.bias.values,
+                marker=".",
+                linewidth=0.75,
+                label=f"{cur_run_id}_{cur_suffix}",
+                linestyle="--" if cur_suffix == "val" else None,
+                color=run_colours[cur_run_id],
+            )
+            std_ax.plot(
+                res_stats_df.period,
+                res_stats_df["std"].values,
+                marker=".",
+                linewidth=0.75,
+                # label=f"{cur_run_id}_{cur_suffix}",
+                linestyle="--" if cur_suffix == "val" else None,
+                color=run_colours[cur_run_id],
+            )
+
+            # Get current y-limit
+            bias_max_values.append(np.max(np.abs(res_stats_df.bias.values)))
+
+        bias_max_value = np.max(bias_max_values) + 0.025
+        bias_ax.set_ylim(-bias_max_value, +bias_max_value)
+        bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
+        bias_ax.set_xlabel("Period, T")
+        bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+        bias_ax.semilogx()
+        bias_ax.legend()
+
+        std_ax.set_ylabel(r"$\sigma_{\mathbf{\Delta}}$")
+        std_ax.set_xlabel("Period, T")
+        std_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+        std_ax.semilogx()
+
+        fig.tight_layout()
+
+        fig.savefig(output_ffp)
+
+    def gen_spectral_bias_plot(
+        self, db_ffps: Sequence[Path], ims: Sequence[str], output_ffp: Path
+    ):
+        """
+        Creates a pSA period vs Bias (+Std) plot for
+        the specified result databases
+        """
+        # Create plot
+        fig = plt.figure(figsize=(16, 10), dpi=200)
+        bias_ax = fig.add_subplot(1, 1, 1)
+
+        # Setup run colours
+        run_ids = np.unique([cur_db_ffp.parent.stem for cur_db_ffp in db_ffps])
+        run_colours = {
+            cur_run_id: cur_color
+            for cur_run_id, cur_color in zip(
+                run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
+            )
+        }
+
+        max_values = []
+        for ix, cur_db_ffp in enumerate(db_ffps):
+            # Get the data
+            columns = ims + [f"{im}_est" for im in ims]
+            data_df = ResultDB.get_data_static(cur_db_ffp, columns)
+
+            # Compute residual statistics
+            cur_suffix = cur_db_ffp.stem.split("_")[0]
+            cur_run_id = cur_db_ffp.parent.stem
+            res_stats_df = self.__compute_residual_stats(
+                data_df,
+                ims,
+            )
+
+            # Plot line
+            bias_ax.errorbar(
+                res_stats_df.period,
+                res_stats_df.bias.values,
+                yerr=res_stats_df["std"].values / 2,
+                marker=".",
+                linewidth=0.75,
+                capsize=7.5,
+                label=f"{cur_run_id}_{cur_suffix}",
+                linestyle="--" if cur_suffix == "val" else None,
+                color=run_colours[cur_run_id],
+            )
+
+            # Get current y-limit
+            max_values.append(
+                np.max(
+                    np.abs(res_stats_df.bias.values) + (res_stats_df["std"].values / 2)
+                )
+                + 0.05
+            )
+
+        max_value = np.max(max_values)
+        bias_ax.set_ylim(-max_value, +max_value)
+        bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
+        bias_ax.set_xlabel("Period, T")
+
+        bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+        bias_ax.semilogx()
+        bias_ax.legend()
+        fig.tight_layout()
+
+        fig.savefig(output_ffp)
+
     def gen_res_plot(self, db_ffp: Path, im: str, output_dir: Path, prefix: str = None):
         """Creates a residual distribution plot"""
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -36,7 +217,9 @@ class ResPlotGen:
 
         prefix = f"{prefix}_" if prefix is not None else ""
         fig.tight_layout()
-        fig.savefig(output_dir / f"{prefix}{im.replace('.', 'p')}_residual_distribution.png")
+        fig.savefig(
+            output_dir / f"{prefix}{im.replace('.', 'p')}_residual_distribution.png"
+        )
         plt.close()
 
     def gen_binned_res_plot(
@@ -51,6 +234,7 @@ class ResPlotGen:
         prefix: str = None,
         figsize: Tuple[int, int] = (16, 10),
     ):
+        """Creates a binned residual plot for the specified feature"""
         output_dir.mkdir(exist_ok=True, parents=True)
 
         # Load the data
@@ -75,17 +259,19 @@ class ResPlotGen:
 
         prefix = f"{prefix}_" if prefix is not None else ""
         fig.tight_layout()
-        fig.savefig(output_dir / f"{prefix}{im.replace('.', 'p')}_{feature}_residual_distributions.png")
+        fig.savefig(
+            output_dir
+            / f"{prefix}{im.replace('.', 'p')}_{feature}_residual_distributions.png"
+        )
         plt.close(fig)
 
     def add_res_hist(self, ax: plt.Axes, data_df: pd.DataFrame, im: str):
         """Computes the residual and plots the histogram"""
-        # Compute the residual
-        residual = data_df[im].values - data_df[f"{im}_est"].values
-        mean, std = np.mean(residual), np.std(residual)
+        # Compute the residuals
+        residuals, mean, std = self.__compute_residuals(data_df, im)
 
         # Ploting
-        ax.hist(residual, bins=self.n_bins, density=True)
+        ax.hist(residuals, bins=self.n_bins, density=True)
         ax.axvline(
             mean, label=f"$\mu$: {mean:.2f}", linestyle="-", linewidth=0.75, c="k"
         )

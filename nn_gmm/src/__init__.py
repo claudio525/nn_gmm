@@ -14,7 +14,7 @@ from .training import (
     train_xgb,
 )
 
-from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, XGBoostGMM, GMM
+from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, XGBoostGMM, GMM, create_reg_multi_output_model
 from .console import console
 from .data_processing import (
     get_standard_scaling_fn,
