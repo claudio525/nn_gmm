@@ -40,18 +40,18 @@ io_config = {
         "dip": "min_max",
         "rake": "min_max",
         "mag": "standard",
-        # "s": "standard",
-        # "theta": "min_max",
+        "s": "standard",
+        "theta": "min_max",
         "vs30": "standard",
-        # "z1p0": "standard",
-        # "z2p5": "standard",
-        # "vs500": "standard",
+        "z1p0": "standard",
+        "z2p5": "standard",
+        "vs500": "standard",
         "rrup": "standard",
         "rx": "standard",
         "rjb": "standard",
         "ry": "standard",
-        # "active_shallow": None,
-        # "volcanic": None,
+        "active_shallow": None,
+        "volcanic": None,
     },
     "im_config": {
         "PGA": "standard",
@@ -75,8 +75,8 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
     model_config = {
         "hidden_layer_func": ml_tools.hidden_layers.selu_dropout,
         "hidden_layer_config": {"dropout": None},
-        "units": [8, 8],
-        "output_units": [8],
+        "units": [32, 32],
+        "output_units": [32],
     }
 
     train_config = {
@@ -135,7 +135,7 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
         nn_gmm.write_train_val_predictions(
             Path(io_config["train_data_dirs"][0]).parent, output_dir, verbose=False
         )
-        console.log(f"Took {time.time() - start_time}s to get predictions")
+        console.print(f"Took {time.time() - start_time}s to get predictions")
 
         # Print and compute general metrics
         train_metrics, val_metrics = nn_gmm.train_val_metrics(output_dir, save=True)
@@ -154,13 +154,13 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
                 wandb.run, ims, "val", val_metrics, val_basin_metrics
             )
 
-        # console.log("Generating binned Rrup plot")
+        # console.print("Generating binned Rrup plot")
         # nn_gmm.gen_rrup_bin_plot(output_dir, ims)
 
-        console.log("Generating residual plots")
+        console.print("Generating residual plots")
         nn_gmm.gen_residual_plots(output_dir, ims)
 
-        console.log("Generating Rrup trend plot")
+        console.print("Generating Rrup trend plot")
         nn_gmm.gen_rrup_trend_plot(output_dir, ims)
 
 

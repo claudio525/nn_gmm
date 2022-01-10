@@ -24,7 +24,7 @@ def create_run_id(tags: Sequence[str]) -> str:
     """Creates a run ID based on the month, day & time"""
     id = datetime.datetime.now().strftime("%m%d_%H%M%S")
 
-    if tags is not None:
+    if tags is not None and len(tags) > 0:
         id = id + "_" + "_".join(tags)
 
     return id
@@ -182,7 +182,7 @@ def train_xgb(
     )
 
     # Pre-processing
-    console.log("Preprocessing")
+    console.print("Preprocessing")
     if io_config.get("multi_input") is not None:
         feature_config_dict, feature_config = (
             {
@@ -220,7 +220,7 @@ def train_xgb(
     )
 
     # Preparing dataset for XGBoost
-    console.log(f"Preparing datasets")
+    console.print(f"Preparing datasets")
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -228,7 +228,7 @@ def train_xgb(
         train_ds = train_ds.cache()
         val_ds = val_ds.cache()
 
-    console.log("Loading data for XGBoost")
+    console.print("Loading data for XGBoost")
     train_iter = XGBDataIterator(train_ds)
     train_Xy = xgb.DMatrix(train_iter)
 
@@ -236,7 +236,7 @@ def train_xgb(
     val_Xy = xgb.DMatrix(val_iter)
 
     # Training
-    console.log("Running training")
+    console.print("Running training")
     eval_dict = {}
     model = xgb.train(
         model_params,
@@ -423,7 +423,7 @@ def train_nn(
         # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
     ]
 
-    console.log(f"Preparing datasets")
+    console.print(f"Preparing datasets")
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
@@ -432,7 +432,7 @@ def train_nn(
         val_ds = val_ds.cache()
 
     # Train
-    console.log(f"Training...")
+    console.print(f"Training...")
     history = model.fit(
         train_ds,
         epochs=n_epochs,

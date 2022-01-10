@@ -140,6 +140,15 @@ class TrendPlotGen:
             columns=list(const_features.keys()),
         )
         X[self.feature] = self.feature_values
+
+        if self.feature == "rrup":
+            # Set Rx and Ry to realistic values
+            # Just setting both to rrup is physically impossible
+            # from my understanding
+            X["rx"] = np.sqrt((self.feature_values**2) / 2)
+            X["ry"] = np.sqrt((self.feature_values**2) / 2)
+            X["rjb"] = self.feature_values
+
         est_df, *_ = model.predict(X)
 
         ax.plot(

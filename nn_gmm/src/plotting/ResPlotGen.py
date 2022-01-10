@@ -18,9 +18,7 @@ from . import plotting_utils as plt_utils
 
 
 class ResPlotGen:
-    def __init__(self, model: GMM, n_bins: int = 100):
-        self.model = model
-
+    def __init__(self, n_bins: int = 100):
         self.n_bins = n_bins
 
     def __compute_residuals(
@@ -68,6 +66,8 @@ class ResPlotGen:
         - pSA period vs Bias
         - pSA period vs Std
         """
+        assert all([cur_im.startswith("pSA") or cur_im == "PGA" for cur_im in ims])
+
         # Create plot
         fig = plt.figure(figsize=(16, 10), dpi=200)
         bias_ax = fig.add_subplot(1, 2, 1)
@@ -78,7 +78,7 @@ class ResPlotGen:
         run_colours = {
             cur_run_id: cur_color
             for cur_run_id, cur_color in zip(
-                run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
+                np.sort(run_ids), sns.color_palette("tab10", n_colors=len(run_ids))
             )
         }
 
@@ -102,7 +102,7 @@ class ResPlotGen:
                 res_stats_df.bias.values,
                 marker=".",
                 linewidth=0.75,
-                label=f"{cur_run_id}_{cur_suffix}",
+                label=f"{cur_run_id}" if cur_suffix == "val" else None,
                 linestyle="--" if cur_suffix == "val" else None,
                 color=run_colours[cur_run_id],
             )
@@ -112,7 +112,7 @@ class ResPlotGen:
                 marker=".",
                 linewidth=0.75,
                 # label=f"{cur_run_id}_{cur_suffix}",
-                linestyle="--" if cur_suffix == "val" else None,
+                linestyle="--"  if cur_suffix == "val" else None,
                 color=run_colours[cur_run_id],
             )
 
@@ -136,72 +136,7 @@ class ResPlotGen:
 
         fig.savefig(output_ffp)
 
-    def gen_spectral_bias_plot(
-        self, db_ffps: Sequence[Path], ims: Sequence[str], output_ffp: Path
-    ):
-        """
-        Creates a pSA period vs Bias (+Std) plot for
-        the specified result databases
-        """
-        # Create plot
-        fig = plt.figure(figsize=(16, 10), dpi=200)
-        bias_ax = fig.add_subplot(1, 1, 1)
 
-        # Setup run colours
-        run_ids = np.unique([cur_db_ffp.parent.stem for cur_db_ffp in db_ffps])
-        run_colours = {
-            cur_run_id: cur_color
-            for cur_run_id, cur_color in zip(
-                run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
-            )
-        }
-
-        max_values = []
-        for ix, cur_db_ffp in enumerate(db_ffps):
-            # Get the data
-            columns = ims + [f"{im}_est" for im in ims]
-            data_df = ResultDB.get_data_static(cur_db_ffp, columns)
-
-            # Compute residual statistics
-            cur_suffix = cur_db_ffp.stem.split("_")[0]
-            cur_run_id = cur_db_ffp.parent.stem
-            res_stats_df = self.__compute_residual_stats(
-                data_df,
-                ims,
-            )
-
-            # Plot line
-            bias_ax.errorbar(
-                res_stats_df.period,
-                res_stats_df.bias.values,
-                yerr=res_stats_df["std"].values / 2,
-                marker=".",
-                linewidth=0.75,
-                capsize=7.5,
-                label=f"{cur_run_id}_{cur_suffix}",
-                linestyle="--" if cur_suffix == "val" else None,
-                color=run_colours[cur_run_id],
-            )
-
-            # Get current y-limit
-            max_values.append(
-                np.max(
-                    np.abs(res_stats_df.bias.values) + (res_stats_df["std"].values / 2)
-                )
-                + 0.05
-            )
-
-        max_value = np.max(max_values)
-        bias_ax.set_ylim(-max_value, +max_value)
-        bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
-        bias_ax.set_xlabel("Period, T")
-
-        bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
-        bias_ax.semilogx()
-        bias_ax.legend()
-        fig.tight_layout()
-
-        fig.savefig(output_ffp)
 
     def gen_res_plot(self, db_ffp: Path, im: str, output_dir: Path, prefix: str = None):
         """Creates a residual distribution plot"""
@@ -305,5 +240,73 @@ class ResPlotGen:
         )
 
         ax.grid(linestyle="--", linewidth=0.5, alpha=0.5)
-        ax.set_xlabel(r"PGA, $\epsilon_{{i, j}}$".format(plt_utils.get_im_name(im)))
+        ax.set_xlabel(r"{}, $\epsilon_{{i, j}}$".format(plt_utils.get_im_name(im)))
         ax.set_xlim(-1.0, 1.0)
+
+
+# def gen_spectral_bias_plot(
+    #     self, db_ffps: Sequence[Path], ims: Sequence[str], output_ffp: Path
+    # ):
+    #     """
+    #     Creates a pSA period vs Bias (+Std) plot for
+    #     the specified result databases
+    #     """
+    #     # Create plot
+    #     fig = plt.figure(figsize=(16, 10), dpi=200)
+    #     bias_ax = fig.add_subplot(1, 1, 1)
+    #
+    #     # Setup run colours
+    #     run_ids = np.unique([cur_db_ffp.parent.stem for cur_db_ffp in db_ffps])
+    #     run_colours = {
+    #         cur_run_id: cur_color
+    #         for cur_run_id, cur_color in zip(
+    #             run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
+    #         )
+    #     }
+    #
+    #     max_values = []
+    #     for ix, cur_db_ffp in enumerate(db_ffps):
+    #         # Get the data
+    #         columns = ims + [f"{im}_est" for im in ims]
+    #         data_df = ResultDB.get_data_static(cur_db_ffp, columns)
+    #
+    #         # Compute residual statistics
+    #         cur_suffix = cur_db_ffp.stem.split("_")[0]
+    #         cur_run_id = cur_db_ffp.parent.stem
+    #         res_stats_df = self.__compute_residual_stats(
+    #             data_df,
+    #             ims,
+    #         )
+    #
+    #         # Plot line
+    #         bias_ax.errorbar(
+    #             res_stats_df.period,
+    #             res_stats_df.bias.values,
+    #             yerr=res_stats_df["std"].values / 2,
+    #             marker=".",
+    #             linewidth=0.75,
+    #             capsize=7.5,
+    #             label=f"{cur_run_id}_{cur_suffix}",
+    #             linestyle="--" if cur_suffix == "val" else None,
+    #             color=run_colours[cur_run_id],
+    #         )
+    #
+    #         # Get current y-limit
+    #         max_values.append(
+    #             np.max(
+    #                 np.abs(res_stats_df.bias.values) + (res_stats_df["std"].values / 2)
+    #             )
+    #             + 0.05
+    #         )
+    #
+    #     max_value = np.max(max_values)
+    #     bias_ax.set_ylim(-max_value, +max_value)
+    #     bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
+    #     bias_ax.set_xlabel("Period, T")
+    #
+    #     bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+    #     bias_ax.semilogx()
+    #     bias_ax.legend()
+    #     fig.tight_layout()
+    #
+    #     fig.savefig(output_ffp)

@@ -127,13 +127,13 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
             nn_gmm.wandb_log_metrics(wandb.run, ims, "train", train_metrics, train_basin_metrics)
             nn_gmm.wandb_log_metrics(wandb.run, ims, "val", val_metrics, val_basin_metrics)
 
-        console.log("Generating binned Rrup plot")
+        console.print("Generating binned Rrup plot")
         nn_gmm.gen_rrup_bin_plot(output_dir, im)
 
-        console.log("Generating Rrup trend plot")
+        console.print("Generating Rrup trend plot")
         nn_gmm.gen_rrup_trend_plot(output_dir, im)
 
-        console.log("Generating residual plots")
+        console.print("Generating residual plots")
         nn_gmm.gen_residual_plots(output_dir, im)
 
 

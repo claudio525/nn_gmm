@@ -83,10 +83,10 @@ assert n_unique_stations == site_df.shape[0]
 site_df.set_index("station", inplace=True)
 
 # Site-source params
-console.log("Loading distance params")
+console.print("Loading distance params")
 distance_df = nn_gmm.load_distance_df(site_df, distance_db_ffps, n_procs=n_procs)
 
-console.log("Loading site-source params")
+console.print("Loading site-source params")
 site_source_df = nn_gmm.load_site_source_df(site_source_ffps, n_procs=n_procs)
 assert (
     np.unique(site_source_df.index.values.astype(str)).shape[0]
@@ -94,7 +94,7 @@ assert (
 )
 
 # Source params
-console.log("Loading realisation params")
+console.print("Loading realisation params")
 rel_df = nn_gmm.load_dfs(
     list(rel_source_params_dir.glob("*.csv")), index_col="realisation"
 )
@@ -107,15 +107,15 @@ rel_df["source"] = [
 sources = np.unique(rel_df.source.values.astype(str))
 
 for ix, cur_source in enumerate(sources):
-    console.log(f"Processing {ix+1}/{sources.size}")
+    console.print(f"Processing {ix+1}/{sources.size}")
     cur_output_ffp = output_dir / f"{cur_source}.csv"
     if cur_output_ffp.exists():
-        console.log(f"[orange]Skipping {cur_source} as output file already exists[/]")
+        console.print(f"[orange]Skipping {cur_source} as output file already exists[/]")
         continue
 
     cur_im_df = nn_gmm.load_fault_im_df(cur_source, imdb_ffps)
     if cur_im_df is None:
-        console.log(f"[orange]No IM data found for source {cur_source}, skipping[/]")
+        console.print(f"[orange]No IM data found for source {cur_source}, skipping[/]")
         continue
     cur_im_df.sort_index(inplace=True)
 

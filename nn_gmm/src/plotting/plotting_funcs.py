@@ -1,7 +1,7 @@
-import tempfile
-from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
+from typing import Dict, Sequence
 from pathlib import Path
 
+import seaborn as sns
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -211,58 +211,6 @@ def plot_mag_vs30_bins(
     plt.close()
 
 
-# def plot_n_records_map(
-#     data_dirs: List[Union[Path, str]],
-#     plot_items_ffp: Union[Path, str],
-#     output_ffp: str,
-#     title: str = "Number-of-records",
-# ):
-#     """Generates a spatial map that shows number of records at each station"""
-#     data_dirs, plot_items_ffp = utils.to_path(data_dirs), utils.to_path(plot_items_ffp)
-#
-#     ds = data.load_dataset(
-#         data_dirs,
-#         data.load_feature_details(data_dirs[0]),
-#         5_000_000,
-#         shuffle_buffer=None,
-#         block_size=1024,
-#     )
-#
-#     dfs = []
-#     for cur_batch in ds.as_numpy_iterator():
-#         cur_df = pd.DataFrame.from_dict(
-#             {key: cur_batch[key] for key in ["id", "lat", "lon"]}
-#         )
-#         cur_df["id"] = cur_df.id.str.decode("UTF-8")
-#         cur_df.set_index("id", inplace=True)
-#
-#         dfs.append(cur_df)
-#
-#     df = pd.concat(dfs)
-#     df["station"] = utils.get_station_from_id(df.index.values.astype(str))
-#
-#     station_lookup_df = utils.get_station_lookup(df)
-#
-#     n_records_df = df.groupby("station").count()
-#     n_records_df["count"] = n_records_df["lat"]
-#     n_records_df.drop(columns=["lat", "lon"], inplace=True)
-#
-#     n_records_df = pd.merge(
-#         n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
-#     )
-#
-#     cb_options = plt_utils.compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
-#     gmt_options = plt_utils.get_gmt_options_dict(
-#         options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
-#     )
-#     csv_ffp = plt_utils.gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
-#
-#     with tempfile.TemporaryDirectory() as tmp_dir:
-#         plot_single(plot_items_ffp, csv_ffp, plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
-#
-#     return
-
-
 def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = None):
     """Adds the empirical data to the
     current plot
@@ -277,7 +225,13 @@ def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = No
         ax = plt.gca()
 
     # mean prediction
-    ax.plot(emp_df.index.values, emp_df["mu"].values, c="r", label=f"{label}", linewidth=0.75)
+    ax.plot(
+        emp_df.index.values,
+        emp_df["mu"].values,
+        c="r",
+        label=f"{label}",
+        linewidth=0.75,
+    )
     # +- sigma
     ax.plot(
         emp_df.index.values,
@@ -285,14 +239,14 @@ def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = No
         c="r",
         linestyle="--",
         # label=f"Std {label}",
-        linewidth=0.75
+        linewidth=0.75,
     )
     ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
         c="r",
         linestyle="--",
-        linewidth=0.75
+        linewidth=0.75,
     )
 
 
@@ -393,3 +347,121 @@ def residual_scatter_hist_plot(
     if output_ffp is not None:
         fig.savefig(output_ffp)
         plt.close()
+
+
+def gen_spectral_loss_plot(
+    loss_dfs: Sequence[pd.DataFrame],
+    run_ids: Sequence[str],
+    ims: Sequence[str],
+    output_ffp: Path,
+    val_only: bool = False,
+):
+    assert all([cur_im.startswith("pSA") or cur_im == "PGA" for cur_im in ims])
+
+    # Create plot
+    fig = plt.figure(figsize=(16, 10), dpi=200)
+    loss_ax = fig.add_subplot(1, 1, 1)
+
+    # Setup run colours
+    run_colours = {
+        cur_run_id: cur_color
+        for cur_run_id, cur_color in zip(
+            run_ids, sns.color_palette("tab10", n_colors=len(run_ids))
+        )
+    }
+
+    # Get the periods
+    periods = np.asarray(
+        [float(im.split("_")[-1]) if im.startswith("pSA") else 0 for im in ims]
+    )
+
+    loss_max_values = []
+    columns = np.asarray([f"{cur_im}_loss" for cur_im in ims])
+    for ix, (cur_loss_df, cur_run_id) in enumerate(zip(loss_dfs, run_ids)):
+        # Plot validation line
+        loss_ax.plot(
+            periods,
+            cur_loss_df.loc[:, np.char.add("val_", columns)].min(axis=0).values,
+            marker=".",
+            linewidth=0.75,
+            label=f"{cur_run_id}",
+            linestyle="--",
+            color=run_colours[cur_run_id],
+        )
+
+        # Plot training line
+        if not val_only:
+            loss_ax.plot(
+                periods,
+                cur_loss_df.loc[:, columns].min(axis=0).values,
+                marker=".",
+                linewidth=0.75,
+                linestyle="-",
+                color=run_colours[cur_run_id],
+            )
+
+        # Get current y-limit
+        loss_max_values.append(np.max(cur_loss_df[columns].values))
+
+    loss_max_value = np.max(loss_max_values) + 0.025
+    loss_ax.set_ylim(0, +loss_max_value)
+    loss_ax.set_ylabel(r"Loss")
+    loss_ax.set_xlabel("Period, T")
+    loss_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+    loss_ax.semilogx()
+    loss_ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+
+
+# def plot_n_records_map(
+#     data_dirs: List[Union[Path, str]],
+#     plot_items_ffp: Union[Path, str],
+#     output_ffp: str,
+#     title: str = "Number-of-records",
+# ):
+#     """Generates a spatial map that shows number of records at each station"""
+#     data_dirs, plot_items_ffp = utils.to_path(data_dirs), utils.to_path(plot_items_ffp)
+#
+#     ds = data.load_dataset(
+#         data_dirs,
+#         data.load_feature_details(data_dirs[0]),
+#         5_000_000,
+#         shuffle_buffer=None,
+#         block_size=1024,
+#     )
+#
+#     dfs = []
+#     for cur_batch in ds.as_numpy_iterator():
+#         cur_df = pd.DataFrame.from_dict(
+#             {key: cur_batch[key] for key in ["id", "lat", "lon"]}
+#         )
+#         cur_df["id"] = cur_df.id.str.decode("UTF-8")
+#         cur_df.set_index("id", inplace=True)
+#
+#         dfs.append(cur_df)
+#
+#     df = pd.concat(dfs)
+#     df["station"] = utils.get_station_from_id(df.index.values.astype(str))
+#
+#     station_lookup_df = utils.get_station_lookup(df)
+#
+#     n_records_df = df.groupby("station").count()
+#     n_records_df["count"] = n_records_df["lat"]
+#     n_records_df.drop(columns=["lat", "lon"], inplace=True)
+#
+#     n_records_df = pd.merge(
+#         n_records_df, station_lookup_df, how="inner", right_index=True, left_index=True
+#     )
+#
+#     cb_options = plt_utils.compute_GMT_std_ticks(n_records_df["count"], non_negative=False)
+#     gmt_options = plt_utils.get_gmt_options_dict(
+#         options={**{"title": title, "xyz-cpt-labels": "n_records"}, **cb_options,}
+#     )
+#     csv_ffp = plt_utils.gmt_save(n_records_df, "count", output_ffp, gmt_options=gmt_options)
+#
+#     with tempfile.TemporaryDirectory() as tmp_dir:
+#         plot_single(plot_items_ffp, csv_ffp, plt_utils.DEFAULT_STANDARD_GMT_PLOT_OPTIONS, tmp_dir)
+#
+#     return

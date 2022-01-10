@@ -22,7 +22,7 @@ MAGNITUDE_BINS = np.arange(3, 10)
 DEFAULT_METRICS = ["bias", "sigma"]
 
 
-DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0, vs500=1.5, z1p0=0.05, z2p5=0.25, theta=45, s=30)
+DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0, vs500=1.5, z1p0=0.05, z2p5=0.25, theta=45, s=30, tect_type="ACTIVE_SHALLOW")
 
 
 def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
@@ -39,7 +39,7 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     """
     gmm = GMM.load(model_dir)
 
-    console.log("Running predictions")
+    console.print("Running predictions")
     sim_df, est_df, _ = gmm.predict_dirs(
         [data_dir], features=list(gmm.features)
     )
@@ -49,13 +49,13 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
         sim_df[f"{cur_col}_est"] = cur_data
     del est_df
 
-    console.log("Computing station names")
+    console.print("Computing station names")
     sim_df["site"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(1)
 
-    console.log("Computing event names")
+    console.print("Computing event names")
     sim_df["event"] = sim_df.index.str.split("_REL", n=1, expand=True).get_level_values(0)
 
-    console.log("Writing database")
+    console.print("Writing database")
     ResultDB.write_data(sim_df, output_ffp)
 
 
@@ -70,15 +70,15 @@ def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool =
     train_data_dir = data_dir / "train"
     val_data_dir = data_dir / "val"
     if not train_data_dir.exists() or not val_data_dir.exists():
-        console.log("[red]Training or Validation directory missing[/]")
+        console.print("[red]Training or Validation directory missing[/]")
         return
 
     if verbose:
-        console.log("Running training data predictions")
+        console.print("Running training data predictions")
     write_predictions(model_dir, train_data_dir, model_dir / "train_predictions.hdf5")
 
     if verbose:
-        console.log("Running validation data predictions")
+        console.print("Running validation data predictions")
     write_predictions(model_dir, val_data_dir, model_dir / "val_predictions.hdf5")
 
 
@@ -234,10 +234,10 @@ def train_val_metrics(
     val_metrics = compute_metrics(val_df, ims, metrics=metrics)
 
     console.rule("Training")
-    console.log(train_metrics)
+    console.print(train_metrics)
 
     console.rule("Validation")
-    console.log(val_metrics)
+    console.print(val_metrics)
 
     if save:
         train_metrics.to_csv(model_dir / "train_metrics.csv")
@@ -303,22 +303,22 @@ def train_val_basin_metrics(model_dir: Path, basin_dir: Path, save: bool = False
     basin_dict = data.load_basin_stations(basin_dir)
 
     # Retrieve model predictions
-    console.log("Loading training model predictions")
+    console.print("Loading training model predictions")
     train_data_df = ResultDB.get_data_static(
         model_dir / "train_predictions.hdf5", columns
     )
 
-    console.log("Loading validation model predictions")
+    console.print("Loading validation model predictions")
     val_data_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 
     # Compute the basin metrics
-    console.log("Compute metrics")
+    console.print("Compute metrics")
     train_metrics = compute_basin_metrics(train_data_df, basin_dict, ims)
     val_metrics = compute_basin_metrics(val_data_df, basin_dict, ims)
 
     for cur_basin in basin_dict.keys():
         console.rule(cur_basin)
-        console.log(
+        console.print(
             pd.merge(
                 train_metrics[cur_basin],
                 val_metrics[cur_basin],
@@ -362,8 +362,10 @@ def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
     """Generates residual plots for the specified model and IM"""
     # Setup
     fig_output_dir = model_dir / "plots" / "residual_plots"
+    fig_output_dir.mkdir(exist_ok=True, parents=True)
+
     model = GMM.load(model_dir)
-    plt_gen = ResPlotGen(model)
+    plt_gen = ResPlotGen()
 
     ims = model.ims if ims is None else ims
 
@@ -371,7 +373,7 @@ def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
     val_db_ffp = model_dir / "val_predictions.hdf5"
 
     # plt_gen.gen_spectral_bias_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
-    plt_gen.gen_spectral_bias_std_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
+    plt_gen.gen_spectral_bias_std_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir / "spectral_bias_std.png")
 
     # General residual distribution
     for im in ims:

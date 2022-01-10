@@ -178,7 +178,7 @@ class XGBoostGMM(GMM):
         sim_dfs, est_dfs = [], []
         data_columns = list(self.features) + ["id"] + list(ims)
         for ix, cur_data in enumerate(ds.as_numpy_iterator()):
-            console.log(f"Processing batch - {ix + 1}")
+            console.print(f"Processing batch - {ix + 1}")
             cur_df = pd.DataFrame.from_dict(
                 {
                     cur_key: cur_value
@@ -284,7 +284,7 @@ class NeuralNetworkGMM(GMM):
         sim_dfs, mean_dfs, std_dfs = [], [], []
         data_columns = list(self.features) + ["id"] + list(ims)
         for ix, cur_data in enumerate(ds.as_numpy_iterator()):
-            console.log(f"Processing batch - {ix + 1}")
+            console.print(f"Processing batch - {ix + 1}")
             cur_df = pd.DataFrame.from_dict(
                 {
                     cur_key: cur_value
