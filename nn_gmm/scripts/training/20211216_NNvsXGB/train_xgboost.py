@@ -1,6 +1,7 @@
 """Train a XGBoost model"""
 from pathlib import Path
 
+import src.plotting.eval_plots
 import wandb
 import tensorflow as tf
 import pandas as pd
@@ -114,10 +115,10 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
         )
 
         # Print and compute general metrics
-        train_metrics, val_metrics = nn_gmm.train_val_metrics(output_dir, save=True)
+        train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(output_dir, save=True)
 
         # Print and compute basin metrics
-        train_basin_metrics, val_basin_metrics = nn_gmm.train_val_basin_metrics(
+        train_basin_metrics, val_basin_metrics = nn_gmm.comp_train_val_basin_metrics(
             output_dir, Path(io_config["basin_dir"])
         )
 
@@ -128,13 +129,13 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
             nn_gmm.wandb_log_metrics(wandb.run, ims, "val", val_metrics, val_basin_metrics)
 
         console.print("Generating binned Rrup plot")
-        nn_gmm.gen_rrup_bin_plot(output_dir, im)
+        src.plotting.eval_plots.gen_rrup_bin_plots(output_dir, im)
 
         console.print("Generating Rrup trend plot")
-        nn_gmm.gen_rrup_trend_plot(output_dir, im)
+        src.plotting.eval_plots.gen_rrup_trend_plots(output_dir, im)
 
         console.print("Generating residual plots")
-        nn_gmm.gen_residual_plots(output_dir, im)
+        src.plotting.eval_plots.gen_residual_plots(output_dir, im)
 
 
 if __name__ == "__main__":

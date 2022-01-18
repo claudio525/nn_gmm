@@ -28,7 +28,7 @@ import nn_gmm
 app = typer.Typer()
 
 
-@app.command("write")
+@app.command("write-predictions")
 def write_train_val_predictions(data_dir: Path, model_dir: Path):
     """Write the training & validation predictions to hdf5 databases"""
     nn_gmm.write_train_val_predictions(data_dir, model_dir)
@@ -37,42 +37,55 @@ def write_train_val_predictions(data_dir: Path, model_dir: Path):
 @app.command("metrics")
 def train_val_metrics(model_dir: Path, save: bool = False):
     """Computes training & validation metrics"""
-    nn_gmm.train_val_metrics(model_dir, save=save)
+    nn_gmm.comp_train_val_metrics(model_dir, save=save)
 
 
-@app.command("rrup")
+@app.command("basin-metrics")
+def train_val_basin_metrics(
+    model_dir: Path, basin_dir: Path, save: bool = False, print: bool = True
+):
+    """Computes training & validation metrics"""
+    nn_gmm.comp_train_val_basin_metrics(
+        model_dir, basin_dir, save=save, print_metrics=print
+    )
+
+@app.command("spatial-metrics")
+def train_val_metrics(model_dir: Path, save: bool = False):
+    """Computes training & validation metrics"""
+    nn_gmm.comp_train_val_spatial_metrics(model_dir, save=save)
+
+
+@app.command("rrup-bin")
 def gen_rrup_bin_plot(model_dir: Path, ims: List[str]):
     """Creates a Rrup based bin (mag, vs30)
     plot for the specified IM"""
-    nn_gmm.gen_rrup_bin_plot(model_dir, ims)
-
-
-@app.command("basin")
-def basin_eval(model_dir: Path, basin_dir: Path):
-    """Computes basin metrics"""
-    nn_gmm.train_val_basin_metrics(model_dir, basin_dir)
+    nn_gmm.gen_rrup_bin_plots(model_dir, ims)
 
 
 @app.command("trend")
 def trend_plot(model_dir: Path, im: str):
     """Generates an Rrup trend plot"""
-    nn_gmm.gen_rrup_trend_plot(model_dir, [im])
+    nn_gmm.gen_rrup_trend_plots(model_dir, [im])
 
 
 @app.command("residuals")
 def residual_plots(model_dir: Path, ims: List[str] = None):
     """Generates residual plots"""
-    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else ims)
+    nn_gmm.gen_residual_plots(
+        model_dir, None if len(ims) == 0 else ims
+    )
 
 
-@app.command("spec-comp-residuals")
-def compare_residuals(output_ffp: Path, model_dirs: List[Path], val_only: bool = False):
+@app.command("spec-comp-bias-std")
+def compare_spec_bias_std(
+    output_ffp: Path, model_dirs: List[Path], val_only: bool = False
+):
     """Generates a spectral bias/std plot for all given models"""
-    db_ffps = [
-        cur_model_dir / "val_predictions.hdf5" for cur_model_dir in model_dirs
-    ]
+    db_ffps = [cur_model_dir / "val_predictions.hdf5" for cur_model_dir in model_dirs]
     if not val_only:
-        db_ffps += [cur_model_dir / "train_predictions.hdf5" for cur_model_dir in model_dirs]
+        db_ffps += [
+            cur_model_dir / "train_predictions.hdf5" for cur_model_dir in model_dirs
+        ]
 
     ims = nn_gmm.GMM.load(model_dirs[0]).ims
 
@@ -80,9 +93,37 @@ def compare_residuals(output_ffp: Path, model_dirs: List[Path], val_only: bool =
     res_plot_gen.gen_spectral_bias_std_plot(db_ffps, ims, output_ffp)
 
 
+@app.command("spec-comp-basin-bias-std")
+def compare_spec_basin_bias_std(
+    output_ffp: Path,
+    model_dirs: List[Path],
+    basin_station_dir: Path,
+    use_train: bool = False,
+    use_val: bool = False,
+    basin_ids: List[str] = None,
+):
+    # Get the dbs
+    assert (use_val or use_train) and not (
+        use_val and use_train
+    ), "Either use_train or use_val has to be set (but not both!)"
+
+    res_plot_gen = nn_gmm.ResPlotGen()
+    res_plot_gen.gen_spectral_basin_bias_std_plot(
+        output_ffp,
+        model_dirs,
+        basin_station_dir,
+        use_train=use_train,
+        use_val=use_val,
+        basin_ids=basin_ids,
+    )
+
+
 @app.command("spec-comp-loss")
-def compare_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool = False):
-    loss_dfs = [pd.read_csv(cur_model_dir / "loss.csv", index_col=0) for cur_model_dir in model_dirs]
+def compare_spec_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool = False):
+    loss_dfs = [
+        pd.read_csv(cur_model_dir / "loss.csv", index_col=0)
+        for cur_model_dir in model_dirs
+    ]
     run_ids = np.asarray([cur_model_dir.stem for cur_model_dir in model_dirs])
     ims = nn_gmm.GMM.load(model_dirs[0]).ims
 
@@ -92,6 +133,15 @@ def compare_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool = Fals
     loss_dfs = [loss_dfs[sort_ix] for sort_ix in sort_ind]
 
     nn_gmm.gen_spectral_loss_plot(loss_dfs, run_ids, ims, output_ffp, val_only=val_only)
+
+
+@app.command("avg-bias-std-spatial")
+def avg_spatial_bias_std(plot_items_ffp: Path, model_dir: Path, ims: List[str] = None, stations_ffp: Path = None, n_procs: int = 4):
+    ims = nn_gmm.GMM.load(model_dir).ims if ims is None or len(ims) == 0 else ims
+
+    nn_gmm.gen_spatial_bias_std_plots(model_dir, ims, plot_items_ffp, stations_ffp=stations_ffp, n_procs=n_procs)
+
+
 
 if __name__ == "__main__":
     app()

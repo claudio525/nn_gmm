@@ -44,16 +44,15 @@ from .directivity import (
 from .eval import (
     MAGNITUDE_BINS,
     compute_metrics,
-    gen_rrup_bin_plot,
-    train_val_metrics,
+    comp_train_val_metrics,
     write_predictions,
     write_train_val_predictions,
-    train_val_basin_metrics,
-    compute_basin_metrics,
+    comp_train_val_basin_metrics,
+    comp_basin_metrics,
     wandb_log_metrics,
     tf_mse,
-    gen_rrup_trend_plot,
-    gen_residual_plots,
+    compute_spatial_metrics,
+    comp_train_val_spatial_metrics
 )
 from .plotting import *
 

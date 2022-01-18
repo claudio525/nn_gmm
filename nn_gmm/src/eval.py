@@ -1,11 +1,9 @@
 from pathlib import Path
-from typing import List, Union, Dict, Sequence
+from typing import Dict, Sequence, Tuple
 
-import wandb
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
 import ml_tools
 from . import data
@@ -13,16 +11,27 @@ from .model import GMM
 from .ResultDB import ResultDB
 from .console import console
 from . import utils
-from nn_gmm.src.plotting.BinPlotGen import BinPlotGen
-from nn_gmm.src.plotting.TrendPlotGen import TrendPlotGen
-from nn_gmm.src.plotting.ResPlotGen import ResPlotGen
 
 MAGNITUDE_BINS = np.arange(3, 10)
 
-DEFAULT_METRICS = ["bias", "sigma"]
+DEFAULT_METRICS = ("bias", "sigma")
 
 
-DEFAULT_CONST_FEATURES = dict(mag=7.0, dip=90, rake=0, vs30=450, ztor=0, vs500=1.5, z1p0=0.05, z2p5=0.25, theta=45, s=30, tect_type="ACTIVE_SHALLOW")
+DEFAULT_CONST_FEATURES = dict(
+    mag=7.0,
+    dip=90,
+    rake=0,
+    vs30=450,
+    ztor=0,
+    vs500=1.5,
+    z1p0=0.05,
+    z2p5=0.25,
+    theta=45,
+    s=30,
+    tect_type="ACTIVE_SHALLOW",
+    lat=-43.53145848236242,
+    lon=172.63054396033107,
+)
 
 
 def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
@@ -40,9 +49,7 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     gmm = GMM.load(model_dir)
 
     console.print("Running predictions")
-    sim_df, est_df, _ = gmm.predict_dirs(
-        [data_dir], features=list(gmm.features)
-    )
+    sim_df, est_df, _ = gmm.predict_dirs([data_dir], features=list(gmm.features))
     assert np.all(sim_df.index == est_df.index)
 
     for cur_col, cur_data in est_df.iteritems():
@@ -53,7 +60,9 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     sim_df["site"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(1)
 
     console.print("Computing event names")
-    sim_df["event"] = sim_df.index.str.split("_REL", n=1, expand=True).get_level_values(0)
+    sim_df["event"] = sim_df.index.str.split("_REL", n=1, expand=True).get_level_values(
+        0
+    )
 
     console.print("Writing database")
     ResultDB.write_data(sim_df, output_ffp)
@@ -111,6 +120,43 @@ def sigma_ln_ratio(y: np.ndarray, y_est: np.ndarray):
 def bias(y: np.ndarray, y_est: np.ndarray):
     """Computes the average bias, i.e. mean of residual"""
     return np.mean(y - y_est)
+
+
+def compute_spatial_metrics(
+    data_df: pd.DataFrame, ims: Sequence[str], metrics: Sequence[str] = DEFAULT_METRICS
+):
+    """Computes the specified metrics for each site"""
+    metric_results = {}
+
+    obs_keys, est_keys = ims, [f"{cur_im}_est" for cur_im in ims]
+    residuals_df = data_df.loc[:, obs_keys] - data_df.loc[:, est_keys].values
+    residuals_df["site"] = data_df["site"]
+
+    residuals_grouped = residuals_df.groupby("site")
+    if "bias" in metrics:
+        metric_results["bias"] = residuals_grouped.mean()
+    if "sigma" in metrics:
+        metric_results["sigma"] = residuals_grouped.std()
+
+    return metric_results
+
+
+def comp_basin_metrics(
+    data_df: pd.DataFrame, basin_dict: Dict[str, np.ndarray], ims: Sequence[str]
+):
+    """Computes basin metrics"""
+    metrics = {}
+    for cur_basin, cur_stations in basin_dict.items():
+        cur_basin_data = data_df.loc[
+            utils.pandas_isin(data_df.site.values, cur_stations)
+        ]
+        cur_basin_metrics = compute_metrics(
+            cur_basin_data, ims, n_samples=data_df.shape[0]
+        )
+
+        metrics[cur_basin] = cur_basin_metrics
+
+    return metrics
 
 
 def compute_metrics(
@@ -213,18 +259,17 @@ def compute_metrics(
                     counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
 
         metric_results["count"] = counts
-        metric_results[cur_im.replace(".", "p")] = cur_metrics
+        # metric_results[cur_im.replace(".", "p")] = cur_metrics
+        metric_results[cur_im] = cur_metrics
 
     return pd.DataFrame.from_dict(metric_results)
 
 
-def train_val_metrics(
+def comp_train_val_metrics(
     model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS
 ):
     """Computes training & validation metrics"""
-    input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
-
-    ims = list(input_config["im_config"].keys())
+    ims = GMM.load(model_dir).ims
     columns = [f"{im}_est" for im in ims] + ims + ["mag"]
 
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
@@ -246,52 +291,38 @@ def train_val_metrics(
     return train_metrics, val_metrics
 
 
-def gen_rrup_bin_plot(model_dir: Path, ims: Sequence[str]):
-    """Creates a Rrup based plot for the specified IM"""
-    output_dir = model_dir / "plots" / "bin_plots"
-    val_result_db_ffp = model_dir / f"val_predictions.hdf5"
-    train_result_db_ffp = model_dir / f"train_predictions.hdf5"
-
-    bin_plot_gen = BinPlotGen()
-    for im in ims:
-        bin_plot_gen.create_IM_bin_plot(
-            im, output_dir, train_result_db_ffp, feature="rrup", prefix="train"
-        )
-        bin_plot_gen.create_IM_bin_plot(
-            im, output_dir, val_result_db_ffp, feature="rrup", prefix="val"
-        )
-
-
-def gen_rrup_trend_plot(
-    model_dir: Path, ims: Sequence[str], const_features: Dict = DEFAULT_CONST_FEATURES
+def comp_train_val_spatial_metrics(
+    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS
 ):
-    fig_output_dir = model_dir / "plots" / "trend_plots"
+    """Computes the specified metrics for each site,
+    for both training and validation data"""
+    ims = GMM.load(model_dir).ims
 
-    gmm = GMM.load(model_dir)
-    tplot = TrendPlotGen(gmm, "rrup", np.linspace(20, 200, 1000))
-    for im in ims:
-        tplot.gen_trend_plot(const_features, im, fig_output_dir, model_dir=model_dir)
+    columns = [f"{im}_est" for im in ims] + list(ims) + ["site"]
+    train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
+    val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
+
+    train_spatial_metrics = compute_spatial_metrics(val_df, ims, metrics=metrics)
+    val_spatial_metrics = compute_spatial_metrics(train_df, ims, metrics=metrics)
+
+    if save:
+        train_out_dir = model_dir / "train_spatial_metrics"
+        val_out_dir = model_dir / "val_spatial_metrics"
+        train_out_dir.mkdir(exist_ok=False)
+        val_out_dir.mkdir(exist_ok=False)
+
+        for cur_metric in train_spatial_metrics.keys():
+            train_spatial_metrics[cur_metric].to_csv(
+                train_out_dir / f"{cur_metric}.csv"
+            )
+            val_spatial_metrics[cur_metric].to_csv(val_out_dir / f"{cur_metric}.csv")
+
+    return train_spatial_metrics, val_spatial_metrics
 
 
-def compute_basin_metrics(
-    data_df: pd.DataFrame, basin_dict: Dict[str, np.ndarray], ims: Sequence[str]
-):
-    """Computes basin metrics"""
-    metrics = {}
-    for cur_basin, cur_stations in basin_dict.items():
-        cur_basin_data = data_df.loc[
-            utils.pandas_isin(data_df.site.values, cur_stations)
-        ]
-        cur_basin_metrics = compute_metrics(
-            cur_basin_data, ims, n_samples=data_df.shape[0]
-        )
-
-        metrics[cur_basin] = cur_basin_metrics
-
-    return metrics
-
-
-def train_val_basin_metrics(model_dir: Path, basin_dir: Path, save: bool = False):
+def comp_train_val_basin_metrics(
+    model_dir: Path, basin_dir: Path, save: bool = False, print_metrics: bool = True
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
     """Computes basin metrics for the training & validation data"""
     # Get the model IMs
     ims = list(
@@ -313,20 +344,32 @@ def train_val_basin_metrics(model_dir: Path, basin_dir: Path, save: bool = False
 
     # Compute the basin metrics
     console.print("Compute metrics")
-    train_metrics = compute_basin_metrics(train_data_df, basin_dict, ims)
-    val_metrics = compute_basin_metrics(val_data_df, basin_dict, ims)
+    train_metrics = comp_basin_metrics(train_data_df, basin_dict, ims)
+    val_metrics = comp_basin_metrics(val_data_df, basin_dict, ims)
 
+    # Save & print
+    if save:
+        (model_dir / "train_basin_metrics").mkdir(parents=False, exist_ok=True)
+        (model_dir / "val_basin_metrics").mkdir(parents=False, exist_ok=True)
     for cur_basin in basin_dict.keys():
-        console.rule(cur_basin)
-        console.print(
-            pd.merge(
-                train_metrics[cur_basin],
-                val_metrics[cur_basin],
-                left_index=True,
-                right_index=True,
-                suffixes=("_train", "_val"),
+        if print_metrics:
+            console.rule(cur_basin)
+            console.print(
+                pd.merge(
+                    train_metrics[cur_basin],
+                    val_metrics[cur_basin],
+                    left_index=True,
+                    right_index=True,
+                    suffixes=("_train", "_val"),
+                )
             )
-        )
+        if save:
+            train_metrics[cur_basin].to_csv(
+                model_dir / "train_basin_metrics" / f"{cur_basin}.csv"
+            )
+            val_metrics[cur_basin].to_csv(
+                model_dir / "val_basin_metrics" / f"{cur_basin}.csv"
+            )
 
     return train_metrics, val_metrics
 
@@ -340,10 +383,10 @@ def wandb_log_metrics(
 ):
     """Logs the given metrics to wandb"""
     for cur_im in ims:
-        cur_im_name = cur_im.replace('.', 'p')
+        # cur_im_name = cur_im.replace(".", "p")
 
         # Write general metrics
-        cur_metrics = general_metrics[cur_im_name]
+        cur_metrics = general_metrics[cur_im]
         cur_metrics.index = np.char.add(
             f"{prefix}_{cur_im}_", cur_metrics.index.values.astype(str)
         )
@@ -351,79 +394,47 @@ def wandb_log_metrics(
 
         # Write basin metrics
         for cur_basin in basin_metrics.keys():
-            cur_metrics = basin_metrics[cur_basin][cur_im_name]
+            cur_metrics = basin_metrics[cur_basin][cur_im]
             cur_metrics.index = np.char.add(
                 f"{prefix}_{cur_im}_{cur_basin}_", cur_metrics.index.values.astype(str)
             )
             wandb_run.summary.update(cur_metrics.to_dict())
 
 
-def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
-    """Generates residual plots for the specified model and IM"""
-    # Setup
-    fig_output_dir = model_dir / "plots" / "residual_plots"
-    fig_output_dir.mkdir(exist_ok=True, parents=True)
+def load_basin_metrics(
+    model_dir: Path, train_only: bool = False, val_only: bool = False
+):
+    """Loads already computed basin metrics
+    for both training and validation data"""
+    assert (train_only and not val_only) or (val_only and not train_only)
 
-    model = GMM.load(model_dir)
-    plt_gen = ResPlotGen()
+    train_basin_metrics = {
+        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        for cur_ffp in (model_dir / "train_basin_metrics").glob("*.csv")
+    }
+    val_basin_metrics = {
+        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        for cur_ffp in (model_dir / "val_basin_metrics").glob("*.csv")
+    }
 
-    ims = model.ims if ims is None else ims
+    if train_only:
+        return train_basin_metrics
+    elif val_only:
+        return val_basin_metrics
+    else:
+        return train_basin_metrics, val_basin_metrics
 
-    train_db_ffp = model_dir / "train_predictions.hdf5"
-    val_db_ffp = model_dir / "val_predictions.hdf5"
 
-    # plt_gen.gen_spectral_bias_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
-    plt_gen.gen_spectral_bias_std_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir / "spectral_bias_std.png")
+def load_spatial_metrics(model_dir: Path):
+    """Loads alread computed spatial metrics
+    for both training and validation data"""
+    train_spatial_metrics = {
+        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        for cur_ffp in (model_dir / "train_spatial_metrics").glob("*.csv")
+    }
+    val_spatial_metrics = {
+        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        for cur_ffp in (model_dir / "val_spatial_metrics").glob("*.csv")
+    }
 
-    # General residual distribution
-    for im in ims:
-        plt_gen.gen_res_plot(
-            train_db_ffp, im, fig_output_dir, prefix="train"
-        )
-        plt_gen.gen_res_plot(
-            val_db_ffp, im, fig_output_dir, prefix="val"
-        )
-
-        # Magnitude
-        plt_gen.gen_binned_res_plot(
-            train_db_ffp,
-            im,
-            "mag",
-            np.asarray([3, 4, 5, 6, 7, 8, 9]),
-            3,
-            2,
-            fig_output_dir,
-            prefix="train",
-        )
-        plt_gen.gen_binned_res_plot(
-            val_db_ffp,
-            im,
-            "mag",
-            np.asarray([3, 4, 5, 6, 7, 8, 9]),
-            3,
-            2,
-            fig_output_dir,
-            prefix="val",
-        )
-
-        # Rrup
-        plt_gen.gen_binned_res_plot(
-            train_db_ffp,
-            im,
-            "rrup",
-            np.linspace(0, 200, 11),
-            5,
-            2,
-            fig_output_dir,
-            prefix="train",
-        )
-        plt_gen.gen_binned_res_plot(
-            val_db_ffp,
-            im,
-            "rrup",
-            np.linspace(0, 200, 11),
-            5,
-            2,
-            fig_output_dir,
-            prefix="val",
-        )
+    return train_spatial_metrics, val_spatial_metrics

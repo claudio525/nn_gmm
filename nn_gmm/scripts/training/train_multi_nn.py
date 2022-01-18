@@ -52,6 +52,8 @@ io_config = {
         "ry": "standard",
         "active_shallow": None,
         "volcanic": None,
+        "lat": "standard",
+        "lon": "standard",
     },
     "im_config": {
         "PGA": "standard",
@@ -65,7 +67,12 @@ io_config = {
 }
 
 
-def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags: List[str] = None):
+def main(
+    use_wandb: bool = False,
+    eval: bool = True,
+    n_epochs: int = None,
+    tags: List[str] = None,
+):
     stats_df = pd.read_csv(io_config["stats_df"], index_col="feature")
     io_config["feature_config"] = nn_gmm.convert_pre_config(
         io_config["feature_config"], stats_df
@@ -73,18 +80,21 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
     io_config["im_config"] = nn_gmm.convert_pre_config(io_config["im_config"], stats_df)
 
     model_config = {
-        "hidden_layer_func": ml_tools.hidden_layers.selu_dropout,
-        "hidden_layer_config": {"dropout": None},
-        "units": [32, 32],
-        "output_units": [32],
+        # "hidden_layer_func": ml_tools.hidden_layers.selu,
+        "hidden_layer_func": ml_tools.hidden_layers.selu,
+        "hidden_layer_config": {"l2": 0.001},
+        # "hidden_layer_config": {"dropout": None},
+        "units": [16, 16, 16],
+        "output_units": [16, 16, 16,],
     }
 
     train_config = {
         "batch_size": 5120,
+        # "batch_size": 2048,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 20,
+        "n_epochs": 1000,
         "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
-        "loss": tf.losses.MeanSquaredError(),
+        "loss": "mse",
         "use_sample_weights": False,
         "cache": True,
     }
@@ -138,12 +148,16 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
         console.print(f"Took {time.time() - start_time}s to get predictions")
 
         # Print and compute general metrics
-        train_metrics, val_metrics = nn_gmm.train_val_metrics(output_dir, save=True)
+        train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(output_dir, save=True)
 
         # Print and compute basin metrics
-        train_basin_metrics, val_basin_metrics = nn_gmm.train_val_basin_metrics(
-            output_dir, Path(io_config["basin_dir"])
+        train_basin_metrics, val_basin_metrics = nn_gmm.comp_train_val_basin_metrics(
+            output_dir, Path(io_config["basin_dir"], save=True)
         )
+
+        # Compute spatial metrics
+        nn_gmm.comp_train_val_spatial_metrics(output_dir, save=True)
+
 
         # Write metrics to wandb
         if use_wandb:
@@ -158,11 +172,10 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None, tags:
         # nn_gmm.gen_rrup_bin_plot(output_dir, ims)
 
         console.print("Generating residual plots")
-        nn_gmm.gen_residual_plots(output_dir, ims)
+        nn_gmm.plotting.eval_plots.gen_residual_plots(output_dir, ims)
 
         console.print("Generating Rrup trend plot")
-        nn_gmm.gen_rrup_trend_plot(output_dir, ims)
-
+        nn_gmm.plotting.eval_plots.gen_rrup_trend_plots(output_dir, ims)
 
 
 if __name__ == "__main__":

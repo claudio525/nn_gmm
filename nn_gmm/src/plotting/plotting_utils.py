@@ -10,7 +10,6 @@ import seaborn as sns
 from nn_gmm.src.model import NeuralNetworkGMM
 from nn_gmm.src import utils
 from nn_gmm.src import data
-from nn_gmm.src.plotting import plotting_utils as plt_utils
 
 FEATUER_NAME_LOOKUP = {
     "rrup": r"$R_{rup}$",
@@ -53,11 +52,27 @@ DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
     },
 }
 
+DEFAULT_GMT_CB_OPTIONS = {
+    "sigma": {
+    "xyz-cpt-min": "0",
+    "xyz-cpt-max": "0.6",
+    },
+    "bias": {
+        "xyz-cpt-inc": "0.025",
+        "xyz-cpt-tick": "0.05",
+        "xyz-cpt-min": "-0.2",
+        "xyz-cpt-max": "0.2",
+    }
+}
+
+
 PLOT_TYPE_OPTIONS_MAPPING = {
-    "sim": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
-    "est_mean": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
-    "est_std": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
-    "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    # "sim": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    # "est_mean": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
+    # "est_std": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    # "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    "bias": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
+    "sigma": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
 }
 
 DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
@@ -79,46 +94,6 @@ def get_im_name(id: str):
     if name is None:
         return id
     return name
-
-
-class ModelEventBasePlotGen:
-    """Base class for generating plots that use NN-GMM model
-    predictions for an event from the training or validation dataset"""
-
-    def __init__(
-        self,
-        plot_items_ffp: str,
-        model: NeuralNetworkGMM,
-        data_dirs: List[Path],
-        output_dir: Path,
-    ):
-        self.plot_items_ffp = plot_items_ffp
-
-        self.model = model
-
-        self.data_dirs = data_dirs
-        self.output_dir = output_dir
-
-        self._estimates = {}
-
-    def _get_event_estimates(
-        self, event: str,
-    ):
-        """Get estimates for the specified event"""
-        if event in self._estimates.keys():
-            return self._estimates[event]
-        else:
-            # Find the .tfrecord file
-            record_ffp, feature_details = utils.find_record_ffp(self.data_dirs, event)
-
-            # Load the data
-            df = data.load_tfrecord(str(record_ffp), feature_details)
-
-            # Get the estimates
-            mean_est, std_est = self.model.predict(df.loc[:, self.model.features])
-
-            self._estimates[event] = (df, mean_est, std_est)
-            return df, mean_est, std_est
 
 
 def multi_fig(
@@ -189,27 +164,13 @@ def gmt_save(df: pd.DataFrame, key: str, output_ffp: str, gmt_options: Dict = No
         Name of the output csv file
     """
     df.loc[:, ["lon", "lat", key]].rename(columns={key: "value"}).to_csv(
-        f"{output_ffp}.csv"
+        f"{output_ffp}.csv", index=False
     )
 
-    gmt_options = get_gmt_options_dict() if gmt_options is None else gmt_options
     with open(f"{output_ffp}.yaml", "w") as f:
         yaml.safe_dump(gmt_options, f)
 
     return f"{output_ffp}.csv"
-
-
-def get_gmt_options_dict(flags: List[str] = None, options: Dict[str, Any] = None):
-    """Generates the GMT plot options dict"""
-    cur_dict = TEMPLATE_OPTIONS_DICT.copy()
-
-    if flags is not None:
-        cur_dict["flags"] = flags
-
-    if options is not None:
-        cur_dict["options"] = options
-
-    return cur_dict
 
 
 def compute_GMT_std_ticks(
