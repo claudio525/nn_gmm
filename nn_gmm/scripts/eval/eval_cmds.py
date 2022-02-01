@@ -1,5 +1,5 @@
 import time
-from typing import Sequence, List
+from typing import Sequence, List, Optional
 from pathlib import Path
 
 import seaborn as sns
@@ -50,7 +50,7 @@ def train_val_basin_metrics(
     )
 
 @app.command("spatial-metrics")
-def train_val_metrics(model_dir: Path, save: bool = False):
+def train_val_spatial_metrics(model_dir: Path, save: bool = False):
     """Computes training & validation metrics"""
     nn_gmm.comp_train_val_spatial_metrics(model_dir, save=save)
 
@@ -97,7 +97,6 @@ def compare_spec_bias_std(
 def compare_spec_basin_bias_std(
     output_ffp: Path,
     model_dirs: List[Path],
-    basin_station_dir: Path,
     use_train: bool = False,
     use_val: bool = False,
     basin_ids: List[str] = None,
@@ -111,7 +110,6 @@ def compare_spec_basin_bias_std(
     res_plot_gen.gen_spectral_basin_bias_std_plot(
         output_ffp,
         model_dirs,
-        basin_station_dir,
         use_train=use_train,
         use_val=use_val,
         basin_ids=basin_ids,
@@ -136,10 +134,11 @@ def compare_spec_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool =
 
 
 @app.command("avg-bias-std-spatial")
-def avg_spatial_bias_std(plot_items_ffp: Path, model_dir: Path, ims: List[str] = None, stations_ffp: Path = None, n_procs: int = 4):
-    ims = nn_gmm.GMM.load(model_dir).ims if ims is None or len(ims) == 0 else ims
+def avg_spatial_bias_std(model_dir: Path, ims: List[str] = None, metrics: List[str] = None, n_procs: int = 4):
+    ims = nn_gmm.GMM.load(model_dir).ims if not ims else ims
+    metrics = None if not metrics else metrics
 
-    nn_gmm.gen_spatial_bias_std_plots(model_dir, ims, plot_items_ffp, stations_ffp=stations_ffp, n_procs=n_procs)
+    nn_gmm.gen_spatial_metric_plots(model_dir, ims, n_procs=n_procs, metrics=metrics)
 
 
 

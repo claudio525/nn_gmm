@@ -15,6 +15,8 @@ from . import utils
 MAGNITUDE_BINS = np.arange(3, 10)
 
 DEFAULT_METRICS = ("bias", "sigma")
+DEFAULT_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual")
+ALL_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual", "count")
 
 
 DEFAULT_CONST_FEATURES = dict(
@@ -49,7 +51,9 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     gmm = GMM.load(model_dir)
 
     console.print("Running predictions")
-    sim_df, est_df, _ = gmm.predict_dirs([data_dir], features=list(gmm.features))
+    sim_df, est_df, _ = gmm.predict_dirs(
+        [data_dir], features=list(gmm.features), metadata=["lat", "lon"]
+    )
     assert np.all(sim_df.index == est_df.index)
 
     for cur_col, cur_data in est_df.iteritems():
@@ -123,20 +127,33 @@ def bias(y: np.ndarray, y_est: np.ndarray):
 
 
 def compute_spatial_metrics(
-    data_df: pd.DataFrame, ims: Sequence[str], metrics: Sequence[str] = DEFAULT_METRICS
+    data_df: pd.DataFrame, ims: Sequence[str], metrics: Sequence[str] = ALL_SPATIAL_METRICS
 ):
     """Computes the specified metrics for each site"""
     metric_results = {}
 
     obs_keys, est_keys = ims, [f"{cur_im}_est" for cur_im in ims]
     residuals_df = data_df.loc[:, obs_keys] - data_df.loc[:, est_keys].values
-    residuals_df["site"] = data_df["site"]
+    residuals_df["lon"] = data_df["lon"]
+    residuals_df["lat"] = data_df["lat"]
 
-    residuals_grouped = residuals_df.groupby("site")
+    residuals_grouped = residuals_df.groupby(["lon", "lat"])
     if "bias" in metrics:
         metric_results["bias"] = residuals_grouped.mean()
+    if "mean_abs_residual" in metrics:
+        metric_results["mean_abs_residual"] = (
+            pd.concat(
+                (residuals_df.loc[:, ims].abs(), residuals_df.loc[:, ["lat", "lon"]]),
+                axis=1,
+            )
+            .groupby(["lon", "lat"])
+            .mean()
+        )
     if "sigma" in metrics:
         metric_results["sigma"] = residuals_grouped.std()
+    # Number of data points at each location
+    if "count" in metrics:
+        metric_results["count"] = residuals_grouped.count()
 
     return metric_results
 
@@ -292,18 +309,18 @@ def comp_train_val_metrics(
 
 
 def comp_train_val_spatial_metrics(
-    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS
+    model_dir: Path, save: bool = False, metrics: Sequence[str] = ALL_SPATIAL_METRICS
 ):
     """Computes the specified metrics for each site,
     for both training and validation data"""
     ims = GMM.load(model_dir).ims
 
-    columns = [f"{im}_est" for im in ims] + list(ims) + ["site"]
+    columns = [f"{im}_est" for im in ims] + list(ims) + ["site", "lat", "lon"]
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
     val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 
-    train_spatial_metrics = compute_spatial_metrics(val_df, ims, metrics=metrics)
-    val_spatial_metrics = compute_spatial_metrics(train_df, ims, metrics=metrics)
+    train_spatial_metrics = compute_spatial_metrics(train_df, ims, metrics=metrics)
+    val_spatial_metrics = compute_spatial_metrics(val_df, ims, metrics=metrics)
 
     if save:
         train_out_dir = model_dir / "train_spatial_metrics"
@@ -349,8 +366,8 @@ def comp_train_val_basin_metrics(
 
     # Save & print
     if save:
-        (model_dir / "train_basin_metrics").mkdir(parents=False, exist_ok=True)
-        (model_dir / "val_basin_metrics").mkdir(parents=False, exist_ok=True)
+        (model_dir / "train_basin_metrics").mkdir()
+        (model_dir / "val_basin_metrics").mkdir()
     for cur_basin in basin_dict.keys():
         if print_metrics:
             console.rule(cur_basin)
@@ -429,12 +446,24 @@ def load_spatial_metrics(model_dir: Path):
     """Loads alread computed spatial metrics
     for both training and validation data"""
     train_spatial_metrics = {
-        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        cur_ffp.stem: pd.read_csv(cur_ffp)
         for cur_ffp in (model_dir / "train_spatial_metrics").glob("*.csv")
     }
     val_spatial_metrics = {
-        cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0)
+        cur_ffp.stem: pd.read_csv(cur_ffp)
         for cur_ffp in (model_dir / "val_spatial_metrics").glob("*.csv")
     }
+
+    # Drop NaN-values for Sigma
+    if "sigma" in train_spatial_metrics.keys():
+        console.print("Dropping NaN-values for spatial sigma")
+        train_spatial_metrics["sigma"].dropna(inplace=True)
+        val_spatial_metrics["sigma"].dropna(inplace=True)
+
+        console.print(
+            f"\tGiving: \n"
+            f"\t\tTraining - {train_spatial_metrics['sigma'].shape[0]} stations\n"
+            f"\t\tValidation - {val_spatial_metrics['sigma'].shape[0]} stations"
+        )
 
     return train_spatial_metrics, val_spatial_metrics

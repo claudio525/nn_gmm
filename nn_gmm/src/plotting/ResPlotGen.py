@@ -74,7 +74,6 @@ class ResPlotGen:
         self,
         output_ffp: Path,
         model_dirs: Sequence[Path],
-        basin_station_dir: Path,
         use_train: bool = False,
         use_val: bool = True,
         basin_ids: Sequence[str] = None,
@@ -82,7 +81,7 @@ class ResPlotGen:
         """Creates a spectral bias & (residual) standard deviation plot
         for each of the specified models and basins (defaults to all)
         """
-        linestyles = ["-", "--"]
+        linestyles = ["-", "--", "dashdot"]
 
         assert (use_val or use_train) and not (
             use_val and use_train
@@ -95,17 +94,6 @@ class ResPlotGen:
             )
             for cur_model_dir in model_dirs
         }
-
-        # console.print("Computing Basin metrics")
-        # with mp.Pool(len(model_dirs)) as pool:
-        #     results = pool.starmap(
-        #         eval.comp_train_val_basin_metrics,
-        #         [(cur_dir, basin_station_dir, False, False) for cur_dir in model_dirs],
-        #     )
-        # basin_metric_data = {
-        #     cur_model_dir.stem: cur_result[0] if use_train else cur_result[1]
-        #     for cur_result, cur_model_dir in zip(results, model_dirs)
-        # }
 
         ims = GMM.load(model_dirs[0]).ims
         assert all([cur_im.startswith("pSA") or cur_im == "PGA" for cur_im in ims])
@@ -174,7 +162,7 @@ class ResPlotGen:
 
         bias_ax.set_ylim(-bias_max - 0.025, bias_max + 0.025)
         bias_ax.legend()
-        bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
+        bias_ax.set_ylabel(r"$\mathbb{E}_{i \in Rup}[\Delta_i]$")
         bias_ax.set_xlabel("Period, T")
         bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
         bias_ax.semilogx()
@@ -230,7 +218,7 @@ class ResPlotGen:
                 res_stats_df.bias.values,
                 marker=".",
                 linewidth=0.75,
-                label=f"{cur_run_id}" if cur_suffix == "val" else None,
+                label=f"{cur_run_id} - Validation" if cur_suffix == "val" else None,
                 linestyle="--" if cur_suffix == "val" else None,
                 color=run_colours[cur_run_id],
             )
@@ -249,7 +237,7 @@ class ResPlotGen:
 
         bias_max_value = np.max(bias_max_values) + 0.025
         bias_ax.set_ylim(-bias_max_value, +bias_max_value)
-        bias_ax.set_ylabel(r"$\mu_{\mathbf{\Delta}}$")
+        bias_ax.set_ylabel(r"$\mathbb{E}_{i \in Rup}[\Delta_i]$")
         bias_ax.set_xlabel("Period, T")
         bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
         bias_ax.semilogx()

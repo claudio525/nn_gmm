@@ -43,6 +43,7 @@ from .directivity import (
 )
 from .eval import (
     MAGNITUDE_BINS,
+    DEFAULT_METRICS,
     compute_metrics,
     comp_train_val_metrics,
     write_predictions,

@@ -52,6 +52,7 @@ class GMM:
         batch_size: int = 1_000_000,
         ims: List[str] = None,
         features: List[str] = None,
+        metadata: List[str] = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
         """
         Performs prediction using the tfrecord files in
@@ -90,10 +91,10 @@ class GMM:
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):
-        if (model_dir / "xgb.model").exists():
-            return XGBoostGMM.load(model_dir)
-        else:
-            return NeuralNetworkGMM.load(model_dir)
+        # if (model_dir / "xgb.model").exists():
+            # return XGBoostGMM.load(model_dir)
+        # else:
+        return NeuralNetworkGMM.load(model_dir)
 
     def _pre_process(self, X: pd.DataFrame):
         # Deal with the categorial features
@@ -158,6 +159,7 @@ class XGBoostGMM(GMM):
         batch_size: int = 1_000_000,
         ims: List[str] = None,
         features: List[str] = None,
+        metadata: List[str] = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, None]:
         """See GMM base class for the full docstring"""
         if ims is not None:
@@ -189,7 +191,7 @@ class XGBoostGMM(GMM):
             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
             cur_est_df, _ = self.predict(cur_df, pre_process=True)
 
-            sim_dfs.append(cur_df[ims + features])
+            sim_dfs.append(cur_df[np.unique(ims + features + metadata)])
             est_dfs.append(cur_est_df)
             del cur_df
 
@@ -268,9 +270,11 @@ class NeuralNetworkGMM(GMM):
         batch_size: int = 1_000_000,
         ims: List[str] = None,
         features: List[str] = None,
+        metadata: List[str] = None,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
         """See GMM base class for the full docstring"""
         features = [] if features is None else features
+        metadata = [] if metadata is None else metadata
 
         # Get feature details, have to be same across all directories anyways
         with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
@@ -280,9 +284,10 @@ class NeuralNetworkGMM(GMM):
             data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
         ).prefetch(tf.data.AUTOTUNE)
 
+
         ims = ims if ims is not None else list(self.outputs)
         sim_dfs, mean_dfs, std_dfs = [], [], []
-        data_columns = list(self.features) + ["id"] + list(ims)
+        data_columns = np.concatenate((self.features, ims, ["id"], metadata))
         for ix, cur_data in enumerate(ds.as_numpy_iterator()):
             console.print(f"Processing batch - {ix + 1}")
             cur_df = pd.DataFrame.from_dict(
@@ -299,7 +304,7 @@ class NeuralNetworkGMM(GMM):
             cur_mean_df = cur_mean_df[ims]
             cur_std_df = cur_std_df[ims] if cur_std_df is not None else None
 
-            sim_dfs.append(cur_df[ims + features])
+            sim_dfs.append(cur_df[np.unique(ims + features + metadata)])
 
             mean_dfs.append(cur_mean_df)
             del cur_df
@@ -410,7 +415,7 @@ def create_reg_multi_output_model(
     keras.Model
     """
     hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config["hidden_layer_config"]
+    hidden_layer_config = model_config.get("hidden_layer_config", dict())
     units = model_config["units"]
     output_units = model_config.get("output_units")
 

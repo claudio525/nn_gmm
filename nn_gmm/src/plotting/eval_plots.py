@@ -1,6 +1,8 @@
+import multiprocessing as mp
 import copy
 from pathlib import Path
 from typing import Sequence, Dict
+from importlib import reload
 
 import numpy as np
 import pandas as pd
@@ -9,11 +11,10 @@ from nn_gmm.src.model import GMM
 from nn_gmm.src.plotting.ResPlotGen import ResPlotGen
 from nn_gmm.src.plotting.TrendPlotGen import TrendPlotGen
 from nn_gmm.src.plotting.BinPlotGen import BinPlotGen
-from nn_gmm.src.eval import DEFAULT_CONST_FEATURES
+from nn_gmm.src.eval import DEFAULT_CONST_FEATURES, DEFAULT_METRICS
 from nn_gmm.src.plotting import plotting_utils
 from nn_gmm.src.console import console
-
-from visualization.plot_items_wrapper import plot_multiple
+from nn_gmm.src.plotting import spatial_plotting
 
 
 def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
@@ -113,79 +114,224 @@ def gen_rrup_bin_plots(model_dir: Path, ims: Sequence[str]):
         )
 
 
-def gen_spatial_bias_std_plots(
+def gen_spatial_metric_plots(
     model_dir: Path,
     ims: Sequence[str],
-    plot_items_ffp: Path,
-    stations_ffp: Path = None,
+    metrics: Sequence[str] = None,
     n_procs: int = 4,
 ):
+    metrics = DEFAULT_METRICS if metrics is None else metrics
+
+    # Output directory
     out_dir = model_dir / "plots" / "spatial_agg"
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    if stations_ffp is None:
-        raise NotImplementedError()
-    else:
-        station_df = pd.read_csv(
-            stations_ffp,
-            index_col=2,
-            delimiter="\s+",
-            header=None,
-            names=["lon", "lat"],
-        )
 
     # Load the spatial metrics data
     train_spatial_metrics, val_spatial_metrics = eval.load_spatial_metrics(model_dir)
 
-    for cur_metric in train_spatial_metrics.keys():
-        console.print(f"Preparing data for metric {cur_metric}")
-
-        gmt_plot_options = plotting_utils.PLOT_TYPE_OPTIONS_MAPPING[cur_metric]
-
-        csv_ffps = []
+    async_results = []
+    with mp.Pool(n_procs) as pool:
         for cur_im in ims:
-            cur_gmt_plot_options = {"flags": [],
-                "options": {
-                **plotting_utils.DEFAULT_GMT_CB_OPTIONS[cur_metric],
-                **{"title": f"{cur_metric}-{cur_im}",
-                   "xyz-cpt-labels": f"{cur_im}",
-                   "dpi": 600}},
-            }
+            console.print(f"Processing IM {cur_im}")
+            data_columns = ["lon", "lat", cur_im]
 
-            # Train
-            cur_train_ffp = out_dir / f"train_{cur_metric}_{cur_im.replace('.', 'p')}"
-            cur_train_df = pd.merge(
-                train_spatial_metrics[cur_metric][cur_im],
-                station_df,
-                left_index=True,
-                right_index=True,
-                how="inner",
-            )
-            cur_train_df.dropna(inplace=True)
-            csv_ffps.append(
-                plotting_utils.gmt_save(cur_train_df, cur_im, str(cur_train_ffp), cur_gmt_plot_options)
-            )
-            console.print(
-                f"Train: {cur_metric} - {cur_im}, N = {cur_train_df.shape[0]}"
-            )
+            if "bias" in metrics:
+                async_results.append(
+                    pool.starmap_async(
+                        _gen_spatial_bias_plot,
+                        [
+                            (
+                                cur_data["bias"].loc[:, data_columns],
+                                cur_im,
+                                out_dir,
+                                cur_prefix,
+                            )
+                            for cur_data, cur_prefix in [
+                                (train_spatial_metrics, "train"),
+                                (val_spatial_metrics, "val"),
+                            ]
+                        ],
+                    )
+                )
 
-            # Val
-            cur_val_ffp = out_dir / f"val_{cur_metric}_{cur_im.replace('.', 'p')}"
-            cur_val_df = pd.merge(
-                val_spatial_metrics[cur_metric][cur_im],
-                station_df,
-                left_index=True,
-                right_index=True,
-                how="inner",
-            )
-            cur_val_df.dropna(inplace=True)
-            csv_ffps.append(
-                plotting_utils.gmt_save(cur_val_df, cur_im, str(cur_val_ffp))
-            )
-            console.print(f"Val: {cur_metric} - {cur_im}, N = {cur_val_df.shape[0]}")
+            if "sigma" in metrics:
+                async_results.append(
+                    pool.starmap_async(
+                        _gen_spatial_sigma_plot,
+                        [
+                            (
+                                cur_data["sigma"].loc[:, data_columns],
+                                cur_im,
+                                out_dir,
+                                cur_prefix,
+                            )
+                            for cur_data, cur_prefix in [
+                                (train_spatial_metrics, "train"),
+                                (val_spatial_metrics, "val"),
+                            ]
+                        ],
+                    )
+                )
 
-        console.print("Plotting")
-        plot_multiple(
-            str(plot_items_ffp), gmt_plot_options, in_ffps=csv_ffps, n_procs=n_procs, timeout=180
-        )
-    print("wtf")
+            if "mean_abs_residual" in metrics:
+                async_results.append(
+                    pool.starmap_async(
+                        _gen_mean_abs_residual_plot,
+                        [
+                            (
+                                cur_data["mean_abs_residual"].loc[:, data_columns],
+                                cur_im,
+                                out_dir,
+                                cur_prefix,
+                            )
+                            for cur_data, cur_prefix in [
+                                (train_spatial_metrics, "train"),
+                                (val_spatial_metrics, "val"),
+                            ]
+                        ],
+                    )
+                )
+
+            if "count" in metrics:
+                async_results.append(
+                    pool.starmap_async(
+                        _gen_count_plot,
+                        [
+                            (
+                                cur_data["count"].loc[:, data_columns],
+                                cur_im,
+                                out_dir,
+                                cur_prefix,
+                            )
+                            for cur_data, cur_prefix in [
+                                (train_spatial_metrics, "train"),
+                                (val_spatial_metrics, "val"),
+                            ]
+                        ],
+                    )
+                )
+
+        # Wait for all processes to finish
+        for cur_result in async_results:
+            cur_result.wait()
+
+
+def _gen_spatial_bias_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
+):
+    # Have to do this so it works with MP
+    # https://github.com/GenericMappingTools/pygmt/issues/217
+    import pygmt
+    reload(pygmt)
+
+    console.print(f"Generating {prefix} bias plot for {cur_im}")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    fig = spatial_plotting.gen_region_fig(
+        plotting_utils.get_im_name(cur_im)
+        + r" - Bias,  <math>\mathbb{E}_{i \in Rup}[\Delta_i]</math>"
+    )
+    spatial_plotting.plot_grid(
+        fig, cur_grid, "polar", (-0.4, 0.4, 0.8 / 16), ("darkred", "darkblue"),
+        reverse_cmap=True
+    )
+
+    console.print("Saving")
+    fig.savefig(
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_bias.png",
+        dpi=900,
+        anti_alias=True,
+    )
+
+
+def _gen_spatial_sigma_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
+):
+    # Have to do this so it works with MP
+    # https://github.com/GenericMappingTools/pygmt/issues/217
+    import pygmt
+
+    reload(pygmt)
+
+    console.print(f"Generating {prefix} sigma plot for {cur_im}")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    fig = spatial_plotting.gen_region_fig(
+        plotting_utils.get_im_name(cur_im) + r" - Standard deviation of Residual, <math>\sigma_{\Delta}</math>"
+    )
+    spatial_plotting.plot_grid(
+        fig,
+        cur_grid,
+        "hot",
+        (0.0, 0.7, 0.7 / 10),
+        ("white", "black"),
+        reverse_cmap=True,
+    )
+
+    fig.savefig(
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_sigma.png",
+        dpi=900,
+        anti_alias=True,
+    )
+
+
+def _gen_mean_abs_residual_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
+):
+    # Have to do this so it works with MP
+    # https://github.com/GenericMappingTools/pygmt/issues/217
+    import pygmt
+
+    reload(pygmt)
+
+    console.print(f"Generating {prefix} mean absolute residual plot for {cur_im}")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    fig = spatial_plotting.gen_region_fig(
+        cur_im + " - Mean Absolute Residual, @[\mu_{|\Delta|}@["
+    )
+    spatial_plotting.plot_grid(
+        fig,
+        cur_grid,
+        "hot",
+        (0.0, 0.5, 0.5 / 10),
+        ("white", "black"),
+        reverse_cmap=True,
+    )
+
+    fig.savefig(
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_mean_abs_residual.png",
+        dpi=900,
+        anti_alias=True,
+    )
+
+
+def _gen_count_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
+):
+    # Have to do this so it works with MP
+    # https://github.com/GenericMappingTools/pygmt/issues/217
+    import pygmt
+
+    reload(pygmt)
+
+    console.print(f"Generating {prefix} mean absolute residual plot for {cur_im}")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    fig = spatial_plotting.gen_region_fig("Number of datapoints")
+    spatial_plotting.plot_grid(
+        fig,
+        cur_grid,
+        "hot",
+        (0, 2000, 2000 / 16),
+        ("white", "black"),
+        "Count",
+        reverse_cmap=True,
+        log_cmap=False,
+    )
+
+    fig.savefig(
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_count.png",
+        dpi=900,
+        anti_alias=True,
+    )

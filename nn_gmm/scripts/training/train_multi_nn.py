@@ -40,20 +40,20 @@ io_config = {
         "dip": "min_max",
         "rake": "min_max",
         "mag": "standard",
-        "s": "standard",
-        "theta": "min_max",
+        # "s": "standard",
+        # "theta": "min_max",
         "vs30": "standard",
-        "z1p0": "standard",
-        "z2p5": "standard",
-        "vs500": "standard",
+        # "z1p0": "standard",
+        # "z2p5": "standard",
+        # "vs500": "standard",
         "rrup": "standard",
-        "rx": "standard",
-        "rjb": "standard",
-        "ry": "standard",
-        "active_shallow": None,
-        "volcanic": None,
-        "lat": "standard",
-        "lon": "standard",
+        # "rx": "standard",
+        # "rjb": "standard",
+        # "ry": "standard",
+        # "active_shallow": None,
+        # "volcanic": None,
+        # "lat": "standard",
+        # "lon": "standard",
     },
     "im_config": {
         "PGA": "standard",
@@ -82,18 +82,18 @@ def main(
     model_config = {
         # "hidden_layer_func": ml_tools.hidden_layers.selu,
         "hidden_layer_func": ml_tools.hidden_layers.selu,
-        "hidden_layer_config": {"l2": 0.001},
+        # "hidden_layer_config": {"l2": 0.001},
         # "hidden_layer_config": {"dropout": None},
-        "units": [16, 16, 16],
-        "output_units": [16, 16, 16,],
+        "units": [16, 16],
+        "output_units": [16],
     }
 
     train_config = {
         "batch_size": 5120,
         # "batch_size": 2048,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 1000,
-        "optimizer": tf.keras.optimizers.Adam(learning_rate=0.001),
+        "n_epochs": 20,
+        "optimizer": tf.keras.optimizers.Adam(),
         "loss": "mse",
         "use_sample_weights": False,
         "cache": True,
@@ -171,12 +171,14 @@ def main(
         # console.print("Generating binned Rrup plot")
         # nn_gmm.gen_rrup_bin_plot(output_dir, ims)
 
-        console.print("Generating residual plots")
-        nn_gmm.plotting.eval_plots.gen_residual_plots(output_dir, ims)
+        # console.print("Generating residual plots")
+        # nn_gmm.gen_residual_plots(output_dir, ims)
 
-        console.print("Generating Rrup trend plot")
-        nn_gmm.plotting.eval_plots.gen_rrup_trend_plots(output_dir, ims)
+        # console.print("Generating Rrup trend plot")
+        # nn_gmm.gen_rrup_trend_plots(output_dir, ims)
 
+        # console.print("Generating spatial metric plots")
+        # nn_gmm.gen_spatial_metric_plots(output_dir, ims, n_procs=14)
 
 if __name__ == "__main__":
     typer.run(main)
