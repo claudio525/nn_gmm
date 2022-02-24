@@ -15,8 +15,7 @@ from . import utils
 MAGNITUDE_BINS = np.arange(3, 10)
 
 DEFAULT_METRICS = ("bias", "sigma")
-DEFAULT_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual")
-ALL_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual", "count")
+ALL_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual", "count", "sum_squared_residual")
 
 
 DEFAULT_CONST_FEATURES = dict(
@@ -36,7 +35,7 @@ DEFAULT_CONST_FEATURES = dict(
 )
 
 
-def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
+def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path, batch_size: int = 1_000_000):
     """
     Runs predictions for the specified directory and model, and saves
     as a ResultDB
@@ -52,7 +51,7 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
 
     console.print("Running predictions")
     sim_df, est_df, _ = gmm.predict_dirs(
-        [data_dir], features=list(gmm.features), metadata=["lat", "lon"]
+        [data_dir], features=list(gmm.features), metadata=["lat", "lon"], batch_size=batch_size
     )
     assert np.all(sim_df.index == est_df.index)
 
@@ -72,7 +71,7 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path):
     ResultDB.write_data(sim_df, output_ffp)
 
 
-def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool = True):
+def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool = True, batch_size: int = 1_000_000):
     """Writes the estimated value (along with "true" values and features)
      for the specified training data directory
 
@@ -88,11 +87,11 @@ def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool =
 
     if verbose:
         console.print("Running training data predictions")
-    write_predictions(model_dir, train_data_dir, model_dir / "train_predictions.hdf5")
+    write_predictions(model_dir, train_data_dir, model_dir / "train_predictions.hdf5", batch_size=batch_size)
 
     if verbose:
         console.print("Running validation data predictions")
-    write_predictions(model_dir, val_data_dir, model_dir / "val_predictions.hdf5")
+    write_predictions(model_dir, val_data_dir, model_dir / "val_predictions.hdf5", batch_size=batch_size)
 
 
 def mse(y: np.ndarray, y_est: np.ndarray):
@@ -140,6 +139,12 @@ def compute_spatial_metrics(
     residuals_grouped = residuals_df.groupby(["lon", "lat"])
     if "bias" in metrics:
         metric_results["bias"] = residuals_grouped.mean()
+    if "sum_squared_residual" in metrics:
+        squared_residuals_df = residuals_df.copy()
+        squared_residuals_df[obs_keys] = squared_residuals_df[obs_keys] ** 2
+        squared_residuals_grouped = squared_residuals_df.groupby(["lon", "lat"])
+
+        metric_results["sum_squared_residual"] = squared_residuals_grouped.sum()
     if "mean_abs_residual" in metrics:
         metric_results["mean_abs_residual"] = (
             pd.concat(
@@ -325,8 +330,8 @@ def comp_train_val_spatial_metrics(
     if save:
         train_out_dir = model_dir / "train_spatial_metrics"
         val_out_dir = model_dir / "val_spatial_metrics"
-        train_out_dir.mkdir(exist_ok=False)
-        val_out_dir.mkdir(exist_ok=False)
+        train_out_dir.mkdir(exist_ok=True)
+        val_out_dir.mkdir(exist_ok=True)
 
         for cur_metric in train_spatial_metrics.keys():
             train_spatial_metrics[cur_metric].to_csv(

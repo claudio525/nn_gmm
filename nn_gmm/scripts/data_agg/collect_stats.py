@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 
+IGNORE_FIELDS = ["id", "site", "source"]
 
 def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp):
     data_files = glob.glob(str(data_dir / glob_filter))
@@ -31,11 +32,11 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
         # tf.print(tf.reduce_min(item["rake"]))
         cur_state["count"] += tf.size(items["id"])
         for key in items.keys():
-            if key != "id":
+            if key not in IGNORE_FIELDS:
                 cur_min = tf.reduce_min(items[key])
                 cur_max = tf.reduce_max(items[key])
-                cur_state["min"][key] = cur_state["min"][key] if cur_state["min"][key] < cur_min else cur_min
-                cur_state["max"][key] = cur_state["max"][key] if cur_state["max"][key] > cur_max else cur_max
+                cur_state["min"][key] = tf.minimum(cur_state["min"][key], cur_min)
+                cur_state["max"][key] = tf.maximum(cur_state["max"][key], cur_max)
                 cur_state["sum"][key] += tf.reduce_sum(items[key])
                 # cur_state["ln_sum"]["key"] += tf.reduce_sum(tf.math.log(items[key]))
 
@@ -45,7 +46,7 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
     std_initial_state = {}
     for item in parsed_dataset.take(1):
         for key in item.keys():
-            if key != "id":
+            if key not in IGNORE_FIELDS:
                 initial_state["min"][key] = 99999.0
                 initial_state["max"][key] = -99999.0
                 initial_state["sum"][key] = 0.0
@@ -66,7 +67,7 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
 
     def _get_sigma_sum(cur_state, items):
         for key in items.keys():
-            if key != "id":
+            if key not in IGNORE_FIELDS:
                 cur_state[key] += tf.reduce_sum(tf.math.pow(items[key] - stats_df.loc[key, "mean"],
                                               tf.constant(2, dtype=tf.float32)))
 

@@ -1,8 +1,10 @@
+import time
+
 import pickle
 import argparse
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Sequence
 
 import pandas as pd
 import numpy as np
@@ -55,6 +57,7 @@ IMs = np.asarray(
 
 BIN_RRUP_MIN, BIN_RRUP_MAX = 0, 395
 
+
 def _bytes_feature(value):
     """Returns a bytes_list from a string / byte."""
     if isinstance(value, type(tf.constant(0))):
@@ -77,42 +80,106 @@ def _int64_feature(value):
     return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
 
-def _serialize(ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weight: float):
-    assert ix_1 == ix_2
+def _serialize(
+    ix_1, input_row, ix_2, im_df_row, ix_3, site_source_row, sample_weight: float
+):
+    assert ix_1 == ix_2 and ix_1 == ix_3
 
     features = {
-        **{key: _float_feature(value) for key, value in cur_input_row.items()},
-        **{key: _float_feature(value) for key, value in cur_im_df_row.items()},
+        **{key: _float_feature(value) for key, value in input_row.items()},
+        **{key: _float_feature(value) for key, value in im_df_row.items()},
     }
     features["id"] = _bytes_feature(str.encode(ix_1))
     features["sample_weight"] = _float_feature(sample_weight)
+    features = {
+        **features,
+        **{
+            key: _bytes_feature(str.encode(value))
+            for key, value in site_source_row.items()
+        },
+    }
 
     example_proto = tf.train.Example(features=tf.train.Features(feature=features))
     return example_proto.SerializeToString()
 
 
-def serialize(input_df: pd.DataFrame, im_df: pd.DataFrame, sample_weights_df: pd.Series, n_procs: int = 8):
+def serialize(
+    input_df: pd.DataFrame,
+    im_df: pd.DataFrame,
+    site_source_ids: pd.DataFrame,
+    sample_weights: pd.Series,
+    n_procs: int = 8,
+):
     """Serializes training data (features & labels) into the tf.train.Example format"""
     ser_examples = []
 
     if input_df.shape[0] < 1000 or n_procs == 1:
-        for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(
-            input_df.iterrows(), im_df.iterrows()
-        ):
-            ser_examples.append(_serialize(ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weights_df.loc[ix_1]))
+        for (
+            (ix_1, cur_input_row),
+            (ix_2, cur_im_df_row),
+            (ix_3, cur_site_source_row),
+        ) in zip(input_df.iterrows(), im_df.iterrows(), site_source_ids.iterrows()):
+            ser_examples.append(
+                _serialize(
+                    ix_1,
+                    cur_input_row,
+                    ix_2,
+                    cur_im_df_row,
+                    ix_3,
+                    cur_site_source_row,
+                    sample_weights[ix_1],
+                )
+            )
     else:
         with mp.Pool(processes=n_procs) as pool:
             ser_examples = pool.starmap(
                 _serialize,
                 [
-                    (ix_1, cur_input_row, ix_2, cur_im_df_row, sample_weights_df.loc[ix_1])
-                    for (ix_1, cur_input_row), (ix_2, cur_im_df_row) in zip(
-                        input_df.iterrows(), im_df.iterrows()
+                    (
+                        ix_1,
+                        cur_input_row,
+                        ix_2,
+                        cur_im_df_row,
+                        ix_3,
+                        cur_site_source_row,
+                        sample_weights[ix_1],
+                    )
+                    for (ix_1, cur_input_row), (ix_2, cur_im_df_row), (
+                        ix_3,
+                        cur_site_source_row,
+                    ) in zip(
+                        input_df.iterrows(),
+                        im_df.iterrows(),
+                        site_source_ids.iterrows(),
                     )
                 ],
             )
 
     return ser_examples
+
+
+def _compute_site_sample_weights(
+    source: str, site_df: pd.DataFrame, imdb_ffps: Sequence[Path]
+):
+    site_counter = pd.Series(
+        index=site_df.index, name=source, data=np.zeros(site_df.shape[0], dtype=int)
+    )
+
+    # Get the IM data (most reliable way to get datapoints)
+    im_df = nn_gmm.load_fault_im_df(source, imdb_ffps)
+    if im_df is None:
+        return None
+
+    id_split = np.stack(
+        np.char.rsplit(im_df.index.values.astype(str), "_", maxsplit=1), axis=0
+    )
+
+    n_ruptures = np.unique(id_split[:, 0]).size
+    sites = id_split[:, -1]
+
+    site_counter.loc[sites[np.isin(sites, site_df.index)]] += n_ruptures
+
+    return site_counter
 
 
 def gen_tf_records(
@@ -124,16 +191,16 @@ def gen_tf_records(
     im_db_ffps: List[Path],
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
-    rrup_mag_weighting_data: Tuple[np.ndarray, np.ndarray, np.ndarray] = None,
     n_procs: int = 8,
+    site_sample_weights: pd.Series = None,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
     """
     print("Generating tfrecord files")
-    total_sample_weights = 0
+    n_sources = sources.size
     for ix, cur_source in enumerate(sources):
-        print(f"Processing {ix + 1}/{sources.size}")
+        print(f"Processing {ix + 1}/{n_sources}")
         cur_output_ffp = output_dir / f"{cur_source}.tfrecord"
         if cur_output_ffp.exists():
             print(f"Skipping source {cur_source} as output tfrecord already exists")
@@ -143,6 +210,7 @@ def gen_tf_records(
         if cur_im_df is None:
             print(f"No IM data found for source {cur_source}, skipping.")
             continue
+
         cur_im_df.sort_index(inplace=True)
 
         # Create sample combinations
@@ -181,42 +249,59 @@ def gen_tf_records(
             left_on=["source", "site"],
             right_on=["source", "site"],
         )
+
+        # Tidy up
         cur_input_df.set_index("id", inplace=True)
         cur_input_df.sort_index(inplace=True)
+
+        # Get source & site ids
+        cur_site_source_ids = cur_input_df.loc[:, ["source", "site"]]
+
+        # Drop non-feature columns
         cur_input_df = cur_input_df.drop(
-            columns=["realisation", "source", "source_rel_df", "site", "rtvz"]
+            columns=[
+                "realisation",
+                "source_rel_df",
+                "site",
+                "source",
+                "rtvz",
+                "fault_id",
+            ]
         )
-        # cur_input_df = cur_input_df.drop(columns=["source", "site"])
         cur_input_df = nn_gmm.apply_one_hot_enc(
             cur_input_df, "tect_type", tect_type_one_hot_dict
         )
 
+        # Update cur_im_df for missing/excluded sites
+        cur_im_df = cur_im_df.loc[cur_input_df.index.values]
+
+        # Interpolate for any extra periods
         cur_im_df = nn_gmm.interpolate_pSA_periods(cur_im_df, IMs)
 
-        # Get the sample weights
-        sample_weights_df = pd.Series(index=cur_input_df.index, data=np.ones(cur_input_df.shape[0], dtype=float))
-        if rrup_mag_weighting_data is not None:
-            bin_weights, mag_bins, rrup_bins = rrup_mag_weighting_data
+        # Compute the sample weights
+        sample_weights = pd.Series(
+            index=cur_site_source_ids.index,
+            data=np.ones(cur_site_source_ids.shape[0], dtype=float),
+        )
+        if site_sample_weights is not None:
+            sample_weights *= site_sample_weights.loc[
+                cur_site_source_ids.site.values
+            ].values
 
-            mag_diff = mag_bins - cur_input_df.mag.values[:, None]
-            mag_diff[mag_diff >= 0] = -np.inf
-            mag_bin_ind = mag_diff.argmax(axis=1)
-
-            rrup_diff = rrup_bins - cur_input_df.rrup.values[:, None]
-            rrup_diff[rrup_diff >= 0] = -np.inf
-            rrup_bin_ind = rrup_diff.argmax(axis=1)
-
-            sample_weights = bin_weights[rrup_bin_ind, mag_bin_ind]
-            total_sample_weights += sample_weights.sum()
-
-            sample_weights_df = pd.Series(index=cur_input_df.index, data=sample_weights)
-
+        # Serialize
         assert np.all(
             cur_input_df.index.values.astype(str) == cur_im_df.index.values.astype(str)
         )
-        examples = serialize(cur_input_df, cur_im_df[IMs], sample_weights_df, n_procs=n_procs)
+        examples = serialize(
+            cur_input_df,
+            cur_im_df[IMs],
+            cur_site_source_ids,
+            sample_weights,
+            n_procs=n_procs,
+        )
 
-        if ix == 0:
+        feature_details_ffp = output_dir / "feature_details.pickle"
+        if ix == 0 or not feature_details_ffp.exists():
             print(f"Writing feature details")
             feature_description = {
                 **{
@@ -227,77 +312,25 @@ def gen_tf_records(
                     col: tf.io.FixedLenFeature([], tf.float32)
                     for col in cur_im_df.columns.values.astype(str)
                 },
+                **{
+                    col: tf.io.FixedLenFeature([], tf.string)
+                    for col in cur_site_source_ids.columns.values.astype(str)
+                },
             }
             feature_description = {
                 **feature_description,
-                **{"id": tf.io.FixedLenFeature([], tf.string),
-                   "sample_weight": tf.io.FixedLenFeature([], tf.float32)},
+                **{
+                    "id": tf.io.FixedLenFeature([], tf.string),
+                    "sample_weight": tf.io.FixedLenFeature([], tf.float32),
+                },
             }
-            with open(str(output_dir / "feature_details.pickle"), "wb") as f:
+            with open(str(feature_details_ffp), "wb") as f:
                 pickle.dump(feature_description, f)
 
         with tf.io.TFRecordWriter(str(cur_output_ffp)) as writer:
             for example in examples:
                 writer.write(example)
 
-    if rrup_mag_weighting_data is not None:
-        if not np.isclose(total_sample_weights, 1.0):
-            print("Sample weights don't add up to 1.0")
-
-
-def gen_bin_weights(distance_df: pd.DataFrame, rel_df: pd.DataFrame, sources: np.ndarray, imdb_ffps: List[Path], n_rrup_bins: int = 10,
-                    n_mag_bins: int = 10):
-    """
-    Computes samples weights based on rrup and magnitude distribution of the samples using
-    a n_rrup_bins x n_mag_bins grid
-    """
-    mag_bins = np.linspace(rel_df.mag.min(), rel_df.mag.max(), n_mag_bins)
-    rrup_bins = np.linspace(BIN_RRUP_MIN, BIN_RRUP_MAX, n_rrup_bins)
-
-    bin_count = None
-    print("Generating bin weights")
-    for ix, cur_source in enumerate(sources):
-        print(f"Processing {ix + 1}/{sources.size}")
-        cur_im_df = nn_gmm.load_fault_im_df(cur_source, imdb_ffps) 
-
-        if cur_im_df is None:
-            print(f"WARNING: No IM data found for source {cur_source}, skipping.")
-            continue
-
-        cur_input_df = nn_gmm.create_sample_comb(cur_im_df)
-        cur_input_df["id"] = cur_input_df.index.values.astype(str)
-
-        # Merge with realisation source parameters
-        cur_input_df = pd.merge(
-            cur_input_df,
-            rel_df,
-            how="inner",
-            left_on="realisation",
-            right_index=True,
-            suffixes=(None, "_rel_df"),
-        )
-
-        # Merge with distance parameters
-        cur_input_df = pd.merge(
-            cur_input_df,
-            distance_df,
-            how="inner",
-            left_on=["source", "site"],
-            right_on=["source", "site"],
-        )
-        cur_input_df.set_index("id", inplace=True)
-
-        cur_bin_count, _, __ = np.histogram2d(cur_input_df.rrup.values, cur_input_df.mag.values, bins=(rrup_bins, mag_bins))
-
-        bin_count = cur_bin_count if bin_count is None else bin_count + cur_bin_count
-
-    bin_weights = np.zeros(bin_count.shape, dtype=float)
-    mask = bin_count != 0
-    bin_weights[mask] = 1 / np.count_nonzero(mask) / bin_count[mask]
-
-    assert np.isclose(np.sum(bin_weights * bin_count), 1.0)
-
-    return bin_weights, mag_bins, rrup_bins
 
 def main(
     site_params_dir: Path,
@@ -306,8 +339,10 @@ def main(
     source_params_dir: Path,
     im_db_dir: Path,
     output_dir: str,
+    base_grid_only: bool = False,
     val_events_ffp: Path = None,
     n_procs: int = 8,
+    use_site_sample_weights: bool = False,
 ):
     output_dir = Path(output_dir)
 
@@ -320,6 +355,17 @@ def main(
     site_df = site_df.drop_duplicates()
     assert n_unique_stations == site_df.shape[0]
     site_df.set_index("station", inplace=True)
+
+    # Only use base grid (and real) stations
+    if base_grid_only:
+        station_ids = site_df.index.values.astype(str)
+        mask = (
+            np.char.startswith(station_ids, "1")
+            | np.char.startswith(station_ids, "2")
+            | np.char.startswith(station_ids, "3")
+            | np.char.startswith(station_ids, "4")
+        )
+        site_df = site_df.loc[~mask]
 
     # Load site-source params
     print("Loading distance params")
@@ -352,7 +398,30 @@ def main(
             val_sources = np.asarray([line.strip() for line in f.readlines()])
         train_sources = all_sources[~np.isin(all_sources, val_sources)]
 
-        bin_weights, mag_bins, rrup_bins = gen_bin_weights(distance_df, rel_df, train_sources, im_db_ffps)
+        site_sample_weights = None
+        if use_site_sample_weights:
+            print("Computing site-sample weights for each site")
+            if n_procs == 1:
+                site_counters = []
+                for ix, cur_source in enumerate(train_sources):
+                    site_counters.append(
+                        _compute_site_sample_weights(cur_source, site_df, im_db_ffps)
+                    )
+            else:
+                with mp.Pool(n_procs) as p:
+                    site_counters = p.starmap(
+                        _compute_site_sample_weights,
+                        [
+                            (cur_source, site_df, im_db_ffps)
+                            for cur_source in train_sources
+                        ],
+                    )
+
+            site_sample_weights = 1 / pd.concat(site_counters, axis=1).sum(axis=1)
+            site_sample_weights = site_sample_weights.loc[
+                ~np.isinf(site_sample_weights)
+            ]
+            assert np.all((site_sample_weights <= 1.0) & (site_sample_weights > 0.0))
 
         # Training dataset
         gen_tf_records(
@@ -364,8 +433,8 @@ def main(
             im_db_ffps,
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
-            rrup_mag_weighting_data=(bin_weights, mag_bins, rrup_bins),
             n_procs=n_procs,
+            site_sample_weights=site_sample_weights,
         )
 
         # Validation dataset
@@ -381,7 +450,8 @@ def main(
             n_procs=n_procs,
         )
     else:
-        bin_weights, mag_bins, rrup_bins = gen_bin_weights(distance_df, rel_df, rel_df.index.values.astype(str), im_db_ffps)
+        if use_site_sample_weights:
+            raise NotImplementedError()
 
         gen_tf_records(
             rel_df.index.values.astype(str),
@@ -392,11 +462,8 @@ def main(
             im_db_ffps,
             output_dir,
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
-            rrup_mag_weighting_data=(bin_weights, mag_bins, rrup_bins),
             n_procs=n_procs,
         )
-
-
 
 
 if __name__ == "__main__":
@@ -417,12 +484,24 @@ if __name__ == "__main__":
     parser.add_argument("im_db_dir", type=str, help="The path to the IM labels dbs dir")
     parser.add_argument("output_dir", type=str, help="Path of the output directory")
     parser.add_argument(
+        "--base_grid_only",
+        action="store_true",
+        default=False,
+        help="If set, only the uniform base grid (and real) stations are used",
+    )
+    parser.add_argument(
         "--val_events_ffp",
         type=str,
         help="Path to a text file that is a list of validation events (one per line)",
     )
     parser.add_argument(
         "--n_procs", type=int, help="Number of processes to use", default=4
+    )
+    parser.add_argument(
+        "--site_sample_weights",
+        action="store_true",
+        help="If set then samples are weighted based on number of other datapoints at a given site",
+        default=True,
     )
     args = parser.parse_args()
 
@@ -433,6 +512,8 @@ if __name__ == "__main__":
         nn_gmm.to_path(args.source_params_dir),
         nn_gmm.to_path(args.im_db_dir),
         nn_gmm.to_path(args.output_dir),
+        base_grid_only=args.base_grid_only,
         n_procs=args.n_procs,
         val_events_ffp=nn_gmm.to_path(args.val_events_ffp),
+        use_site_sample_weights=args.site_sample_weights,
     )

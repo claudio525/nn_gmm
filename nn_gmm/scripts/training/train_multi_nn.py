@@ -29,10 +29,20 @@ if gpus:
 import nn_gmm
 from nn_gmm import console
 
-io_config = {
-    "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/train"],
-    "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/val"],
-    "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/train/stats.csv",
+data_dirs_lookup = {
+    "base": {
+        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/train"],
+        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/val"],
+        "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/train/stats.csv",
+    },
+    "base_fw": {
+        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train"],
+        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/val"],
+        "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train/stats.csv",
+    }
+}
+
+IO_CONFIG = {
     "base_output_dir": "/home/cbs51/dev/work/data/nn_gmm/results/test",
     "basin_dir": "/home/claudy/dev/work/data/nn_gmm/input_data/site_data/basin_stations",
     "output_dir": None,
@@ -40,39 +50,46 @@ io_config = {
         "dip": "min_max",
         "rake": "min_max",
         "mag": "standard",
-        # "s": "standard",
-        # "theta": "min_max",
+        "s": "standard",
+        "theta": "min_max",
         "vs30": "standard",
-        # "z1p0": "standard",
-        # "z2p5": "standard",
-        # "vs500": "standard",
+        "z1p0": "standard",
+        "z2p5": "standard",
+        "vs500": "standard",
         "rrup": "standard",
-        # "rx": "standard",
-        # "rjb": "standard",
-        # "ry": "standard",
-        # "active_shallow": None,
-        # "volcanic": None,
-        # "lat": "standard",
-        # "lon": "standard",
+        "rx": "standard",
+        "rjb": "standard",
+        "ry": "standard",
+        "active_shallow": None,
+        "volcanic": None,
+        "lat": "standard",
+        "lon": "standard",
     },
     "im_config": {
-        "PGA": "standard",
-        "pSA_0.1": "standard",
-        "pSA_0.5": "standard",
-        "pSA_1.0": "standard",
+        # "PGA": "standard",
+        # "pSA_0.1": "standard",
+        # "pSA_0.5": "standard",
+        # "pSA_1.0": "standard",
         "pSA_3.0": "standard",
-        "pSA_5.0": "standard",
-        "pSA_10.0": "standard",
+        # "pSA_5.0": "standard",
+        # "pSA_10.0": "standard",
     },
 }
 
 
 def main(
-    use_wandb: bool = False,
-    eval: bool = True,
-    n_epochs: int = None,
-    tags: List[str] = None,
+        data_key: str,
+        use_wandb: bool = False,
+        eval: bool = True,
+        n_epochs: int = None,
+        tags: List[str] = None,
+        use_sample_weights: bool = False
 ):
+    # Add the data entries
+    if data_key not in data_dirs_lookup.keys():
+        raise ValueError(f"Invalid data key {data_key}")
+    io_config = {**IO_CONFIG, **data_dirs_lookup[data_key]}
+
     stats_df = pd.read_csv(io_config["stats_df"], index_col="feature")
     io_config["feature_config"] = nn_gmm.convert_pre_config(
         io_config["feature_config"], stats_df
@@ -80,23 +97,31 @@ def main(
     io_config["im_config"] = nn_gmm.convert_pre_config(io_config["im_config"], stats_df)
 
     model_config = {
+        "hidden_layer_func": ml_tools.hidden_layers.relu,
         # "hidden_layer_func": ml_tools.hidden_layers.selu,
-        "hidden_layer_func": ml_tools.hidden_layers.selu,
         # "hidden_layer_config": {"l2": 0.001},
         # "hidden_layer_config": {"dropout": None},
-        "units": [16, 16],
-        "output_units": [16],
+        "units": [32, 32],
+        "output_units": [32, 32],
     }
+
+    # def lr_scheduler(epoch, lr):
+    #     if epoch > 0 and epoch % 250 == 0:
+    #         return lr / 10
+    #     return lr
 
     train_config = {
         "batch_size": 5120,
+        # "batch_size": 10240,
         # "batch_size": 2048,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 20,
+        "n_epochs": 100,
         "optimizer": tf.keras.optimizers.Adam(),
+        # "optimizer": tf.keras.optimizers.SGD(learning_rate=0.1),
         "loss": "mse",
-        "use_sample_weights": False,
+        "use_sample_weights": use_sample_weights,
         "cache": True,
+        # "callbacks": [tf.keras.callbacks.LearningRateScheduler(lr_scheduler, verbose=1)]
     }
 
     if n_epochs is not None:
@@ -132,7 +157,7 @@ def main(
         train_config,
         model_fn=nn_gmm.create_reg_multi_output_model,
         model_config=model_config,
-        multi_output=True,
+        multi_output=False,
         verbose=2,
     )
     output_dir = train_result.output_dir
@@ -143,7 +168,7 @@ def main(
 
         start_time = time.time()
         nn_gmm.write_train_val_predictions(
-            Path(io_config["train_data_dirs"][0]).parent, output_dir, verbose=False
+            Path(io_config["train_data_dirs"][0]).parent, output_dir, verbose=False, batch_size=1_000_000
         )
         console.print(f"Took {time.time() - start_time}s to get predictions")
 
@@ -157,7 +182,6 @@ def main(
 
         # Compute spatial metrics
         nn_gmm.comp_train_val_spatial_metrics(output_dir, save=True)
-
 
         # Write metrics to wandb
         if use_wandb:
@@ -179,6 +203,7 @@ def main(
 
         # console.print("Generating spatial metric plots")
         # nn_gmm.gen_spatial_metric_plots(output_dir, ims, n_procs=14)
+
 
 if __name__ == "__main__":
     typer.run(main)

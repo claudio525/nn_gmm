@@ -192,6 +192,25 @@ def gen_spatial_metric_plots(
                     )
                 )
 
+            if "sum_squared_residual" in metrics:
+                async_results.append(
+                    pool.starmap_async(
+                        _gen_sum_squared_residual_plot,
+                        [
+                            (
+                                cur_data["sum_squared_residual"].loc[:, data_columns],
+                                cur_im,
+                                out_dir,
+                                cur_prefix,
+                            )
+                            for cur_data, cur_prefix in [
+                                (train_spatial_metrics, "train"),
+                                (val_spatial_metrics, "val"),
+                            ]
+                        ],
+                    )
+                )
+
             if "count" in metrics:
                 async_results.append(
                     pool.starmap_async(
@@ -222,6 +241,7 @@ def _gen_spatial_bias_plot(
     # Have to do this so it works with MP
     # https://github.com/GenericMappingTools/pygmt/issues/217
     import pygmt
+
     reload(pygmt)
 
     console.print(f"Generating {prefix} bias plot for {cur_im}")
@@ -232,8 +252,12 @@ def _gen_spatial_bias_plot(
         + r" - Bias,  <math>\mathbb{E}_{i \in Rup}[\Delta_i]</math>"
     )
     spatial_plotting.plot_grid(
-        fig, cur_grid, "polar", (-0.4, 0.4, 0.8 / 16), ("darkred", "darkblue"),
-        reverse_cmap=True
+        fig,
+        cur_grid,
+        "polar",
+        (-0.4, 0.4, 0.8 / 16),
+        ("darkred", "darkblue"),
+        reverse_cmap=True,
     )
 
     console.print("Saving")
@@ -257,7 +281,8 @@ def _gen_spatial_sigma_plot(
     cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
 
     fig = spatial_plotting.gen_region_fig(
-        plotting_utils.get_im_name(cur_im) + r" - Standard deviation of Residual, <math>\sigma_{\Delta}</math>"
+        plotting_utils.get_im_name(cur_im)
+        + r" - Standard deviation of Residual, <math>\sigma_{\Delta}</math>"
     )
     spatial_plotting.plot_grid(
         fig,
@@ -288,7 +313,8 @@ def _gen_mean_abs_residual_plot(
     cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
 
     fig = spatial_plotting.gen_region_fig(
-        cur_im + " - Mean Absolute Residual, @[\mu_{|\Delta|}@["
+        plotting_utils.get_im_name(cur_im)
+        + " - Mean Absolute Residual, @[\mu_{|\Delta|}@["
     )
     spatial_plotting.plot_grid(
         fig,
@@ -306,6 +332,63 @@ def _gen_mean_abs_residual_plot(
     )
 
 
+def _gen_sum_squared_residual_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
+):
+    # Have to do this so it works with MP
+    # https://github.com/GenericMappingTools/pygmt/issues/217
+    import pygmt
+    reload(pygmt)
+
+    SUM_SQUARED_RESIDUAL_CB_MAX_LOOKUP = {
+        "train": {"PGA": 160,
+                  "pSA_0.1": 170,
+                  "pSA_0.5": 180,
+                  "pSA_1.0": 200,
+                  "pSA_3.0": 1300,
+                  "pSA_5.0": 1600,
+                  "pSA_10.0": 1000,
+                  },
+        "val": {"PGA": 30,
+                "pSA_0.1": 30,
+                "pSA_0.5": 30,
+                "pSA_1.0": 30,
+                "pSA_3.0": 160,
+                "pSA_5.0": 180,
+                "pSA_10.0": 110,
+                }
+    }
+
+    console.print(f"Generating {prefix} sum squared residual plot for {cur_im}")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im, interp_method="linear")
+
+    # cb_max = float(np.round(np.nanquantile(cur_grid.values, 0.98), -1))
+    try:
+        cb_max = SUM_SQUARED_RESIDUAL_CB_MAX_LOOKUP[prefix][cur_im]
+    except KeyError:
+        print(f"Sum-Squared-Residual {prefix} - {cur_im} - No CB limit in lookup, skipping!")
+        return
+
+    fig = spatial_plotting.gen_region_fig(
+        plotting_utils.get_im_name(cur_im)
+        + " - Sum Squared Residual, <math>\mathbb{\Sigma}_{i \in Rup}[\Delta_i^2]</math>"
+    )
+    spatial_plotting.plot_grid(
+        fig,
+        cur_grid,
+        "hot",
+        (0.0, cb_max, cb_max / 20),
+        # (0, 2000, 2000 / 10),
+        ("white", "black"),
+        reverse_cmap=True,
+    )
+
+    fig.savefig(
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_sum_squared_residual.png",
+        dpi=900,
+        anti_alias=True,
+    )
+
 def _gen_count_plot(
     spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
 ):
@@ -315,15 +398,17 @@ def _gen_count_plot(
 
     reload(pygmt)
 
-    console.print(f"Generating {prefix} mean absolute residual plot for {cur_im}")
+    console.print(f"Generating {prefix} count plot for {cur_im}")
     cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    cb_max = float(np.round(np.nanquantile(cur_grid.values, 0.98), -1))
 
     fig = spatial_plotting.gen_region_fig("Number of datapoints")
     spatial_plotting.plot_grid(
         fig,
         cur_grid,
         "hot",
-        (0, 2000, 2000 / 16),
+        (0, cb_max, cb_max / 20),
         ("white", "black"),
         "Count",
         reverse_cmap=True,

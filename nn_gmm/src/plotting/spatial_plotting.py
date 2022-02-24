@@ -1,37 +1,118 @@
 import pandas as pd
 from pathlib import Path
 import tempfile
-from typing import Tuple, Union
+from typing import Tuple, Union, NamedTuple
 
-import numpy as np
 import pygmt
+import geopandas
 import xarray as xr
+import numpy as np
 from scipy import interpolate
+from shapely import geometry
 
+class NZMapData(NamedTuple):
+    road_df: pd.DataFrame = None
+    highway_df: geopandas.GeoDataFrame = None
+    coastline_df: geopandas.GeoDataFrame = None
+    water_df: geopandas.GeoDataFrame = None
+    topo_grid: xr.DataArray = None
+
+    @classmethod
+    def load(cls, qcore_data_dir: Path):
+        road_ffp = qcore_data_dir / "Paths/road/NZ.gmt"
+        highway_ffp = qcore_data_dir / "Paths/highway/NZ.gmt"
+        coastline_ffp = qcore_data_dir / "Paths/coastline/NZ.gmt"
+        water_ffp = qcore_data_dir / "Paths/water/NZ.gmt"
+        topo_ffp = qcore_data_dir / "Topo/srtm_NZ.grd"
+
+        return cls(road_df=geopandas.read_file(road_ffp), highway_df=geopandas.read_file(highway_ffp),
+                  coastline_df=geopandas.read_file(coastline_ffp), water_df = geopandas.read_file(water_ffp),
+                  topo_grid = pygmt.grdclip(grid=str(topo_ffp), below=[0, np.nan]))
+
+
+DEFAULT_PLT_KWARGS = dict(
+    road_pen_width=0.01,
+    highway_pen_width=0.5,
+    coastline_pen_width=0.05,
+)
 
 def gen_region_fig(
-    title: str = None, region: Union[str, Tuple[float, float, float, float]] = "NZ"
+    title: str = None,
+    region: Union[str, Tuple[float, float, float, float]] = "NZ",
+    projection: str = "j172/1.5",
+    map_data: NZMapData = None,
+    plot_roads: bool = True,
+    plot_topo: bool = True,
+    plot_kwargs = None
 ):
-    """Creates a basic figure for the specified region
-    Todo: Extend this one day to include topo etc. (see plot_items)
+    """
+    Creates a basic figure for the specified region
+    and plots the coastline (and roads & topo if specified)
+
+    Parameters
+    ----------
+    title: str, optional
+        Title of the figure
+    region: str or Tuple of 4 floats
+        Region to plot, either a string or
+        a tuple of 4 floats in the format
+        (min_lon, max_lon, min_lat, max_lat)
+    projection: str
+        Projection string, see pygmt or gmt
+        documentation for this
+    map_data: NZMapData
+        Custom map data from qcore
+    plot_kwargs:
+        Extra plotting arguments, see DEFAULT_PLT_KWARGS
+        for available options
+
+        Note: Only need to specify the ones to override
+
+    Returns
+    -------
+    fig: Figure
     """
     frame_args = ["af", "xaf+lLongitude", "yaf+lLatitude"]
     if title is not None:
         frame_args.append(f'+t"{title}"')
 
-    fig = pygmt.Figure()
-    fig.basemap(region=region, projection="j172/1.5", frame=frame_args)
+    # Merge with default
+    plot_kwargs = DEFAULT_PLT_KWARGS if plot_kwargs is None else {**DEFAULT_PLT_KWARGS, **plot_kwargs}
 
-    # Plots the coast (sea & inland lakes/rivers)
-    fig.coast(
-        shorelines=["1/0.1p,black", "2/0.1p,black"],
-        resolution="f",
-        land="#666666",
-        water="skyblue",
-    )
+    fig = pygmt.Figure()
+    fig.basemap(region=region, projection=projection, frame=frame_args)
+
+    # Plots the default coast (sea & inland lakes/rivers)
+    if map_data is None:
+        fig.coast(
+            shorelines=["1/0.1p,black", "2/0.1p,black"],
+            resolution="f",
+            land="#666666",
+            water="skyblue",
+        )
+    # Use the custom NZ data
+    else:
+        # Plot water & coastline
+        water_bg = geopandas.GeoSeries(geometry.LineString([
+            (fig.region[0], fig.region[2]),
+            (fig.region[1], fig.region[2]),
+            (fig.region[1], fig.region[3]),
+            [fig.region[0], fig.region[3]]]))
+        fig.plot(water_bg, color="lightblue", straight_line=True)
+        fig.plot(data=map_data.coastline_df, pen=f"{plot_kwargs['coastline_pen_width']}p,black", color="lightgray")
+        fig.plot(data=map_data.water_df, color="lightblue")
+
+        # Add topo
+        if plot_topo:
+            pygmt.makecpt(series=(-10_000, 3000), continuous=True, cmap="gray")
+            fig.grdimage(grid=map_data.topo_grid, cmap=True, nan_transparent=True)
+
+        # Add roads
+        if plot_roads:
+            fig.plot(data=map_data.road_df, pen=f"{plot_kwargs['road_pen_width']}p,white")
+            fig.plot(data=map_data.highway_df, pen=f"{plot_kwargs['highway_pen_width']}p,yellow")
 
     return fig
-
 
 def plot_grid(
     fig: pygmt.Figure,
@@ -137,6 +218,8 @@ def create_grid(
     ----------
     data_df: DataFrame
         Unstructured data to be gridded
+
+        Expected to have columns, [lon, lat] and data_key
     grid_spacing: string
         Grid spacing to use, uses gmt gridding
         functionality, see "spacing" in
@@ -188,7 +271,7 @@ def create_grid(
 
     # Create XArray grid
     grid = xr.DataArray(
-        grid_values.reshape(land_mask.lat.size, land_mask.lon.size),
+        grid_values.reshape(land_mask.lat.size, land_mask.lon.size).astype(float),
         dims=("lat", "lon"),
         coords={"lon": np.unique(x1), "lat": np.unique(x2)},
     )

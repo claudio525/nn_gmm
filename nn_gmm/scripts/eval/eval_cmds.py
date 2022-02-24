@@ -50,7 +50,7 @@ def train_val_basin_metrics(
     )
 
 @app.command("spatial-metrics")
-def train_val_spatial_metrics(model_dir: Path, save: bool = False):
+def train_val_spatial_metrics(model_dir: Path, save: bool = True):
     """Computes training & validation metrics"""
     nn_gmm.comp_train_val_spatial_metrics(model_dir, save=save)
 

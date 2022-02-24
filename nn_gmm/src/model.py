@@ -248,9 +248,6 @@ class NeuralNetworkGMM(GMM):
         # Apply inverse pre-processing for outputs if required
         mean_df = self._post_process(mean_df)
 
-        # Convert to non-logged output
-        # mean_df = mean_df.apply(np.exp)
-
         if y_est.shape[1] == 2 * self.outputs.size:
             std_df = pd.DataFrame(
                 data=y_est[:, self.outputs.size :],

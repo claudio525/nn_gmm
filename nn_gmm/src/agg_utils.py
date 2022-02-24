@@ -1,7 +1,7 @@
 import time
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
@@ -86,7 +86,7 @@ def load_site_source_df(site_source_db_ffps: List[Path], n_procs: int = 1):
     return pd.concat(dfs)
 
 
-def load_fault_im_df(cur_fault: str, im_db_ffps: List[Path]):
+def load_fault_im_df(cur_fault: str, im_db_ffps: Sequence[Path]):
     """Loads the IM dataframe for the specified fault"""
     for im_db_ffp in im_db_ffps:
         with pd.HDFStore(im_db_ffp, "r") as store:

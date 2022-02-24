@@ -384,10 +384,11 @@ def train_nn(
     if model is None:
         print(f"Creating model")
         n_features, n_outputs = len(feature_config.keys()), len(im_config.keys())
+        assert multi_output or (not multi_output and n_outputs == 1)
         model = (
             model_fn(model_config, n_features, list(im_config.keys()))
             if multi_output
-            else model_fn(model_config, n_features, n_outputs)
+            else model_fn(model_config, n_features, ["Output"])
         )
 
     # Compile the model
