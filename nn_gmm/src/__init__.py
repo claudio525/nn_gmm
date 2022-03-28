@@ -42,6 +42,7 @@ from .directivity import (
     FaultDirectivityProcessor,
 )
 from .eval import (
+    DEFAULT_CONST_FEATURES,
     MAGNITUDE_BINS,
     DEFAULT_METRICS,
     compute_metrics,

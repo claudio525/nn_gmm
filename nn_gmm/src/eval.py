@@ -17,6 +17,10 @@ MAGNITUDE_BINS = np.arange(3, 10)
 DEFAULT_METRICS = ("bias", "sigma")
 ALL_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual", "count", "sum_squared_residual")
 
+DEFAULT_EVAL_SITES = dict(chch_site = "02007fb",
+nelson_site = "02008b5",
+wellington_site = "0200ab4",
+blenheim_site = "020099b",)
 
 DEFAULT_CONST_FEATURES = dict(
     mag=7.0,
@@ -30,6 +34,10 @@ DEFAULT_CONST_FEATURES = dict(
     theta=45,
     s=30,
     tect_type="ACTIVE_SHALLOW",
+    rrup=50,
+    rjb=50,
+    rx=50,
+    ry=50,
     lat=-43.53145848236242,
     lon=172.63054396033107,
 )

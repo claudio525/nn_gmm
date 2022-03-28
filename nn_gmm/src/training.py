@@ -416,13 +416,13 @@ def train_nn(
     callbacks = (
         [] if train_config.get("callbacks") is None else train_config["callbacks"]
     )
-    callbacks += [
-        # Saves the best model (based on the validation loss)
-        keras.callbacks.ModelCheckpoint(
-            str(model_dir), monitor="val_loss", save_best_only=True
-        ),
-        # keras.callbacks.TensorBoard(str(output_dir / "log"), profile_batch="2,10")
-    ]
+    if train_config.get("save_best_val") is True:
+        callbacks += [
+            # Saves the best model (based on the validation loss)
+            keras.callbacks.ModelCheckpoint(
+                str(model_dir), monitor="val_loss", save_best_only=True
+            ),
+        ]
 
     console.print(f"Preparing datasets")
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
@@ -442,6 +442,10 @@ def train_nn(
         verbose=verbose,
     )
 
+    if not train_config.get("save_best_val"):
+        print("Saving the model")
+        model.save(model_dir, save_format="tf")
+
     # Save model data
     loss_df = _save_model_data(output_dir, model_dir, io_config, train_config, history)
 
@@ -450,8 +454,8 @@ def train_nn(
     ims = list(im_config.keys())
     fig = ml_tools.plotting.plot_loss(
         history,
-        y_lim=(0.0, 1.0),
-        y_label="MSE",
+        # y_lim=(0.0, 1.0),
+        y_label="Loss",
         multi_keys=ims if len(ims) > 1 else None,
     )
     fig.savefig(os.path.join(output_dir, "loss.png"))

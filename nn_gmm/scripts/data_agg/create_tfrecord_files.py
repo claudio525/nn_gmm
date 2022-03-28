@@ -9,7 +9,9 @@ from typing import Dict, List, Tuple, Sequence
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from scipy import spatial
 
+from qcore import geo
 import nn_gmm
 
 IMs = np.asarray(
@@ -158,9 +160,10 @@ def serialize(
     return ser_examples
 
 
-def _compute_site_sample_weights(
+def _compute_site_sample_count(
     source: str, site_df: pd.DataFrame, imdb_ffps: Sequence[Path]
 ):
+    """Gets the number of samples (i.e. ruptures) for the specified site"""
     site_counter = pd.Series(
         index=site_df.index, name=source, data=np.zeros(site_df.shape[0], dtype=int)
     )
@@ -192,7 +195,8 @@ def gen_tf_records(
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
     n_procs: int = 8,
-    site_sample_weights: pd.Series = None,
+    fault_density_weights: pd.Series = None,
+    station_density_weights: pd.Series = None,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
@@ -283,10 +287,12 @@ def gen_tf_records(
             index=cur_site_source_ids.index,
             data=np.ones(cur_site_source_ids.shape[0], dtype=float),
         )
-        if site_sample_weights is not None:
-            sample_weights *= site_sample_weights.loc[
+        if fault_density_weights is not None:
+            sample_weights *= fault_density_weights.loc[
                 cur_site_source_ids.site.values
             ].values
+        if station_density_weights is not None:
+            sample_weights *= station_density_weights.loc[cur_site_source_ids.site.values].values
 
         # Serialize
         assert np.all(
@@ -342,7 +348,8 @@ def main(
     base_grid_only: bool = False,
     val_events_ffp: Path = None,
     n_procs: int = 8,
-    use_site_sample_weights: bool = False,
+    use_fault_density_weights: bool = False,
+    use_site_density_weights: bool = False,
 ):
     output_dir = Path(output_dir)
 
@@ -350,11 +357,21 @@ def main(
     print("Loading site params")
     site_df = nn_gmm.load_dfs(list(site_params_dir.glob("*.csv")))
 
+    # Perform X, Y, Z coordinate transform as per
+    # https://datascience.stackexchange.com/questions/13567/ways-to-deal-with-longitude-latitude-feature
+    # x = cos(lat) * cos(lon)
+    # y = cos(lat) * sin(lon),
+    # z = sin(lat)
+    site_df["X"] = np.cos(site_df.lat) * np.cos(site_df.lon)
+    site_df["Y"] = np.cos(site_df.lat) * np.sin(site_df.lon)
+    site_df["Z"] = np.sin(site_df.lat)
+
     # Drop duplicates & check for duplicates
     n_unique_stations = np.unique(site_df.station.values.astype(str)).shape[0]
     site_df = site_df.drop_duplicates()
     assert n_unique_stations == site_df.shape[0]
     site_df.set_index("station", inplace=True)
+    site_df.drop_duplicates(subset={"lat", "lon"}, inplace=True)
 
     # Only use base grid (and real) stations
     if base_grid_only:
@@ -398,30 +415,51 @@ def main(
             val_sources = np.asarray([line.strip() for line in f.readlines()])
         train_sources = all_sources[~np.isin(all_sources, val_sources)]
 
-        site_sample_weights = None
-        if use_site_sample_weights:
-            print("Computing site-sample weights for each site")
+        fault_density_weights = None
+        if use_fault_density_weights:
+            print("Computing fault density weights for each site")
             if n_procs == 1:
                 site_counters = []
                 for ix, cur_source in enumerate(train_sources):
                     site_counters.append(
-                        _compute_site_sample_weights(cur_source, site_df, im_db_ffps)
+                        _compute_site_sample_count(cur_source, site_df, im_db_ffps)
                     )
             else:
                 with mp.Pool(n_procs) as p:
                     site_counters = p.starmap(
-                        _compute_site_sample_weights,
+                        _compute_site_sample_count,
                         [
                             (cur_source, site_df, im_db_ffps)
                             for cur_source in train_sources
                         ],
                     )
 
-            site_sample_weights = 1 / pd.concat(site_counters, axis=1).sum(axis=1)
-            site_sample_weights = site_sample_weights.loc[
-                ~np.isinf(site_sample_weights)
+            fault_density_weights = 1 / pd.concat(site_counters, axis=1).sum(axis=1)
+            fault_density_weights = fault_density_weights.loc[
+                ~np.isinf(fault_density_weights)
             ]
-            assert np.all((site_sample_weights <= 1.0) & (site_sample_weights > 0.0))
+            assert np.all((fault_density_weights <= 1.0) & (fault_density_weights > 0.0))
+
+        station_density_weights = None
+        if use_site_density_weights:
+            print(f"Computing station density weights for each site")
+            site_nztm200_coords = geo.wgs_nztm2000x(np.stack((site_df.lon.values, site_df.lat.values), axis=1))
+
+            # Create kd-tree and run lookup
+            kd_tree = spatial.KDTree(site_nztm200_coords)
+            station_count = np.asarray(
+                [
+                    len(cur_c)
+                    for cur_c in kd_tree.query_ball_point(
+                    site_nztm200_coords, r=3.99 * 1000, p=2,
+                    workers=-1
+                )
+                ]
+            )
+
+            station_density_weights = 1 / pd.Series(index=site_df.index, data=station_count)
+            # Normalise so that sum of weights == number of stations (not really needed tbh)
+            station_density_weights = station_density_weights * site_df.shape[0] / station_density_weights.sum()
 
         # Training dataset
         gen_tf_records(
@@ -434,7 +472,8 @@ def main(
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
             n_procs=n_procs,
-            site_sample_weights=site_sample_weights,
+            fault_density_weights=fault_density_weights,
+            station_density_weights=station_density_weights
         )
 
         # Validation dataset
@@ -450,7 +489,7 @@ def main(
             n_procs=n_procs,
         )
     else:
-        if use_site_sample_weights:
+        if use_fault_density_weights:
             raise NotImplementedError()
 
         gen_tf_records(
@@ -479,7 +518,9 @@ if __name__ == "__main__":
         "site_source_dir", type=str, help="The path to the site-source dir"
     )
     parser.add_argument(
-        "source_params_dir", type=str, help="The path to the source params dir",
+        "source_params_dir",
+        type=str,
+        help="The path to the source params dir",
     )
     parser.add_argument("im_db_dir", type=str, help="The path to the IM labels dbs dir")
     parser.add_argument("output_dir", type=str, help="Path of the output directory")
@@ -498,10 +539,17 @@ if __name__ == "__main__":
         "--n_procs", type=int, help="Number of processes to use", default=4
     )
     parser.add_argument(
-        "--site_sample_weights",
+        "--fault_density_weights",
         action="store_true",
-        help="If set then samples are weighted based on number of other datapoints at a given site",
+        help="If set then samples are weighted based on number "
+        "of other datapoints (i.e. faults/realisations) at a given site",
         default=True,
+    )
+    parser.add_argument(
+        "--station_density_weights",
+        action="store_true",
+        help="If set then sites are weight based "
+        "on the number of other stations in their vicinity (radius of 3.8km)",
     )
     args = parser.parse_args()
 
@@ -515,5 +563,6 @@ if __name__ == "__main__":
         base_grid_only=args.base_grid_only,
         n_procs=args.n_procs,
         val_events_ffp=nn_gmm.to_path(args.val_events_ffp),
-        use_site_sample_weights=args.site_sample_weights,
+        use_fault_density_weights=args.fault_density_weights,
+        use_site_density_weights=args.station_density_weights,
     )

@@ -39,7 +39,12 @@ data_dirs_lookup = {
         "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train"],
         "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/val"],
         "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train/stats.csv",
-    }
+    },
+    "tmp": {
+        "train_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/train"],
+        "val_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/val"],
+        "stats_df": "/home/claudy/dev/work/tmp/sample_files/train/stats.csv",
+    },
 }
 
 IO_CONFIG = {
@@ -50,20 +55,23 @@ IO_CONFIG = {
         "dip": "min_max",
         "rake": "min_max",
         "mag": "standard",
-        "s": "standard",
-        "theta": "min_max",
+        # "s": "standard",
+        # "theta": "min_max",
         "vs30": "standard",
-        "z1p0": "standard",
-        "z2p5": "standard",
-        "vs500": "standard",
+        # "z1p0": "standard",
+        # "z2p5": "standard",
+        # "vs500": "standard",
         "rrup": "standard",
-        "rx": "standard",
-        "rjb": "standard",
-        "ry": "standard",
-        "active_shallow": None,
-        "volcanic": None,
-        "lat": "standard",
-        "lon": "standard",
+        # "rx": "standard",
+        # "rjb": "standard",
+        # "ry": "standard",
+        # "active_shallow": None,
+        # "volcanic": None,
+        # "lat": "standard",
+        # "lon": "standard",
+        "X": "standard",
+        "Y": "standard",
+        "Z": "standard"
     },
     "im_config": {
         # "PGA": "standard",
@@ -111,15 +119,17 @@ def main(
     #     return lr
 
     train_config = {
-        "batch_size": 5120,
-        # "batch_size": 10240,
+        # "batch_size": 5120,
+        "batch_size": 10240,
         # "batch_size": 2048,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 100,
+        "n_epochs": 20,
         "optimizer": tf.keras.optimizers.Adam(),
         # "optimizer": tf.keras.optimizers.SGD(learning_rate=0.1),
         "loss": "mse",
+        # "loss": tf.keras.losses.Huber(delta=0.5),
         "use_sample_weights": use_sample_weights,
+        "save_val_best": False,
         "cache": True,
         # "callbacks": [tf.keras.callbacks.LearningRateScheduler(lr_scheduler, verbose=1)]
     }
@@ -152,6 +162,7 @@ def main(
         else:
             train_config["callbacks"] = [WandbCallback()]
 
+    # Run training
     train_result = nn_gmm.train_nn(
         io_config,
         train_config,

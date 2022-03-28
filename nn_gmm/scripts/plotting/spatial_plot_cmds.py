@@ -1,5 +1,6 @@
+import os
 import time
-from typing import Sequence, List, Optional
+from typing import Sequence, List, Optional, Dict, Union
 from pathlib import Path
 
 import pygmt
@@ -35,16 +36,125 @@ app = typer.Typer()
 
 @app.command("metrics")
 def gen_spatial_metric_plots(
-    model_dir: Path,
-    ims: List[str] = None,
-    metrics: List[str] = None,
-    n_procs: int = 4,
+    model_dir: Path, ims: List[str] = None, metrics: List[str] = None, n_procs: int = 4,
 ):
     """Creates spatial metrics plots"""
     ims = nn_gmm.GMM.load(model_dir).ims if not ims else ims
     metrics = nn_gmm.DEFAULT_METRICS if not metrics else metrics
 
     nn_gmm.gen_spatial_metric_plots(model_dir, ims, metrics=metrics, n_procs=n_procs)
+
+
+@app.command("location-dependence")
+def gen_location_dependence_plot(
+    model_dir: Path, station_ffp: Path, ims: List[str] = None, mag: float = 7.0
+):
+    output_dir = model_dir / "plots" / "spatial_trend"
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Merge custom constant features
+    const_features = {**nn_gmm.DEFAULT_CONST_FEATURES, **{"mag": mag}}
+
+    # Load station df
+    station_df = pd.read_csv(
+        station_ffp,
+        delim_whitespace=True,
+        index_col=2,
+        header=None,
+        names=["lon", "lat"],
+    )
+
+    # Get the base stations
+    base_mask = np.char.startswith(station_df.index.values.astype(str), "0")
+    lon_values = station_df.loc[base_mask, "lon"].values
+    lat_values = station_df.loc[base_mask, "lat"].values
+    n_loc = np.count_nonzero(base_mask)
+
+    # Load the model
+    gmm = nn_gmm.GMM.load(model_dir)
+    ims = gmm.ims if len(ims) == 0 else ims
+
+    if np.any(~np.isin(["lat", "lon"], gmm.features)) and np.any(
+        ~np.isin(["X", "Y", "Z"], gmm.features)
+    ):
+        raise ValueError(
+            "This functionality only works for models with location dependence!"
+        )
+
+    # Create the input dataframe
+    input_df = pd.DataFrame.from_dict(
+        {cur_key: [cur_value] * n_loc for cur_key, cur_value in const_features.items()}
+    )
+
+    if "lon" in gmm.features:
+        input_df["lon"] = lon_values
+        input_df["lat"] = lat_values
+    else:
+        input_df["X"] = np.cos(lat_values) * np.cos(lon_values)
+        input_df["Y"] = np.cos(lat_values) * np.sin(lon_values)
+        input_df["Z"] = np.sin(lat_values)
+
+    # Get the model predictions
+    result_df = gmm.predict(input_df)[0]
+
+    # Add lon & lat values
+    result_df["lon"] = lon_values
+    result_df["lat"] = lat_values
+
+    # Load the NZ map data
+    nz_map_data = None
+    if qcore_data_dir := os.environ.get("QCORE_DATA_DIR") is not None:
+        nz_map_data = nn_gmm.NZMapData.load(Path(qcore_data_dir))
+
+    # Create the figures
+    for cur_im in ims:
+        nn_gmm.console.print(f"Generating location-dependence plot for {cur_im}")
+        cur_data = result_df.loc[:, [cur_im, "lon", "lat"]]
+
+        fig = nn_gmm.gen_region_fig(
+            title=f"{nn_gmm.get_im_name(cur_im)} Location Dependence",
+            map_data=nz_map_data,
+            plot_roads=False,
+            plot_topo=False,
+        )
+
+        grid = nn_gmm.create_grid(cur_data, cur_im, interp_method="linear")
+        cb_min, cb_max = (
+            np.quantile(cur_data[cur_im], 0.05),
+            np.quantile(cur_data[cur_im], 0.95),
+        )
+        nn_gmm.plot_grid(
+            fig,
+            grid,
+            "polar",
+            (cb_min, cb_max, np.abs(cb_max - cb_min) / 16),
+            ("darkred", "darkblue"),
+            reverse_cmap=False,
+        )
+
+        nn_gmm.console.print(f"Saving location-dependence plot for {cur_im}")
+        fig.savefig(
+            output_dir / f"{cur_im.replace('.', 'p')}_loc_dependence.png",
+            dpi=900,
+            anti_alias=True,
+        )
+
+
+@app.command("im-map")
+def gen_im_map(data_dir: Path, rel_name: str, im: str, output_ffp: Path):
+    record_ffp = next(data_dir.rglob(f"**/{rel_name.split('_')[0]}.tfrecord"))
+
+    data_df = nn_gmm.load_tfrecord(
+        str(record_ffp), nn_gmm.load_feature_details(record_ffp.parent)
+    )
+    data_df["rel"] = np.stack(
+        np.char.rsplit(data_df.index.values.astype(str), "_", maxsplit=1)
+    )[:, 0]
+
+    data_df = data_df.loc[data_df.rel == rel_name]
+
+    fig = nn_gmm.im_plot(data_df, im, rel_name, Path(os.environ.get("QCORE_DATA_DIR")))
+    fig.savefig(str(output_ffp), dpi=1200)
 
 
 @app.command("station-density")
@@ -85,99 +195,6 @@ def gen_station_density_plot(station_ffp: Path, output_ffp: Path, grid_size: int
         fig, grid, "hot", (0, 50, 50 / 10), ("white", "black"), reverse_cmap=True
     )
     fig.savefig(output_ffp, dpi=1200)
-
-# @app.command("station-density")
-# def gen_station_density_plot(station_ffp: Path, output_ffp: Path, grid_size: int):
-#     # Read station file & drop duplicated locations
-#     station_df = pd.read_csv(
-#         station_ffp, index_col=2, sep="\s+", header=None, names=["lon", "lat"]
-#     )
-#     station_df.drop_duplicates(subset={"lat", "lon"}, inplace=True)
-#
-#     # Create the land/water mask (which also acts as the aggregation grid)
-#     # There is probably a better way of doing this..
-#     land_mask = pygmt.grdlandmask(
-#         region="NZ",
-#         spacing=f"{grid_size}k/{grid_size}k",
-#         maskvalues=[0, 1],
-#         resolution="f"
-#         # region="NZ", spacing=f"1000+n/1000+n", maskvalues=[0, 1], resolution="f"
-#     ).T
-#     x1, x2 = np.meshgrid(land_mask.lon.values, land_mask.lat.values)
-#
-#     # Convert to NZGD2000, which is in metres
-#     station_coords = geo.wgs_nztm2000x(
-#         np.stack((station_df.lon.values, station_df.lat.values), axis=1)
-#     )
-#     grid_coords = geo.wgs_nztm2000x(
-#         np.stack((x1.ravel(), x2.ravel()), axis=1)[land_mask.values.ravel() > 0, :]
-#     )
-#
-#     # Create kd-tree and run lookup
-#     kd_tree = spatial.KDTree(station_coords)
-#     station_count = np.asarray(
-#         [
-#             len(cur_c)
-#             for cur_c in kd_tree.query_ball_point(
-#                 grid_coords, r=grid_size * 1000, p=1, workers=-1
-#             )
-#         ]
-#     )
-#
-#     # Create a high density (interpolated) grid for plotting
-#     grid = nn_gmm.create_grid(
-#         pd.DataFrame(
-#             np.concatenate(
-#                 (geo.wgs_nztm2000x(grid_coords), station_count[:, np.newaxis]), axis=1
-#             ),
-#             columns=["lon", "lat", "count"],
-#         ),
-#         "count",
-#         interp_method="linear",
-#         # grid_spacing="200e/200e",
-#         grid_spacing="1k/1k",
-#     )
-#
-#     # # Create fine grid for plotting
-#     # plt_land_mask = pygmt.grdlandmask(region="NZ", spacing="200e/200e", maskvalues=[0, 1], resolution="f").T
-#     # plt_grid = plt_land_mask.copy()
-#     # plt_grid.values = np.zeros(plt_grid.shape)
-#     # x1, x2 = np.meshgrid(plt_grid.lon.values, plt_grid.lat.values)
-#     # plt_grid_coords = geo.wgs_nztm2000x(np.stack((x1.ravel(), x2.ravel()), axis=1))
-#     #
-#     # # Interpolate available data onto meshgrid
-#     # interpolator = interpolate.CloughTocher2DInterpolator(
-#     #     grid_coords,
-#     #     station_count
-#     # )
-#     # plt_grid_values = interpolator(plt_grid_coords[:, 0], plt_grid_coords[:, 1])
-#     #
-#     # # Convert back to lat/lon
-#     # plt_grid.values = plt_grid_values.reshape(plt_grid.shape)
-#     # plt_grid.values[plt_land_mask.values.astype(bool)] = np.nan
-#
-#     x1, x2 = np.meshgrid(grid.lon.values, grid.lat.values)
-#
-#
-#     fig = plt.figure(figsize=(16,10), dpi=200)
-#     mask = ~np.isnan(grid.values)
-#     # plt.scatter(x1[mask].ravel(), x2[mask].ravel(), c=grid.values[mask].ravel(), marker=",", s=0.1)
-#     plt.pcolormesh(x1, x2, grid.values)
-#
-#
-#     fig.tight_layout()
-#     fig.savefig(output_ffp)
-#
-#
-#     # fig = nn_gmm.gen_region_fig("Station density")
-#     #
-#     # nn_gmm.plot_grid(
-#     #     fig, grid, "hot", (0, 5, 5 / 10), ("white", "black"), reverse_cmap=True
-#     # )
-#     #
-#     # fig.savefig(output_ffp, dpi=1200)
-#
-#     print(f"wtf")
 
 
 if __name__ == "__main__":

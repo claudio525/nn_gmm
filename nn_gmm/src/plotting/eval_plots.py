@@ -17,11 +17,15 @@ from nn_gmm.src.console import console
 from nn_gmm.src.plotting import spatial_plotting
 
 
-def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
+def gen_residual_plots(
+    model_dir: Path, ims: Sequence[str] = None, sites: Dict[str, str] = None
+):
     """Generates residual plots for the specified model and IM"""
     # Setup
     fig_output_dir = model_dir / "plots" / "residual_plots"
     fig_output_dir.mkdir(exist_ok=True, parents=True)
+
+    sites = eval.DEFAULT_EVAL_SITES if sites is None else sites
 
     model = GMM.load(model_dir)
     plt_gen = ResPlotGen()
@@ -83,6 +87,24 @@ def gen_residual_plots(model_dir: Path, ims: Sequence[str] = None):
             2,
             fig_output_dir,
             prefix="val",
+        )
+
+        # Site residuals
+        plt_gen.gen_site_res_plot(
+            train_db_ffp,
+            im,
+            list(sites.values()),
+            fig_output_dir,
+            prefix="train",
+            site_names=list(sites.keys()),
+        )
+        plt_gen.gen_site_res_plot(
+            val_db_ffp,
+            im,
+            list(sites.values()),
+            fig_output_dir,
+            prefix="val",
+            site_names=list(sites.keys()),
         )
 
 
@@ -260,7 +282,7 @@ def _gen_spatial_bias_plot(
         reverse_cmap=True,
     )
 
-    console.print("Saving")
+    console.print(f"Saving {prefix} bias plot for {cur_im}")
     fig.savefig(
         output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_bias.png",
         dpi=900,
@@ -338,35 +360,42 @@ def _gen_sum_squared_residual_plot(
     # Have to do this so it works with MP
     # https://github.com/GenericMappingTools/pygmt/issues/217
     import pygmt
+
     reload(pygmt)
 
     SUM_SQUARED_RESIDUAL_CB_MAX_LOOKUP = {
-        "train": {"PGA": 160,
-                  "pSA_0.1": 170,
-                  "pSA_0.5": 180,
-                  "pSA_1.0": 200,
-                  "pSA_3.0": 1300,
-                  "pSA_5.0": 1600,
-                  "pSA_10.0": 1000,
-                  },
-        "val": {"PGA": 30,
-                "pSA_0.1": 30,
-                "pSA_0.5": 30,
-                "pSA_1.0": 30,
-                "pSA_3.0": 160,
-                "pSA_5.0": 180,
-                "pSA_10.0": 110,
-                }
+        "train": {
+            "PGA": 160,
+            "pSA_0.1": 170,
+            "pSA_0.5": 180,
+            "pSA_1.0": 200,
+            "pSA_3.0": 1300,
+            "pSA_5.0": 1600,
+            "pSA_10.0": 1000,
+        },
+        "val": {
+            "PGA": 30,
+            "pSA_0.1": 30,
+            "pSA_0.5": 30,
+            "pSA_1.0": 30,
+            "pSA_3.0": 160,
+            "pSA_5.0": 180,
+            "pSA_10.0": 110,
+        },
     }
 
     console.print(f"Generating {prefix} sum squared residual plot for {cur_im}")
-    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im, interp_method="linear")
+    cur_grid = spatial_plotting.create_grid(
+        spatial_metrics, cur_im, interp_method="linear"
+    )
 
     # cb_max = float(np.round(np.nanquantile(cur_grid.values, 0.98), -1))
     try:
         cb_max = SUM_SQUARED_RESIDUAL_CB_MAX_LOOKUP[prefix][cur_im]
     except KeyError:
-        print(f"Sum-Squared-Residual {prefix} - {cur_im} - No CB limit in lookup, skipping!")
+        print(
+            f"Sum-Squared-Residual {prefix} - {cur_im} - No CB limit in lookup, skipping!"
+        )
         return
 
     fig = spatial_plotting.gen_region_fig(
@@ -388,6 +417,7 @@ def _gen_sum_squared_residual_plot(
         dpi=900,
         anti_alias=True,
     )
+
 
 def _gen_count_plot(
     spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
@@ -420,3 +450,4 @@ def _gen_count_plot(
         dpi=900,
         anti_alias=True,
     )
+

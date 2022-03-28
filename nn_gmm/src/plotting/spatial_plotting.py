@@ -10,40 +10,57 @@ import numpy as np
 from scipy import interpolate
 from shapely import geometry
 
+
 class NZMapData(NamedTuple):
     road_df: pd.DataFrame = None
     highway_df: geopandas.GeoDataFrame = None
     coastline_df: geopandas.GeoDataFrame = None
     water_df: geopandas.GeoDataFrame = None
     topo_grid: xr.DataArray = None
+    topo_shading_grid: xr.DataArray = None
 
     @classmethod
-    def load(cls, qcore_data_dir: Path):
+    def load(cls, qcore_data_dir: Path, high_res_topo: bool = False):
         road_ffp = qcore_data_dir / "Paths/road/NZ.gmt"
         highway_ffp = qcore_data_dir / "Paths/highway/NZ.gmt"
         coastline_ffp = qcore_data_dir / "Paths/coastline/NZ.gmt"
         water_ffp = qcore_data_dir / "Paths/water/NZ.gmt"
-        topo_ffp = qcore_data_dir / "Topo/srtm_NZ.grd"
 
-        return cls(road_df=geopandas.read_file(road_ffp), highway_df=geopandas.read_file(highway_ffp),
-                  coastline_df=geopandas.read_file(coastline_ffp), water_df = geopandas.read_file(water_ffp),
-                  topo_grid = pygmt.grdclip(grid=str(topo_ffp), below=[0, np.nan]))
+        if high_res_topo:
+            topo_ffp = qcore_data_dir / "Topo/srtm_NZ_1s.grd"
+            topo_shading_ffp = qcore_data_dir / "Topo/srtm_NZ_1s_i5.grd"
+        else:
+            topo_ffp = qcore_data_dir / "Topo/srtm_NZ.grd"
+            topo_shading_ffp = qcore_data_dir / "Topo/srtm_NZ_i5.grd"
+
+        return cls(
+            road_df=geopandas.read_file(road_ffp),
+            highway_df=geopandas.read_file(highway_ffp),
+            coastline_df=geopandas.read_file(coastline_ffp),
+            water_df=geopandas.read_file(water_ffp),
+            topo_grid=pygmt.grdclip(grid=str(topo_ffp), below=[0.1, np.nan]),
+            topo_shading_grid=pygmt.grdclip(
+                grid=str(topo_shading_ffp), below=[0.1, np.nan]
+            ),
+        )
 
 
 DEFAULT_PLT_KWARGS = dict(
     road_pen_width=0.01,
     highway_pen_width=0.5,
     coastline_pen_width=0.05,
+    topo_cmap="gray"
 )
+
 
 def gen_region_fig(
     title: str = None,
     region: Union[str, Tuple[float, float, float, float]] = "NZ",
-    projection: str = "j172/1.5",
+    projection: str = f"M17.0c",
     map_data: NZMapData = None,
     plot_roads: bool = True,
     plot_topo: bool = True,
-    plot_kwargs = None
+    plot_kwargs=None,
 ):
     """
     Creates a basic figure for the specified region
@@ -77,7 +94,11 @@ def gen_region_fig(
         frame_args.append(f'+t"{title}"')
 
     # Merge with default
-    plot_kwargs = DEFAULT_PLT_KWARGS if plot_kwargs is None else {**DEFAULT_PLT_KWARGS, **plot_kwargs}
+    plot_kwargs = (
+        DEFAULT_PLT_KWARGS
+        if plot_kwargs is None
+        else {**DEFAULT_PLT_KWARGS, **plot_kwargs}
+    )
 
     fig = pygmt.Figure()
     fig.basemap(region=region, projection=projection, frame=frame_args)
@@ -92,27 +113,49 @@ def gen_region_fig(
         )
     # Use the custom NZ data
     else:
-        # Plot water & coastline
-        water_bg = geopandas.GeoSeries(geometry.LineString([
-            (fig.region[0], fig.region[2]),
-            (fig.region[1], fig.region[2]),
-            (fig.region[1], fig.region[3]),
-            [fig.region[0], fig.region[3]]]))
+        # Plot coastline and background water
+        fig.plot(
+            data=map_data.coastline_df,
+            pen=f"{plot_kwargs['coastline_pen_width']}p,black",
+            color="lightgray",
+        )
+        water_bg = geopandas.GeoSeries(
+            geometry.LineString(
+                [
+                    (fig.region[0], fig.region[2]),
+                    (fig.region[1], fig.region[2]),
+                    (fig.region[1], fig.region[3]),
+                    [fig.region[0], fig.region[3]],
+                ]
+            )
+        )
         fig.plot(water_bg, color="lightblue", straight_line=True)
-        fig.plot(data=map_data.coastline_df, pen=f"{plot_kwargs['coastline_pen_width']}p,black", color="lightgray")
-        fig.plot(data=map_data.water_df, color="lightblue")
 
         # Add topo
         if plot_topo:
-            pygmt.makecpt(series=(-10_000, 3000), continuous=True, cmap="gray")
-            fig.grdimage(grid=map_data.topo_grid, cmap=True, nan_transparent=True)
+            pygmt.makecpt(series=(-10_000, 3000, 10), continuous=False, cmap=plot_kwargs["topo_cmap"])
+            fig.grdimage(
+                grid=map_data.topo_grid,
+                shading=map_data.topo_shading_grid,
+                cmap=True,
+                nan_transparent=True,
+            )
+
+        # Plot water
+        fig.plot(data=map_data.water_df, color="lightblue")
 
         # Add roads
         if plot_roads:
-            fig.plot(data=map_data.road_df, pen=f"{plot_kwargs['road_pen_width']}p,white")
-            fig.plot(data=map_data.highway_df, pen=f"{plot_kwargs['highway_pen_width']}p,yellow")
+            fig.plot(
+                data=map_data.road_df, pen=f"{plot_kwargs['road_pen_width']}p,white"
+            )
+            fig.plot(
+                data=map_data.highway_df,
+                pen=f"{plot_kwargs['highway_pen_width']}p,yellow",
+            )
 
     return fig
+
 
 def plot_grid(
     fig: pygmt.Figure,
@@ -123,6 +166,7 @@ def plot_grid(
     cb_label: str = None,
     reverse_cmap: bool = False,
     log_cmap: bool = False,
+    transparency: float = 0.0,
 ):
     """
     Plots the given grid as a colourmap & contours
@@ -182,7 +226,11 @@ def plot_grid(
 
         # Plot the grid
         fig.grdimage(
-            grid, cmap=cpt_ffp, transparency=0, interpolation="c", nan_transparent=True
+            grid,
+            cmap=cpt_ffp,
+            transparency=transparency,
+            interpolation="c",
+            nan_transparent=True,
         )
 
         # Plot the contours
@@ -196,11 +244,13 @@ def plot_grid(
 
         # Add a colorbar, with an annotated tick every second colour step,
         # and un-annotated tick with every other colour step
-        cb_frame = [f"a+{cmap_limits[2] * 2:.3f}f+{cmap_limits[2]:.3f}"]
+        phase = f"+{cmap_limits[0]}" if cmap_limits[0] > 0 else f"{cmap_limits}"
+        cb_frame = [f"a+{cmap_limits[2] * 2}{phase}f+{cmap_limits[2]}"]
         if cb_label is not None:
             cb_frame.append(f'x+l"{cb_label}"')
         fig.colorbar(
-            cmap=cpt_ffp, frame=cb_frame,
+            cmap=cpt_ffp,
+            frame=cb_frame,
         )
 
 
@@ -208,7 +258,7 @@ def create_grid(
     data_df: pd.DataFrame,
     data_key: str,
     grid_spacing: str = "200e/200e",
-    region: str = "NZ",
+    region: Union[str, Tuple[float, float, float, float]] = "NZ",
     interp_method: str = "CloughTorcher",
 ):
     """
@@ -239,7 +289,7 @@ def create_grid(
     """
     # Create the land/water mask
     land_mask = pygmt.grdlandmask(
-        region=region, spacing=grid_spacing, maskvalues=[0, 1], resolution="f"
+        region=region, spacing=grid_spacing, maskvalues=[0, 1, 1, 1, 1], resolution="f"
     )
 
     # Use land/water mask to create meshgrid
@@ -280,3 +330,77 @@ def create_grid(
     grid.values[~land_mask.astype(bool)] = np.nan
 
     return grid
+
+
+def im_plot(
+    data_df: pd.DataFrame,
+    im: str,
+    rupture_name: str,
+    qcore_data_dir: Path = None,
+    region: Union[str, Tuple[float, float, float, float]] = None,
+):
+    """
+    Creates an IM plot figure for
+    the given rupture
+
+    Parameters
+    ----------
+    data_df: dataframe
+        Must contain lat, lon and im column,
+        where IM values are in logspace
+    im: str
+        Name of IM (and key into data_df)
+    rupture_name: str
+        Used in the title
+    qcore_data_dir: Path
+        Path to qcore data dir,
+        required for plotting road & topo
+        Set to None to plot no roads or topo
+    low_bg_quality: bool
+        If True then no roads or topo are
+        plotted. Good for tuning the figure
+        due to long run-time required to topo
+        and roads
+
+    Returns
+    -------
+    fig: Figure
+    """
+    region = (
+        data_df.lon.min(),
+        data_df.lon.max(),
+        data_df.lat.min(),
+        data_df.lat.max(),
+    ) if region is None else region
+
+    nz_map_data = None if qcore_data_dir is None else NZMapData.load(qcore_data_dir)
+    fig = gen_region_fig(
+        rupture_name,
+        region,
+        projection=f"M17.0c",
+        plot_roads=True if nz_map_data is not None else False,
+        plot_topo=True if nz_map_data is not None else False,
+        map_data=nz_map_data,
+    )
+
+    # Apply exponential
+    cur_df = data_df[["lon", "lat"]].copy()
+    cur_df[im] = np.exp(data_df[im].values)
+
+    grid = create_grid(cur_df, im, region=region)
+
+    cb_min, cb_max = (
+        np.round(np.quantile(cur_df[im].values, 0.02), 3),
+        np.round(np.quantile(cur_df[im].values, 0.98), 3),
+    )
+    plot_grid(
+        fig,
+        grid,
+        "hot",
+        (cb_min, cb_max, np.abs(cb_max - cb_min) / 10),
+        ("white", "black"),
+        reverse_cmap=True,
+        transparency=35,
+    )
+
+    return fig

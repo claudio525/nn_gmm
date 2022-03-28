@@ -271,6 +271,37 @@ class ResPlotGen:
         )
         plt.close()
 
+    def gen_site_res_plot(
+        self,
+        db_ffp: Path,
+        im: str,
+        site_ids: Sequence[str],
+        output_dir: Path,
+        prefix: str = None,
+        site_names: Sequence[str] = None,
+    ):
+        """Creates residual distribution plots for the specified sites"""
+        output_dir.mkdir(exist_ok=True, parents=True)
+        prefix = f"{prefix}_" if prefix is not None else ""
+
+        columns = ["site", im, f"{im}_est"]
+        data_df = ResultDB.get_data_static(db_ffp, columns)
+        for ix, cur_site_id in enumerate(site_ids):
+            cur_site_label = cur_site_id if site_names is None else site_names[ix]
+            cur_mask = data_df.site == cur_site_id
+
+            fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
+            self.add_res_hist(ax, data_df.loc[cur_mask], im)
+            ax.set_title(cur_site_label)
+            ax.legend()
+
+            fig.tight_layout()
+            fig.savefig(
+                output_dir
+                / f"{prefix}{im.replace('.', 'p')}_{cur_site_label}_residual_distribution.png"
+            )
+            plt.close()
+
     def gen_binned_res_plot(
         self,
         db_ffp: Path,
