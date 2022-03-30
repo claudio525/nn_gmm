@@ -440,6 +440,9 @@ def main(
             ]
             assert np.all((fault_density_weights <= 1.0) & (fault_density_weights > 0.0))
 
+            # Normalise to sum to the number of stations
+            fault_density_weights = fault_density_weights * (fault_density_weights.shape[0] / fault_density_weights.sum())
+
         station_density_weights = None
         if use_site_density_weights:
             print(f"Computing station density weights for each site")

@@ -40,6 +40,11 @@ data_dirs_lookup = {
         "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/val"],
         "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train/stats.csv",
     },
+    "fsw": {
+        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/train"],
+        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/val"],
+        "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/train/stats.csv",
+    },
     "tmp": {
         "train_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/train"],
         "val_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/val"],
@@ -109,21 +114,16 @@ def main(
         # "hidden_layer_func": ml_tools.hidden_layers.selu,
         # "hidden_layer_config": {"l2": 0.001},
         # "hidden_layer_config": {"dropout": None},
-        "units": [32, 32],
+        "units": [32, 32, 32],
         "output_units": [32, 32],
     }
-
-    # def lr_scheduler(epoch, lr):
-    #     if epoch > 0 and epoch % 250 == 0:
-    #         return lr / 10
-    #     return lr
 
     train_config = {
         # "batch_size": 5120,
         "batch_size": 10240,
         # "batch_size": 2048,
         "shuffle_buffer_size": int(5e6),
-        "n_epochs": 20,
+        "n_epochs": 50,
         "optimizer": tf.keras.optimizers.Adam(),
         # "optimizer": tf.keras.optimizers.SGD(learning_rate=0.1),
         "loss": "mse",

@@ -228,7 +228,7 @@ class NeuralNetworkGMM(GMM):
             raise ValueError("Not all required features exist in the given dataframe")
 
         # Run estimation
-        y_est = self.model(X.loc[:, self.features].values.astype(float))
+        y_est = self.model(X.loc[:, self.features].values.astype(float)).numpy()
         # y_est = self.model.predict(X.loc[:, self.features].values.astype(float), batch_size=1024)
 
         # Multi-output model
