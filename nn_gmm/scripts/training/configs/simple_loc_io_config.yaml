@@ -1,0 +1,17 @@
+feature_config:
+        dip: min_max
+        rake: min_max
+        mag: standard
+        vs30: standard
+        rrup: standard
+        X: standard
+        Y: standard
+        Z: standard
+im_config:
+#        PGA: standard
+#        pSA_0.1: standard
+#        pSA_0.5: standard
+#        pSA_1.0: standard
+        pSA_3.0: standard
+#        pSA_5.0: standard
+#        pSA_10.0: standard

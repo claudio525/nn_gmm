@@ -1,7 +1,7 @@
 import pandas as pd
 from pathlib import Path
 import tempfile
-from typing import Tuple, Union, NamedTuple
+from typing import Tuple, Union, NamedTuple, Sequence
 
 import pygmt
 import geopandas
@@ -9,6 +9,8 @@ import xarray as xr
 import numpy as np
 from scipy import interpolate
 from shapely import geometry
+
+from qcore import nhm
 
 
 class NZMapData(NamedTuple):
@@ -49,7 +51,7 @@ DEFAULT_PLT_KWARGS = dict(
     road_pen_width=0.01,
     highway_pen_width=0.5,
     coastline_pen_width=0.05,
-    topo_cmap="gray"
+    topo_cmap="gray",
 )
 
 
@@ -59,6 +61,7 @@ def gen_region_fig(
     projection: str = f"M17.0c",
     map_data: NZMapData = None,
     plot_roads: bool = True,
+    plot_highways: bool = True,
     plot_topo: bool = True,
     plot_kwargs=None,
 ):
@@ -114,11 +117,6 @@ def gen_region_fig(
     # Use the custom NZ data
     else:
         # Plot coastline and background water
-        fig.plot(
-            data=map_data.coastline_df,
-            pen=f"{plot_kwargs['coastline_pen_width']}p,black",
-            color="lightgray",
-        )
         water_bg = geopandas.GeoSeries(
             geometry.LineString(
                 [
@@ -130,10 +128,19 @@ def gen_region_fig(
             )
         )
         fig.plot(water_bg, color="lightblue", straight_line=True)
+        fig.plot(
+            data=map_data.coastline_df,
+            pen=f"{plot_kwargs['coastline_pen_width']}p,black",
+            color="lightgray",
+        )
 
         # Add topo
         if plot_topo:
-            pygmt.makecpt(series=(-10_000, 3000, 10), continuous=False, cmap=plot_kwargs["topo_cmap"])
+            pygmt.makecpt(
+                series=(-10_000, 3000, 10),
+                continuous=False,
+                cmap=plot_kwargs["topo_cmap"],
+            )
             fig.grdimage(
                 grid=map_data.topo_grid,
                 shading=map_data.topo_shading_grid,
@@ -149,6 +156,7 @@ def gen_region_fig(
             fig.plot(
                 data=map_data.road_df, pen=f"{plot_kwargs['road_pen_width']}p,white"
             )
+        if plot_highways:
             fig.plot(
                 data=map_data.highway_df,
                 pen=f"{plot_kwargs['highway_pen_width']}p,yellow",
@@ -249,8 +257,7 @@ def plot_grid(
         if cb_label is not None:
             cb_frame.append(f'x+l"{cb_label}"')
         fig.colorbar(
-            cmap=cpt_ffp,
-            frame=cb_frame,
+            cmap=cpt_ffp, frame=cb_frame,
         )
 
 
@@ -367,11 +374,10 @@ def im_plot(
     fig: Figure
     """
     region = (
-        data_df.lon.min(),
-        data_df.lon.max(),
-        data_df.lat.min(),
-        data_df.lat.max(),
-    ) if region is None else region
+        (data_df.lon.min(), data_df.lon.max(), data_df.lat.min(), data_df.lat.max(),)
+        if region is None
+        else region
+    )
 
     nz_map_data = None if qcore_data_dir is None else NZMapData.load(qcore_data_dir)
     fig = gen_region_fig(
@@ -402,5 +408,76 @@ def im_plot(
         reverse_cmap=True,
         transparency=35,
     )
+
+    return fig
+
+
+def faults_plot(
+    rupture_df: pd.DataFrame,
+    fault_data: Sequence[nhm.NHMFault],
+    region: Union[str, Tuple[float, float, float, float]] = (
+        164.8,
+        179.4,
+        -47.5,
+        -36.0,
+    ),
+    map_data: NZMapData = None,
+    title: str = "Faults"
+):
+    """
+    Creates a figure showing all
+    fault traces and the hypocentre of historic events
+
+    Parameters
+    ----------
+    rupture_df: Dataframe
+        Contains the hypocentre locations
+        Required columns: [hlon, hlat, historic]
+        where historic indicates if its an historic event
+        or a realisation
+    fault_data: list of NHMFault
+    region: str or tuple of floats
+        Region of the plot, see gen_region_fig
+        for full details
+    map_data: NZMapData
+        Custom map data from qcore
+
+    Returns
+    -------
+    fig: Figure
+    """
+    fig = gen_region_fig(
+        title,
+        region,
+        map_data=map_data,
+        plot_topo=True,
+        plot_roads=False,
+        plot_highways=True,
+        plot_kwargs={"highway_pen_width": 0.1, "coastline_pen_width": 0.01},
+    )
+
+    # Plot the historic events
+    fig.plot(
+        x=rupture_df.loc[rupture_df.historic].hlon,
+        y=rupture_df.loc[rupture_df.historic].hlat,
+        size=0.005 * (2 ** rupture_df.loc[rupture_df.historic].mag),
+        style="cc",
+        color="white",
+        pen="0.15p,black",
+    )
+
+    # Plot the fault traces
+    for cur_fault in fault_data:
+        cur_trace = cur_fault.trace
+        fig.plot(x=cur_trace[:, 0], y=cur_trace[:, 1], pen="0.5p,black")
+
+    # Plot the cybershake hypocentres
+    # fig.plot(
+    #     x=rupture_df.loc[~rupture_df.historic].hlon,
+    #     y=rupture_df.loc[~rupture_df.historic].hlat,
+    #     style="c0.05c",
+    #     color="black",
+    #     pen="black",
+    # )
 
     return fig

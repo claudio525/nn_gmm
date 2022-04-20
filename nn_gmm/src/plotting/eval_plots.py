@@ -1,11 +1,13 @@
 import multiprocessing as mp
-import copy
 from pathlib import Path
-from typing import Sequence, Dict
+from typing import Sequence, Dict, Tuple
 from importlib import reload
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from nn_gmm.src import eval
 from nn_gmm.src.model import GMM
 from nn_gmm.src.plotting.ResPlotGen import ResPlotGen
@@ -15,6 +17,296 @@ from nn_gmm.src.eval import DEFAULT_CONST_FEATURES, DEFAULT_METRICS
 from nn_gmm.src.plotting import plotting_utils
 from nn_gmm.src.console import console
 from nn_gmm.src.plotting import spatial_plotting
+from nn_gmm.src.ResultDB import ResultDB
+from nn_gmm.src import data
+from nn_gmm.src import utils
+
+
+def gen_basin_comp_mag_rrup_plots(
+    model_dirs: Sequence[Path],
+    im: str,
+    metrics: Sequence[str],
+    regions: Sequence[str],
+    basin_dir: Path,
+    output_dir: Path,
+    model_names: Sequence[str] = None,
+):
+    """Creates a figure for each metric-region pair,
+    showing the metrics trend (wrt. Magnitude and Rrup)
+    for the region"""
+    console.print(
+        f"[orange]This function assumes that all models were trained/validated on the same data. Otherwise this plot is not valid.[/]"
+    )
+
+    YAXIS_LIMITS = dict(bias=(-1.0, 1.0), sigma=(0.0, 0.8))
+
+    # Compute the bins
+    # As max/min values are the same for all models, just use the first one
+    cur_model_dir = model_dirs[0]
+    data_df = ResultDB.get_data_static(
+        cur_model_dir / "train_predictions.hdf5",
+        ["mag", "rrup", "site", "fault", "rupture"],
+    )
+
+    # Create the magnitude and rrup bin sizes
+    mag_step = 0.5
+    mag_bins = np.arange(
+        data_df.mag.min() - (mag_step / 2.0),
+        data_df.mag.max() + (mag_step / 2.0),
+        mag_step,
+    )
+
+    rrup_step = 20
+    rrup_bins = np.arange(0, data_df.rrup.max() + (rrup_step / 2.0), rrup_step)
+
+    # Compute the data for each model
+    train_metric_results = {}
+    val_metric_results = {}
+
+    for cur_model_dir, cur_model_name in zip(model_dirs, model_names):
+        console.print(f"Processing model {cur_model_dir.stem}")
+        (
+            cur_train_basin_metrics,
+            cur_val_basin_metrics,
+        ) = eval.comp_train_val_basin_metrics(
+            cur_model_dir,
+            basin_dir,
+            print_metrics=False,
+            mag_bins=mag_bins,
+            rrup_bins=rrup_bins,
+            metrics=metrics,
+        )
+
+        train_metric_results[cur_model_name] = cur_train_basin_metrics
+        val_metric_results[cur_model_name] = cur_val_basin_metrics
+
+    # Get the basin stations
+    basin_dict = data.load_basin_stations(basin_dir)
+
+    model_colors = sns.color_palette("hls", len(model_dirs))
+    linewidth = 0.5
+
+    for cur_region in regions:
+        # Get the current basin/region stations
+        if cur_region == "BaseGrid":
+            cur_sites_mask = data.get_base_grid_stations_mask(
+                data_df.site.values.astype(str)
+            )
+        else:
+            try:
+                cur_sites = basin_dict[cur_region]
+            except KeyError:
+                console.print(f"[red]Failed to load sites for region {cur_region}. Skipping![/]")
+                continue
+
+            cur_sites_mask = utils.pandas_isin(
+                data_df.site.values.astype(str), cur_sites
+            )
+
+        cur_rup_group = data_df.loc[cur_sites_mask].groupby("rupture").first()
+
+        for cur_metric in metrics:
+            cur_mag_metric_keys = [
+                f"{cur_metric}_mag_{cur_mag}_{cur_mag + mag_step}"
+                for cur_mag in mag_bins
+            ]
+            cur_rrup_metric_keys = [
+                f"{cur_metric}_rrup_{cur_rrup}_{cur_rrup + rrup_step}"
+                for cur_rrup in rrup_bins
+            ]
+
+            # Create the figure
+            fig = plt.figure(figsize=(16, 10))
+
+            ax_dict = fig.subplot_mosaic(
+                """
+                AB
+                CD
+                CD
+                CD
+                """
+            )
+
+            # Histogram of data in current basin
+            ax_dict["A"].hist(cur_rup_group.mag.values, bins=mag_bins, log=True)
+            ax_dict["A"].set_ylabel("Number of Ruptures")
+
+            ax_dict["B"].hist(
+                data_df.loc[cur_sites_mask].rrup.values, bins=rrup_bins, log=True
+            )
+            ax_dict["B"].set_ylabel("Number of Datapoints")
+
+            # Plot the models
+            for cur_model_dir, cur_model_name, cur_color in zip(
+                model_dirs, model_names, model_colors
+            ):
+                cur_mag_data = pd.Series(
+                    index=mag_bins + (mag_step / 2),
+                    data=[
+                        train_metric_results[cur_model_name][cur_region][im].get(
+                            cur_key, np.nan
+                        )
+                        for cur_key in cur_mag_metric_keys
+                    ],
+                    name=cur_metric,
+                )
+                cur_rrup_data = pd.Series(
+                    index=rrup_bins + (rrup_step / 2),
+                    data=[
+                        train_metric_results[cur_model_name][cur_region][im].get(
+                            cur_key, np.nan
+                        )
+                        for cur_key in cur_rrup_metric_keys
+                    ],
+                    name=cur_metric,
+                )
+
+                ax_dict["C"].plot(
+                    cur_mag_data.index.values,
+                    cur_mag_data.values,
+                    marker=".",
+                    c=cur_color,
+                    linewidth=linewidth,
+                    label=cur_model_name,
+                )
+                ax_dict["D"].plot(
+                    cur_rrup_data.index.values,
+                    cur_rrup_data.values,
+                    marker=".",
+                    c=cur_color,
+                    linewidth=linewidth,
+                    label=cur_model_name,
+                )
+
+            # Magnitude plot settings
+            ax_dict["C"].set_xlabel(f"Magnitude")
+            ax_dict["C"].set_ylabel(eval.FANCY_METRICS[cur_metric])
+            ax_dict["C"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+            ax_dict["C"].set_ylim(YAXIS_LIMITS.get(cur_metric, (None, None)))
+            ax_dict["D"].legend()
+
+            ax_dict["A"].get_shared_x_axes().join(ax_dict["A"], ax_dict["C"])
+            ax_dict["A"].set_xticklabels([])
+
+            # Rrup plot settings
+            ax_dict["D"].set_xlabel("$R_{Rup}$")
+            ax_dict["D"].set_ylabel(eval.FANCY_METRICS[cur_metric])
+            ax_dict["D"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+            ax_dict["D"].set_ylim(YAXIS_LIMITS.get(cur_metric, (None, None)))
+
+            ax_dict["B"].get_shared_x_axes().join(ax_dict["B"], ax_dict["D"])
+            ax_dict["B"].set_xticklabels([])
+
+            fig.suptitle(cur_region)
+            fig.tight_layout()
+            fig.subplots_adjust(hspace=0)
+            fig.savefig(output_dir / f"{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png")
+
+            plt.close(fig)
+
+
+def gen_basin_metric_comp_matrix(
+    models: Sequence[Tuple[Path, str]], im: str, metric: str, output_ffp: Path, val: bool = False
+):
+    """Creates a matrix plot the metric
+    for the specified models & available basins
+
+    Parameters
+    ----------
+    models: sequence of tuples
+        Each tuple contains the path to the model directory
+        and the model name to be used (or None)
+    im: string
+    metric: string
+        The metric to compare
+        Has to be a valid metric in the
+        computed basin metrics
+    val: bool, optional
+        Use validation data
+    """
+
+    def _load_metric(model_dir: Path, im: str, metric: str, val: bool = False):
+        data_dir = (
+            model_dir / "val_basin_metrics"
+            if val
+            else model_dir / "train_basin_metrics"
+        )
+        metric_dict = {
+            cur_ffp.stem: pd.read_csv(cur_ffp, index_col=0).loc[metric, im]
+            for cur_ffp in list(data_dir.glob("*.csv"))
+        }
+
+        metric_dict["AllStations"] = pd.read_csv(
+            model_dir / "train_metrics.csv", index_col=0
+        ).loc[metric, im]
+        return metric_dict
+
+
+    CMAP_OPTIONS = dict(
+        bias=dict(cmap="seismic_r", vmin=-1.0, vmax=1.0),
+        sigma=dict(cmap="hot_r", vmin=0.0, vmax=0.8),
+        mae=dict(cmap="hot_r", vmin=0.0, vmax=None),
+        mse=dict(cmap="hot_r", vmin=0.0, vmax=None),
+    )
+    # metric_type = metric.split("_")[0]
+    # assert metric_type in CB_LABELS
+
+    metric_results = [
+        pd.Series(
+            _load_metric(cur_model_dir, im, metric, val=val),
+            name=cur_model_dir.stem if cur_model_name is None else cur_model_name,
+        )
+        for cur_model_dir, cur_model_name in models
+    ]
+
+    metrics_df = pd.concat(metric_results, axis=1).T
+
+    fig = plt.figure(figsize=(metrics_df.shape[1], metrics_df.shape[0] + 2))
+    ax = fig.add_subplot(1, 1, 1)
+
+    model_labels = (
+        [cur_col[:11] for cur_col in metrics_df.index.values]
+        if models[0][1] is None
+        else metrics_df.index.values
+    )
+
+    p = ax.matshow(
+        metrics_df,
+        cmap=CMAP_OPTIONS[metric]["cmap"],
+        vmin=CMAP_OPTIONS[metric]["vmin"],
+        vmax=CMAP_OPTIONS[metric]["vmax"],
+    )
+    plt.colorbar(
+        p, location="bottom", pad=0.01, label=eval.FANCY_METRICS[metric],
+    )
+    ax.set_yticks(np.arange(metrics_df.shape[0]), labels=model_labels)
+    ax.set_xticks(np.arange(metrics_df.shape[1]), labels=metrics_df.columns.values)
+    ax.text(
+        0.1,
+        1.2,
+        f"{eval.FANCY_METRICS[metric]}",
+        horizontalalignment="right",
+        verticalalignment="bottom",
+        transform=ax.transAxes,
+        fontsize="x-large",
+        weight="bold",
+    )
+
+    plt.setp(ax.get_xticklabels(), rotation=25, ha="left", rotation_mode="anchor")
+
+    for i in range(metrics_df.shape[0]):
+        for j in range(metrics_df.shape[1]):
+            ax.text(
+                j,
+                i,
+                f"{metrics_df.iloc[i, j]:.3f}",
+                ha="center",
+                va="center",
+                color="k",
+            )
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
 
 
 def gen_residual_plots(
@@ -450,4 +742,3 @@ def _gen_count_plot(
         dpi=900,
         anti_alias=True,
     )
-

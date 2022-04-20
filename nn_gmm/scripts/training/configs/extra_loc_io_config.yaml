@@ -1,0 +1,29 @@
+feature_config:
+        dip: min_max
+        rake: min_max
+        mag: standard
+        vs30: standard
+        s: standard
+        theta: min_max
+        z1p0: standard
+        z2p5: standard
+        vs500: standard
+        rrup: standard
+        rx: standard
+        rjb: standard
+        ry: standard
+        active_shallow: null
+        volcanic: null
+#        lat: standard
+#        lon: standard
+        X: standard
+        Y: standard
+        Z: standard
+im_config:
+#        PGA: standard
+#        pSA_0.1: standard
+#        pSA_0.5: standard
+#        pSA_1.0: standard
+        pSA_3.0: standard
+#        pSA_5.0: standard
+#        pSA_10.0: standard

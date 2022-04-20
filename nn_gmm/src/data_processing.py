@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Union
 
 import numpy as np
 import pandas as pd
@@ -270,3 +270,11 @@ def apply_one_hot_enc(df: pd.DataFrame, col: str, enc_dict: Dict):
         df.loc[df[col] == key, value] = 1
 
     return df.drop(columns=[col])
+
+
+def get_XYZ_from_LL(lon: Union[float, np.ndarray], lat: Union[float, np.ndarray]):
+    x = np.cos(lat) * np.cos(lon)
+    y = np.cos(lat) * np.sin(lon)
+    z = np.sin(lat)
+
+    return x, y, z

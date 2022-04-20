@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Union, Dict, List, Tuple
 
 import ml_tools.utils
-import xgboost as xgb
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+import ml_tools as mlt
 
 from . import data
 from . import data_processing
@@ -121,93 +121,93 @@ class GMM:
         return mean_df
 
 
-class XGBoostGMM(GMM):
-    def __init__(self, model: xgb.Booster, input_config: Dict):
-        super().__init__(input_config)
-
-        self.model = model
-
-    def predict(
-        self,
-        X: pd.DataFrame,
-        pre_process: bool = True,
-        result_df_index: np.ndarray = None,
-    ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
-        X = self._pre_process(X.copy()) if pre_process else X
-
-        # Ensure that all the required features exist
-        if not np.all(np.isin(self.features, X.columns.values.astype(str))):
-            raise ValueError("Not all required features exist in the given dataframe")
-
-        dX = xgb.DMatrix(X.loc[:, self.features])
-        y_est = self.model.predict(dX)
-
-        # Convert to dataframes
-        result_df_index = (
-            result_df_index if result_df_index is not None else X.index.values
-        )
-        mean_df = pd.DataFrame(data=y_est, columns=self.outputs, index=result_df_index,)
-
-        # Apply inverse pre-processing for outputs if required
-        mean_df = self._post_process(mean_df)
-
-        return mean_df, None
-
-    def predict_dirs(
-        self,
-        data_dirs: List[Path],
-        batch_size: int = 1_000_000,
-        ims: List[str] = None,
-        features: List[str] = None,
-        metadata: List[str] = None,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, None]:
-        """See GMM base class for the full docstring"""
-        if ims is not None:
-            assert len(ims) == 1, "XGBoost models are only single-output"
-
-        # Get feature details, have to be same across all directories anyways
-        features = [] if features is None else features
-        with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
-            feature_details = pickle.load(f)
-
-        # Prepare dataset
-        ds = data.load_dataset(
-            data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
-        ).prefetch(tf.data.AUTOTUNE)
-
-        # Run predictions
-        ims = ims if ims is not None else list(self.outputs)
-        sim_dfs, est_dfs = [], []
-        data_columns = list(self.features) + ["id"] + list(ims)
-        for ix, cur_data in enumerate(ds.as_numpy_iterator()):
-            console.print(f"Processing batch - {ix + 1}")
-            cur_df = pd.DataFrame.from_dict(
-                {
-                    cur_key: cur_value
-                    for cur_key, cur_value in cur_data.items()
-                    if cur_key in data_columns
-                }
-            )
-            cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
-            cur_est_df, _ = self.predict(cur_df, pre_process=True)
-
-            sim_dfs.append(cur_df[np.unique(ims + features + metadata)])
-            est_dfs.append(cur_est_df)
-            del cur_df
-
-        est_df = pd.concat(est_dfs)
-        return pd.concat(sim_dfs), est_df, None
-
-    @classmethod
-    def load(cls, model_dir: Union[str, Path]):
-        model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
-
-        model = xgb.Booster()
-        model.load_model(model_dir / "xgb.model")
-
-        input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
-
-        return cls(model, input_config)
+# class XGBoostGMM(GMM):
+#     def __init__(self, model: xgb.Booster, input_config: Dict):
+#         super().__init__(input_config)
+#
+#         self.model = model
+#
+#     def predict(
+#         self,
+#         X: pd.DataFrame,
+#         pre_process: bool = True,
+#         result_df_index: np.ndarray = None,
+#     ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
+#         X = self._pre_process(X.copy()) if pre_process else X
+#
+#         # Ensure that all the required features exist
+#         if not np.all(np.isin(self.features, X.columns.values.astype(str))):
+#             raise ValueError("Not all required features exist in the given dataframe")
+#
+#         dX = xgb.DMatrix(X.loc[:, self.features])
+#         y_est = self.model.predict(dX)
+#
+#         # Convert to dataframes
+#         result_df_index = (
+#             result_df_index if result_df_index is not None else X.index.values
+#         )
+#         mean_df = pd.DataFrame(data=y_est, columns=self.outputs, index=result_df_index,)
+#
+#         # Apply inverse pre-processing for outputs if required
+#         mean_df = self._post_process(mean_df)
+#
+#         return mean_df, None
+#
+#     def predict_dirs(
+#         self,
+#         data_dirs: List[Path],
+#         batch_size: int = 1_000_000,
+#         ims: List[str] = None,
+#         features: List[str] = None,
+#         metadata: List[str] = None,
+#     ) -> Tuple[pd.DataFrame, pd.DataFrame, None]:
+#         """See GMM base class for the full docstring"""
+#         if ims is not None:
+#             assert len(ims) == 1, "XGBoost models are only single-output"
+#
+#         # Get feature details, have to be same across all directories anyways
+#         features = [] if features is None else features
+#         with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
+#             feature_details = pickle.load(f)
+#
+#         # Prepare dataset
+#         ds = data.load_dataset(
+#             data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
+#         ).prefetch(tf.data.AUTOTUNE)
+#
+#         # Run predictions
+#         ims = ims if ims is not None else list(self.outputs)
+#         sim_dfs, est_dfs = [], []
+#         data_columns = list(self.features) + ["id"] + list(ims)
+#         for ix, cur_data in enumerate(ds.as_numpy_iterator()):
+#             console.print(f"Processing batch - {ix + 1}")
+#             cur_df = pd.DataFrame.from_dict(
+#                 {
+#                     cur_key: cur_value
+#                     for cur_key, cur_value in cur_data.items()
+#                     if cur_key in data_columns
+#                 }
+#             )
+#             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
+#             cur_est_df, _ = self.predict(cur_df, pre_process=True)
+#
+#             sim_dfs.append(cur_df[np.unique(ims + features + metadata)])
+#             est_dfs.append(cur_est_df)
+#             del cur_df
+#
+#         est_df = pd.concat(est_dfs)
+#         return pd.concat(sim_dfs), est_df, None
+#
+#     @classmethod
+#     def load(cls, model_dir: Union[str, Path]):
+#         model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
+#
+#         model = xgb.Booster()
+#         model.load_model(model_dir / "xgb.model")
+#
+#         input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
+#
+#         return cls(model, input_config)
 
 
 class NeuralNetworkGMM(GMM):
@@ -395,14 +395,14 @@ def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras
 
 
 def create_reg_multi_output_model(
-    model_config: Dict, n_inputs: int, output_names: List[str]
+    hyper_params: Dict, n_inputs: int, output_names: List[str]
 ):
     """Creates a functional keras model from the model config,
     with multiple linear outputs and possible sub-nets per output
 
     Parameters
     ----------
-    model_config: dictionary
+    hyper_params: dictionary
         Model config,
     n_inputs
     n_outputs
@@ -411,10 +411,11 @@ def create_reg_multi_output_model(
     -------
     keras.Model
     """
-    hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config.get("hidden_layer_config", dict())
-    units = model_config["units"]
-    output_units = model_config.get("output_units")
+    hidden_layer_func = mlt.tf_utils.get_hidden_layer_fn(hyper_params["hidden_layer_func"])
+
+    hidden_layer_config = dict(l2=hyper_params.get("l2"), dropout=hyper_params.get("dropout"))
+    units = hyper_params["units"]
+    output_units = hyper_params.get("output_units")
 
     inputs = keras.Input(n_inputs, name="inputs")
 

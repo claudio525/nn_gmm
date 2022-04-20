@@ -1,3 +1,4 @@
+import multiprocessing as mp
 from pathlib import Path
 from typing import Dict, Sequence, Tuple
 
@@ -13,14 +14,36 @@ from .console import console
 from . import utils
 
 MAGNITUDE_BINS = np.arange(3, 10)
+RRUP_BINS = np.arange(0, 500, 50, dtype=int)
 
-DEFAULT_METRICS = ("bias", "sigma")
-ALL_SPATIAL_METRICS = ("bias", "sigma", "mean_abs_residual", "count", "sum_squared_residual")
+DEFAULT_METRICS = ("bias", "sigma", "mae", "mse")
+ALL_SPATIAL_METRICS = (
+    "bias",
+    "sigma",
+    "mean_abs_residual",
+    "count",
+    "sum_squared_residual",
+)
 
-DEFAULT_EVAL_SITES = dict(chch_site = "02007fb",
-nelson_site = "02008b5",
-wellington_site = "0200ab4",
-blenheim_site = "020099b",)
+FANCY_METRICS = dict(
+    bias=r"Bias, $\frac{1}{N} [\Sigma^N (lnIM - ln\hat{IM})]$",
+    sigma=r"Error Residual, $\sigma_{\Delta_{i, j}}$",
+    mae="MAE",
+    mse="MSE",
+)
+
+FANCY_SPATIAL_METRICS = dict(bias=r"Bias, $\frac{1}{N} [\Sigma^N (lnIM - ln\hat{IM})]$",
+                             sigma=r"$\sigma_{\Delta}$",
+                             mean_abs_residual="MAE",
+                             count="Count, N",
+                             sum_squared_residual="Sum of Squared Error")
+
+DEFAULT_EVAL_SITES = dict(
+    chch_site="02007fb",
+    nelson_site="02008b5",
+    wellington_site="0200ab4",
+    blenheim_site="020099b",
+)
 
 DEFAULT_CONST_FEATURES = dict(
     mag=7.0,
@@ -38,12 +61,18 @@ DEFAULT_CONST_FEATURES = dict(
     rjb=50,
     rx=50,
     ry=50,
+    # CCCC (I think)
     lat=-43.53145848236242,
     lon=172.63054396033107,
+    X=-0.8890043834110928,
+    Y=0.14077926825788484,
+    Z=0.4357205571288063,
 )
 
 
-def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path, batch_size: int = 1_000_000):
+def write_predictions(
+    model_dir: Path, data_dir: Path, output_ffp: Path, batch_size: int = 1_000_000
+):
     """
     Runs predictions for the specified directory and model, and saves
     as a ResultDB
@@ -59,7 +88,10 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path, batch_s
 
     console.print("Running predictions")
     sim_df, est_df, _ = gmm.predict_dirs(
-        [data_dir], features=list(gmm.features), metadata=["lat", "lon"], batch_size=batch_size
+        [data_dir],
+        features=list(gmm.features),
+        metadata=["lat", "lon"],
+        batch_size=batch_size,
     )
     assert np.all(sim_df.index == est_df.index)
 
@@ -70,8 +102,11 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path, batch_s
     console.print("Computing station names")
     sim_df["site"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(1)
 
-    console.print("Computing event names")
-    sim_df["event"] = sim_df.index.str.split("_REL", n=1, expand=True).get_level_values(
+    console.print("Computing fault names")
+    sim_df["fault"] = sim_df.index.str.split("_", n=1, expand=True).get_level_values(0)
+
+    console.print("Computing rupture names")
+    sim_df["rupture"] = sim_df.index.str.rsplit("_", n=1, expand=True).get_level_values(
         0
     )
 
@@ -79,7 +114,9 @@ def write_predictions(model_dir: Path, data_dir: Path, output_ffp: Path, batch_s
     ResultDB.write_data(sim_df, output_ffp)
 
 
-def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool = True, batch_size: int = 1_000_000):
+def write_train_val_predictions(
+    data_dir: Path, model_dir: Path, verbose: bool = True, batch_size: int = 1_000_000
+):
     """Writes the estimated value (along with "true" values and features)
      for the specified training data directory
 
@@ -95,12 +132,26 @@ def write_train_val_predictions(data_dir: Path, model_dir: Path, verbose: bool =
 
     if verbose:
         console.print("Running training data predictions")
-    write_predictions(model_dir, train_data_dir, model_dir / "train_predictions.hdf5", batch_size=batch_size)
+    write_predictions(
+        model_dir,
+        train_data_dir,
+        model_dir / "train_predictions.hdf5",
+        batch_size=batch_size,
+    )
 
     if verbose:
         console.print("Running validation data predictions")
-    write_predictions(model_dir, val_data_dir, model_dir / "val_predictions.hdf5", batch_size=batch_size)
+    write_predictions(
+        model_dir,
+        val_data_dir,
+        model_dir / "val_predictions.hdf5",
+        batch_size=batch_size,
+    )
 
+
+def mae(y: np.ndarray, y_est: np.ndarray):
+    """Compute Mean Absolute Error"""
+    return np.mean(np.abs(y - y_est))
 
 def mse(y: np.ndarray, y_est: np.ndarray):
     """Computes MSE"""
@@ -134,7 +185,9 @@ def bias(y: np.ndarray, y_est: np.ndarray):
 
 
 def compute_spatial_metrics(
-    data_df: pd.DataFrame, ims: Sequence[str], metrics: Sequence[str] = ALL_SPATIAL_METRICS
+    data_df: pd.DataFrame,
+    ims: Sequence[str],
+    metrics: Sequence[str] = ALL_SPATIAL_METRICS,
 ):
     """Computes the specified metrics for each site"""
     metric_results = {}
@@ -172,27 +225,91 @@ def compute_spatial_metrics(
 
 
 def comp_basin_metrics(
-    data_df: pd.DataFrame, basin_dict: Dict[str, np.ndarray], ims: Sequence[str]
+    data_df: pd.DataFrame,
+    basin_dict: Dict[str, np.ndarray],
+    ims: Sequence[str],
+    mag_bins: Sequence[float] = MAGNITUDE_BINS,
+    rrup_bins: Sequence[int] = RRUP_BINS,
+    metrics: Sequence[str] = DEFAULT_METRICS,
+    n_procs: int = 4,
 ):
     """Computes basin metrics"""
-    metrics = {}
-    for cur_basin, cur_stations in basin_dict.items():
-        cur_basin_data = data_df.loc[
-            utils.pandas_isin(data_df.site.values, cur_stations)
-        ]
-        cur_basin_metrics = compute_metrics(
-            cur_basin_data, ims, n_samples=data_df.shape[0]
+    with mp.Pool(n_procs) as p:
+        results = p.starmap(
+            compute_metrics,
+            [
+                (
+                    data_df.loc[utils.pandas_isin(data_df.site.values, cur_stations)],
+                    ims,
+                    mag_bins,
+                    rrup_bins,
+                    metrics,
+                    data_df.shape[0],
+                )
+                for cur_basin, cur_stations in basin_dict.items()
+            ],
         )
 
-        metrics[cur_basin] = cur_basin_metrics
+    metric_results = {
+        cur_key: cur_result for cur_result, cur_key in zip(results, basin_dict.keys())
+    }
 
-    return metrics
+    return metric_results
+
+
+def _compute_metrics(
+    metrics: Sequence[str],
+    key_suffix: str,
+    y: np.ndarray,
+    y_est: np.ndarray,
+    n_samples: int,
+    add_count: bool,
+) -> Tuple[Dict, Dict]:
+    cur_metrics, counts = {}, {}
+
+    # Standard MSE
+    if "mse" in metrics:
+        cur_metrics[f"mse{key_suffix}"] = mse(y, y_est)
+
+        if add_count:
+            counts[f"mse{key_suffix}"] = y.shape[0] / n_samples
+
+    # Mean Absolute error
+    if "mae" in metrics:
+        cur_metrics[f"mae{key_suffix}"] = mae(y, y_est)
+
+        if add_count:
+            counts[f"mae{key_suffix}"] = y.shape[0] / n_samples
+
+    # Mean absolute log ratio
+    if "malr" in metrics:
+        cur_metrics[f"malr{key_suffix}"] = mean_absolute_ln_ratio(y, y_est)
+
+        if add_count:
+            counts[f"malr{key_suffix}"] = y.shape[0] / n_samples
+
+    # Standard deviation of residual (in log-space)
+    if "sigma" in metrics:
+        cur_metrics[f"sigma{key_suffix}"] = sigma_ln_ratio(y, y_est)
+
+        if add_count:
+            counts[f"sigma{key_suffix}"] = y.shape[0] / n_samples
+
+    # Bias of predictions (i.e. mean of residuals)
+    if "bias" in metrics:
+        cur_metrics[f"bias{key_suffix}"] = bias(y, y_est)
+
+        if add_count:
+            counts[f"bias{key_suffix}"] = y.shape[0] / n_samples
+
+    return cur_metrics, counts
 
 
 def compute_metrics(
     data_df: pd.DataFrame,
     ims: Sequence[str],
     mag_bins: Sequence[float] = MAGNITUDE_BINS,
+    rrup_bins: Sequence[int] = RRUP_BINS,
     metrics: Sequence[str] = DEFAULT_METRICS,
     n_samples: int = None,
 ):
@@ -203,7 +320,9 @@ def compute_metrics(
     ----------
     data_df: Dataframe
     ims: list of strings
-    mag_bins: Sequence of floats, optional
+    rrup_bins: Sequence of floats, optional
+        Magnitude bins for which to compute the metrics
+    rrup_bins: Sequence of ints, optional
         Magnitude bins for which to compute the metrics
     metrics: Sequence of strings, optional
         Metrics to compute
@@ -214,82 +333,49 @@ def compute_metrics(
     Dictionary of evaluation metrics
     """
     # Compute the statistics
+
     metric_results = {}
-    counts = {}
     n_samples = data_df.shape[0] if n_samples is None else n_samples
     for ix, cur_im in enumerate(ims):
-        cur_metrics = {}
         y, y_est = data_df[cur_im], data_df[f"{cur_im}_est"]
 
-        # Standard MSE
-        if "mse" in metrics:
-            cur_metrics["mse"] = mse(y, y_est)
-
-            if ix == 0:
-                counts["mse"] = y.shape[0] / n_samples
-
-        # Mean absolute log ratio
-        if "malr" in metrics:
-            cur_metrics["malr"] = mean_absolute_ln_ratio(y, y_est)
-
-            if ix == 0:
-                counts["malr"] = y.shape[0] / n_samples
-
-        # Standard deviation of residual (in log-space)
-        if "sigma" in metrics:
-            cur_metrics["sigma"] = sigma_ln_ratio(y, y_est)
-
-            if ix == 0:
-                counts["sigma"] = y.shape[0] / n_samples
-
-        # Bias of predictions (i.e. mean of residuals)
-        if "bias" in metrics:
-            cur_metrics["bias"] = bias(y, y_est)
-
-            if ix == 0:
-                counts["bias"] = y.shape[0] / n_samples
+        cur_metrics, counts = _compute_metrics(
+            metrics, "", y, y_est, n_samples, ix == 0
+        )
 
         # Compute metric per magnitude bin
         mag_bin_ind = np.digitize(data_df.mag, bins=mag_bins)
         for cur_bin_ind in np.unique(mag_bin_ind):
             cur_mask = mag_bin_ind == cur_bin_ind
 
-            # MSE
-            if "mse" in metrics:
-                cur_key = f"mse_mag_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                cur_metrics[cur_key] = mse(y[cur_mask], y_est[cur_mask])
+            cur_result = _compute_metrics(
+                metrics,
+                f"_mag_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}",
+                y[cur_mask],
+                y_est[cur_mask],
+                n_samples,
+                ix == 0,
+            )
+            cur_metrics = cur_metrics | cur_result[0]
+            counts = counts | cur_result[1]
 
-                if ix == 0:
-                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
+        # Compute metric per rrup bin
+        rrup_bin_ind = np.digitize(data_df.rrup, bins=rrup_bins)
+        for cur_bin_ind in np.unique(rrup_bin_ind):
+            cur_mask = rrup_bin_ind == cur_bin_ind
 
-            # Mean absolute log ratio
-            if "malr" in metrics:
-                cur_key = f"malr_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                cur_metrics[cur_key] = mean_absolute_ln_ratio(
-                    y[cur_mask], y_est[cur_mask]
-                )
-
-                if ix == 0:
-                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
-
-            # Standard deviation of residual (in log-space)
-            if "sigma" in metrics:
-                cur_key = f"sigma_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                cur_metrics[cur_key] = sigma_ln_ratio(y[cur_mask], y_est[cur_mask])
-
-                if ix == 0:
-                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
-
-            # Bias of predictions (i.e. mean of residuals)
-            if "bias" in metrics:
-                cur_key = f"bias_{mag_bins[cur_bin_ind - 1]}_{mag_bins[cur_bin_ind]}"
-                cur_metrics[cur_key] = bias(y[cur_mask], y_est[cur_mask])
-
-                if ix == 0:
-                    counts[cur_key] = np.count_nonzero(cur_mask) / n_samples
+            cur_result = _compute_metrics(
+                metrics,
+                f"_rrup_{rrup_bins[cur_bin_ind - 1]}_{rrup_bins[cur_bin_ind]}",
+                y[cur_mask],
+                y_est[cur_mask],
+                n_samples,
+                ix == 0,
+            )
+            cur_metrics = cur_metrics | cur_result[0]
+            counts = counts | cur_result[1]
 
         metric_results["count"] = counts
-        # metric_results[cur_im.replace(".", "p")] = cur_metrics
         metric_results[cur_im] = cur_metrics
 
     return pd.DataFrame.from_dict(metric_results)
@@ -300,7 +386,7 @@ def comp_train_val_metrics(
 ):
     """Computes training & validation metrics"""
     ims = GMM.load(model_dir).ims
-    columns = [f"{im}_est" for im in ims] + ims + ["mag"]
+    columns = [f"{im}_est" for im in ims] + ims + ["mag", "rrup"]
 
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
     val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
@@ -351,14 +437,20 @@ def comp_train_val_spatial_metrics(
 
 
 def comp_train_val_basin_metrics(
-    model_dir: Path, basin_dir: Path, save: bool = False, print_metrics: bool = True
+    model_dir: Path,
+    basin_dir: Path,
+    save: bool = False,
+    print_metrics: bool = True,
+    mag_bins: Sequence[float] = MAGNITUDE_BINS,
+    rrup_bins: Sequence[int] = RRUP_BINS,
+    metrics: Sequence[str] = DEFAULT_METRICS,
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame]]:
     """Computes basin metrics for the training & validation data"""
     # Get the model IMs
     ims = list(
         ml_tools.utils.load_json(model_dir / "input_config.json")["im_config"].keys()
     )
-    columns = ims + [f"{im}_est" for im in ims] + ["site", "mag"]
+    columns = ims + [f"{im}_est" for im in ims] + ["site", "mag", "rrup"]
 
     # Get the basin stations
     basin_dict = data.load_basin_stations(basin_dir)
@@ -374,14 +466,38 @@ def comp_train_val_basin_metrics(
 
     # Compute the basin metrics
     console.print("Compute metrics")
-    train_metrics = comp_basin_metrics(train_data_df, basin_dict, ims)
-    val_metrics = comp_basin_metrics(val_data_df, basin_dict, ims)
+    train_metrics = comp_basin_metrics(
+        train_data_df, basin_dict, ims, mag_bins=mag_bins, rrup_bins=rrup_bins, metrics=metrics
+    )
+    val_metrics = comp_basin_metrics(
+        val_data_df, basin_dict, ims, mag_bins=mag_bins, rrup_bins=rrup_bins, metrics=metrics
+    )
+
+    # Add metrics for base-grid stations
+    train_metrics["BaseGrid"] = compute_metrics(
+        train_data_df.loc[
+            np.char.startswith(train_data_df.site.values.astype(str), "0")
+        ],
+        ims,
+        n_samples=train_data_df.shape[0],
+        mag_bins=mag_bins,
+        rrup_bins=rrup_bins,
+        metrics=metrics,
+    )
+    val_metrics["BaseGrid"] = compute_metrics(
+        val_data_df.loc[np.char.startswith(val_data_df.site.values.astype(str), "0")],
+        ims,
+        n_samples=val_data_df.shape[0],
+        mag_bins=mag_bins,
+        rrup_bins=rrup_bins,
+        metrics=metrics,
+    )
 
     # Save & print
     if save:
-        (model_dir / "train_basin_metrics").mkdir()
-        (model_dir / "val_basin_metrics").mkdir()
-    for cur_basin in basin_dict.keys():
+        (model_dir / "train_basin_metrics").mkdir(exist_ok=True)
+        (model_dir / "val_basin_metrics").mkdir(exist_ok=True)
+    for cur_basin in train_metrics.keys():
         if print_metrics:
             console.rule(cur_basin)
             console.print(

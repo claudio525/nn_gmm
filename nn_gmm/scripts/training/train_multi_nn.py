@@ -10,7 +10,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from wandb.keras import WandbCallback
 
-import ml_tools
+import ml_tools as mlt
 import typer
 
 # Grow the GPU memory usage as needed
@@ -29,147 +29,115 @@ if gpus:
 import nn_gmm
 from nn_gmm import console
 
-data_dirs_lookup = {
+app = typer.Typer()
+
+DATA_DIRS_LOOKUP = {
     "base": {
-        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/train"],
-        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/val"],
+        "train_data_dirs": [
+            "/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/train"
+        ],
+        "val_data_dirs": [
+            "/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/val"
+        ],
         "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base_grid/train/stats.csv",
     },
     "base_fw": {
-        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train"],
-        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/val"],
+        "train_data_dirs": [
+            "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train"
+        ],
+        "val_data_dirs": [
+            "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/val"
+        ],
         "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/base-grid_fault-weighted/train/stats.csv",
     },
-    "fsw": {
-        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/train"],
-        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/val"],
-        "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted/train/stats.csv",
-    },
-    "tmp": {
-        "train_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/train"],
-        "val_data_dirs": ["/home/claudy/dev/work/tmp/sample_files/val"],
-        "stats_df": "/home/claudy/dev/work/tmp/sample_files/train/stats.csv",
-    },
-}
-
-IO_CONFIG = {
-    "base_output_dir": "/home/cbs51/dev/work/data/nn_gmm/results/test",
-    "basin_dir": "/home/claudy/dev/work/data/nn_gmm/input_data/site_data/basin_stations",
-    "output_dir": None,
-    "feature_config": {
-        "dip": "min_max",
-        "rake": "min_max",
-        "mag": "standard",
-        # "s": "standard",
-        # "theta": "min_max",
-        "vs30": "standard",
-        # "z1p0": "standard",
-        # "z2p5": "standard",
-        # "vs500": "standard",
-        "rrup": "standard",
-        # "rx": "standard",
-        # "rjb": "standard",
-        # "ry": "standard",
-        # "active_shallow": None,
-        # "volcanic": None,
-        # "lat": "standard",
-        # "lon": "standard",
-        "X": "standard",
-        "Y": "standard",
-        "Z": "standard"
-    },
-    "im_config": {
-        # "PGA": "standard",
-        # "pSA_0.1": "standard",
-        # "pSA_0.5": "standard",
-        # "pSA_1.0": "standard",
-        "pSA_3.0": "standard",
-        # "pSA_5.0": "standard",
-        # "pSA_10.0": "standard",
+    "fswn": {
+        "train_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted_norm/train"],
+        "val_data_dirs": ["/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted_norm/val"],
+        "stats_df": "/home/claudy/dev/work/data/nn_gmm/training_data/fault_station_weighted_norm/train/stats.csv",
     },
 }
 
 
-def main(
-        data_key: str,
-        use_wandb: bool = False,
-        eval: bool = True,
-        n_epochs: int = None,
-        tags: List[str] = None,
-        use_sample_weights: bool = False
+@app.command("run-config")
+def run_config(config_ffp: Path, eval: bool = True):
+    print(f"wtf")
+
+
+@app.command("run")
+def run(
+    machine_config_ffp: Path,
+    io_config_ffp: Path,
+    hyper_config_ffp: Path,
+    data_key: str,
+    use_wandb: bool = False,
+    eval: bool = True,
+    n_epochs: int = None,
+    tags: List[str] = None,
+    use_sample_weights: bool = False,
 ):
+    tags = list(tags)
+
+    machine_config = mlt.utils.load_yaml(machine_config_ffp)
+    io_config = mlt.utils.load_yaml(io_config_ffp)
+    hyperparams = mlt.utils.load_yaml(hyper_config_ffp)
+
     # Add the data entries
-    if data_key not in data_dirs_lookup.keys():
+    if data_key not in DATA_DIRS_LOOKUP.keys():
         raise ValueError(f"Invalid data key {data_key}")
-    io_config = {**IO_CONFIG, **data_dirs_lookup[data_key]}
+    config = {**DATA_DIRS_LOOKUP[data_key], **io_config, **machine_config}
 
-    stats_df = pd.read_csv(io_config["stats_df"], index_col="feature")
-    io_config["feature_config"] = nn_gmm.convert_pre_config(
-        io_config["feature_config"], stats_df
+    # Prepare model input/output config for preprocesing
+    stats_df = pd.read_csv(config["stats_df"], index_col="feature")
+    config["feature_config"] = nn_gmm.convert_pre_config(
+        config["feature_config"], stats_df
     )
-    io_config["im_config"] = nn_gmm.convert_pre_config(io_config["im_config"], stats_df)
-
-    model_config = {
-        "hidden_layer_func": ml_tools.hidden_layers.relu,
-        # "hidden_layer_func": ml_tools.hidden_layers.selu,
-        # "hidden_layer_config": {"l2": 0.001},
-        # "hidden_layer_config": {"dropout": None},
-        "units": [32, 32, 32],
-        "output_units": [32, 32],
-    }
-
-    train_config = {
-        # "batch_size": 5120,
-        "batch_size": 10240,
-        # "batch_size": 2048,
-        "shuffle_buffer_size": int(5e6),
-        "n_epochs": 50,
-        "optimizer": tf.keras.optimizers.Adam(),
-        # "optimizer": tf.keras.optimizers.SGD(learning_rate=0.1),
-        "loss": "mse",
-        # "loss": tf.keras.losses.Huber(delta=0.5),
-        "use_sample_weights": use_sample_weights,
-        "save_val_best": False,
-        "cache": True,
-        # "callbacks": [tf.keras.callbacks.LearningRateScheduler(lr_scheduler, verbose=1)]
-    }
+    config["im_config"] = nn_gmm.convert_pre_config(config["im_config"], stats_df)
 
     if n_epochs is not None:
-        train_config["n_epochs"] = n_epochs
+        hyperparams["n_epochs"] = n_epochs
 
     # Create a run ID
     run_id = nn_gmm.create_run_id(tags)
-    io_config["run_id"] = run_id
+    config["run_id"] = run_id
+
+    if use_sample_weights:
+        tags.append("sample_weights")
+        config["use_sample_weights"] = use_sample_weights
 
     if use_wandb:
         tags = [] if tags is None else list(tags)
-        tags = tags + list(io_config["im_config"].keys()) + ["NN"]
+        tags = tags + list(config["im_config"].keys()) + ["NN"]
 
-        if "lat" in io_config["feature_config"].keys():
+        if "lat" in config["feature_config"].keys():
             tags.append("location")
 
-        if train_config["use_sample_weights"]:
-            tags.append("sample_weights")
+        wandb.init(
+            project="nn-gmm",
+            entity="cbs51",
+            tags=tags,
+            name=run_id,
+            config=hyperparams,
+        )
 
-        wandb.init(project="nn-gmm", entity="cbs51", tags=tags, name=run_id)
+        wandb.config["use_sample_weights"] = True
+        wandb.config.config = config
 
-        wandb.config.input_config = io_config
-        wandb.config.training_config = train_config
-        wandb.config.model_config = model_config
-
-        if "callbacks" in train_config.keys():
-            train_config["callbacks"].append(WandbCallback())
+        if "callbacks" in hyperparams.keys():
+            hyperparams["callbacks"].append(WandbCallback())
         else:
-            train_config["callbacks"] = [WandbCallback()]
+            hyperparams["callbacks"] = [WandbCallback()]
+
+    # Create the model
+    model = nn_gmm.create_reg_multi_output_model(
+        hyperparams, len(config["feature_config"]), list(config["im_config"].keys())
+    )
+
+    # Get the loss function
+    hyperparams["loss"] = nn_gmm.get_loss_function(hyperparams)
 
     # Run training
     train_result = nn_gmm.train_nn(
-        io_config,
-        train_config,
-        model_fn=nn_gmm.create_reg_multi_output_model,
-        model_config=model_config,
-        multi_output=False,
-        verbose=2,
+        config, hyperparams, model=model, multi_output=False, verbose=2,
     )
     output_dir = train_result.output_dir
 
@@ -179,16 +147,21 @@ def main(
 
         start_time = time.time()
         nn_gmm.write_train_val_predictions(
-            Path(io_config["train_data_dirs"][0]).parent, output_dir, verbose=False, batch_size=1_000_000
+            Path(config["train_data_dirs"][0]).parent,
+            output_dir,
+            verbose=False,
+            batch_size=1_000_000,
         )
         console.print(f"Took {time.time() - start_time}s to get predictions")
 
         # Print and compute general metrics
-        train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(output_dir, save=True)
+        train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(
+            output_dir, save=True
+        )
 
         # Print and compute basin metrics
         train_basin_metrics, val_basin_metrics = nn_gmm.comp_train_val_basin_metrics(
-            output_dir, Path(io_config["basin_dir"], save=True)
+            output_dir, Path(config["basin_dir"], save=True)
         )
 
         # Compute spatial metrics
@@ -217,4 +190,4 @@ def main(
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    app()

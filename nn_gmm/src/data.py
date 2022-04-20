@@ -169,3 +169,7 @@ def load_basin_stations(basin_dir: Path):
 def load_feature_details(data_dir: Path):
     with (data_dir / "feature_details.pickle").open("rb") as f:
         return pickle.load(f)
+
+
+def get_base_grid_stations_mask(sites: np.ndarray):
+    return np.char.startswith(sites.astype(str), "0")

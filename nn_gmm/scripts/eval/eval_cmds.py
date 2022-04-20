@@ -49,6 +49,7 @@ def train_val_basin_metrics(
         model_dir, basin_dir, save=save, print_metrics=print
     )
 
+
 @app.command("spatial-metrics")
 def train_val_spatial_metrics(model_dir: Path, save: bool = True):
     """Computes training & validation metrics"""
@@ -71,9 +72,7 @@ def trend_plot(model_dir: Path, im: str):
 @app.command("residuals")
 def residual_plots(model_dir: Path, ims: List[str] = None):
     """Generates residual plots"""
-    nn_gmm.gen_residual_plots(
-        model_dir, None if len(ims) == 0 else ims
-    )
+    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else ims)
 
 
 @app.command("spec-comp-bias-std")
@@ -101,6 +100,7 @@ def compare_spec_basin_bias_std(
     use_val: bool = False,
     basin_ids: List[str] = None,
 ):
+    """Creates a basin bias/std plot for the given models"""
     # Get the dbs
     assert (use_val or use_train) and not (
         use_val and use_train
@@ -133,13 +133,73 @@ def compare_spec_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool =
     nn_gmm.gen_spectral_loss_plot(loss_dfs, run_ids, ims, output_ffp, val_only=val_only)
 
 
+@app.command("comp-basin-metrics-rrup-mag")
+def compare_basin_metrics_mag_rrup(
+    model_dirs: List[Path] = typer.Argument(
+        ..., help="Directories of the models to compare"
+    ),
+    im: str = typer.Argument(...),
+    metrics: List[str] = typer.Option(..., help="Metrics to compare"),
+    regions: List[str] = typer.Option(..., help="Region/Basins to compare"),
+    basin_dir: Path = typer.Argument(
+        ..., help="Directorie that contains the basin definitions"
+    ),
+    output_dir: Path = typer.Argument(...),
+    model_names: List[str] = typer.Option(
+        None,
+        help="Name of the models to use on the plot\n"
+        "Has to be in the same order as model_dirs",
+    ),
+):
+    """Creates a figure for each metric-region pair,
+    showing the metrics trend (wrt. Magnitude and Rrup)
+    for the region"""
+    nn_gmm.gen_basin_comp_mag_rrup_plots(
+        model_dirs, im, metrics, regions, basin_dir, output_dir, model_names=model_names
+    )
+
+
+@app.command("comp-basin-metrics")
+def compare_basin_metrics_matrix(
+    model_dirs: List[Path] = typer.Argument(
+        ..., help="The directories of the models to compare"
+    ),
+    output_dir: Path = typer.Argument(
+        ..., help="Output directory path for the resulting plots"
+    ),
+    im: str = typer.Argument(...),
+    metrics: List[str] = typer.Option(..., help="The comparison metrics"),
+    model_names: List[str] = typer.Option(
+        None,
+        help="The names of the models to use on the plot\n"
+        "If not specified then the run_id (without tags) is used",
+    ),
+    val: bool = typer.Option(False, help="Generate for validation data")
+):
+    """Creates a matrix plot the metric
+    for the specified models & available basins
+    """
+    for cur_metric in metrics:
+        nn_gmm.gen_basin_metric_comp_matrix(
+            [
+                (cur_model_dir, model_names[ix] if model_names is not None else None)
+                for ix, cur_model_dir in enumerate(model_dirs)
+            ],
+            im,
+            cur_metric,
+            output_dir / f"val_{cur_metric}.png" if val else output_dir / f"train_{cur_metric}.png",
+            val=val
+        )
+
+
 @app.command("avg-bias-std-spatial")
-def avg_spatial_bias_std(model_dir: Path, ims: List[str] = None, metrics: List[str] = None, n_procs: int = 4):
+def avg_spatial_bias_std(
+    model_dir: Path, ims: List[str] = None, metrics: List[str] = None, n_procs: int = 4
+):
     ims = nn_gmm.GMM.load(model_dir).ims if not ims else ims
     metrics = None if not metrics else metrics
 
     nn_gmm.gen_spatial_metric_plots(model_dir, ims, n_procs=n_procs, metrics=metrics)
-
 
 
 if __name__ == "__main__":
