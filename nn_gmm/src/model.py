@@ -228,12 +228,14 @@ class NeuralNetworkGMM(GMM):
             raise ValueError("Not all required features exist in the given dataframe")
 
         # Run estimation
-        y_est = self.model(X.loc[:, self.features].values.astype(float)).numpy()
+        y_est = self.model(X.loc[:, self.features].values.astype(float))
         # y_est = self.model.predict(X.loc[:, self.features].values.astype(float), batch_size=1024)
 
         # Multi-output model
         if isinstance(y_est, list):
             y_est = np.stack(y_est, axis=1).reshape(-1, self.outputs.size)
+        else:
+            y_est = y_est.numpy()
 
         # Convert to dataframes
         result_df_index = (
@@ -414,8 +416,15 @@ def create_reg_multi_output_model(
     hidden_layer_func = mlt.tf_utils.get_hidden_layer_fn(hyper_params["hidden_layer_func"])
 
     hidden_layer_config = dict(l2=hyper_params.get("l2"), dropout=hyper_params.get("dropout"))
-    units = hyper_params["units"]
-    output_units = hyper_params.get("output_units")
+
+    if "units" in hyper_params:
+        units = hyper_params["units"]
+        output_units = hyper_params["output_units"]
+    elif "n_units" in hyper_params:
+        units = [hyper_params["n_units"] for ix in range(hyper_params["n_layers"])]
+        output_units = [hyper_params["n_out_units"] for ix in range(hyper_params["n_out_layers"])]
+    else:
+        raise ValueError("Invalid model unit & layer hyperparameters")
 
     inputs = keras.Input(n_inputs, name="inputs")
 
@@ -425,14 +434,14 @@ def create_reg_multi_output_model(
 
     outputs = []
     for cur_output_name in output_names:
-        if output_units is not None:
-            cur_x = hidden_layer_func(x, output_units[0], **hidden_layer_config)
-            for cur_out_units in output_units[1:]:
+        cur_x = x
+        if output_units is not None and len(output_units) > 0:
+            for cur_out_units in output_units:
                 cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
 
-            outputs.append(
-                keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
-            )
+        outputs.append(
+            keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
+        )
 
     return keras.Model(inputs=inputs, outputs=outputs)
 

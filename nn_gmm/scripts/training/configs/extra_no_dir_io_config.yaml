@@ -3,19 +3,13 @@ feature_config:
         rake: min_max
         mag: standard
         vs30: standard
-#        U: standard
-#        T: standard
-#        D: standard
-#        S: standard
-        theta: min_max
-        s: standard
         z1p0: standard
         z2p5: standard
         vs500: standard
         rrup: standard
-        rx: standard
+#        rx: standard
         rjb: standard
-        ry: standard
+#        ry: standard
         active_shallow: null
         volcanic: null
 im_config:

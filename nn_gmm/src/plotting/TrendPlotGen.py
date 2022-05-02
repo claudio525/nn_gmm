@@ -1,7 +1,7 @@
 """Class for generating plots that show model behaviour with respect to one
 or more inputs"""
 from pathlib import Path
-from typing import Union, Tuple, Dict, Sequence
+from typing import Union, Tuple, Dict, Sequence, Any
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,22 @@ from . import plotting_utils as plt_utils
 
 
 class TrendPlotGen:
+
+    DATA_CONSTRAINTS = dict(
+        mag=0.25,
+        dip=15,
+        rake=25,
+        vs30=50,
+        ztor=10,
+        vs500=0.25,
+        z1p0=0.1,
+        z2p5=0.5,
+        rrup=10,
+        rjb=10,
+        rx=10,
+        ry=10,
+    )
+
     def __init__(self, model: GMM, feature: str, feature_values: np.ndarray):
         self.model = model
 
@@ -30,6 +46,7 @@ class TrendPlotGen:
         im: str,
         output_dir: Path,
         model_dir: Path = None,
+        data_constraints: Dict[str, Any] = None,
     ):
         """Creates a trend plot for the specified feature"""
         # Get the model predictions
@@ -49,6 +66,9 @@ class TrendPlotGen:
                 plot_std=True,
                 label="Training Data",
                 color="royalblue",
+                constraints=self.DATA_CONSTRAINTS
+                if data_constraints is None
+                else data_constraints,
             )
 
         # Add empirical model
@@ -145,8 +165,8 @@ class TrendPlotGen:
             # Set Rx and Ry to realistic values
             # Just setting both to rrup is physically impossible
             # from my understanding
-            X["rx"] = np.sqrt((self.feature_values**2) / 2)
-            X["ry"] = np.sqrt((self.feature_values**2) / 2)
+            X["rx"] = np.sqrt((self.feature_values ** 2) / 2)
+            X["ry"] = np.sqrt((self.feature_values ** 2) / 2)
             X["rjb"] = self.feature_values
 
         est_df, *_ = model.predict(X)

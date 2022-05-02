@@ -87,7 +87,7 @@ console.print("Loading distance params")
 distance_df = nn_gmm.load_distance_df(site_df, distance_db_ffps, n_procs=n_procs)
 
 console.print("Loading site-source params")
-site_source_df = nn_gmm.load_site_source_df(site_source_ffps, n_procs=n_procs)
+site_source_df = nn_gmm.load_directivity_df(site_source_ffps, n_procs=n_procs)
 assert (
     np.unique(site_source_df.index.values.astype(str)).shape[0]
     == site_source_df.shape[0]

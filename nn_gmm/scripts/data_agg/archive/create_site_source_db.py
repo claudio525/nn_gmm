@@ -1,5 +1,5 @@
 """Script for creating a site-source db that contains
-site-source features such as rupture directivity
+site-source features such as rupture directivity (theta & s)
 """
 import time
 import multiprocessing as mp

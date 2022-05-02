@@ -1,0 +1,10 @@
+dropout: null
+
+shuffle_buffer_size: 5000000
+
+optimizer: adam
+n_epochs: 25
+
+loss_key: huber
+delta: 1.0
+cache: True

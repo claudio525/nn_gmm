@@ -129,6 +129,194 @@ def _save_model_data(
     return loss_df
 
 
+def train_nn(
+    config: Dict,
+    hyperparams: Dict,
+    model: keras.Model = None,
+    model_fn: Callable = None,
+    model_config: Dict = None,
+    verbose: int = 2,
+    multi_output: bool = False,
+    output_dir: Path = None,
+) -> TrainingResult:
+    """
+    Runs the training based on the specified configs
+    Note: Only supports training of a "single" output node model
+
+    Parameters
+    ----------
+    data_config: dictonary
+        The input and output data config
+    config: dictionary
+        The model inputs and outputs config
+    hyperparams: dictionary
+        The training config
+    model: keras model, optional
+        The model to train
+        Either the model or model_specs parameter has to be specified
+    model_fn: callabel, optional
+        The callable must be a function that returns the keras model to train
+        and takes 3 inputs: model_config, n_inputs, n_outputs
+        Either the model or model_specs parameter has to be specified
+    model_config: dictionary
+        The dictionary specifies the details of the model, as required
+        by the model creation function
+        If a model is passed then this config is not used, only saved
+        with the model
+    verbose: int, optional
+        Model fitting verbosity for details, see
+        https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
+
+    Returns
+    -------
+    TrainingResult
+    """
+    print(
+        f"================================ Training ================================="
+    )
+
+    assert (
+        model is not None or model_fn is not None
+    ), "Either the model or model_specs parameter has to be specified"
+
+    assert (model_fn is None) or (
+        model_fn is not None and model_config is not None
+    ), "If a model creation function is used, then a model config has to be specified"
+
+    # Load hyperparamters
+    batch_size, n_epochs = hyperparams["batch_size"], hyperparams["n_epochs"]
+
+    # Create the output directory
+    output_dir = create_output_dir(config) if output_dir is None else output_dir
+
+    # Save the input, model & training config
+    _save_configs(config, model_config, hyperparams, output_dir)
+
+    train_ds, val_ds = load_datasets(
+        utils.to_path(config["train_data_dirs"]),
+        hyperparams["batch_size"],
+        val_dirs=utils.to_path(config["val_data_dirs"]),
+        shuffle_buffer_size=hyperparams["shuffle_buffer_size"],
+        n_open_files=512,
+    )
+
+    # Pre-processing
+    if config.get("multi_input") is not None:
+        feature_config_dict, feature_config = (
+            {
+                cur_input_name: data_processing.convert_to_transform_fn(
+                    cur_feature_config.copy()
+                )
+                for cur_input_name, cur_feature_config in config[
+                    "feature_config"
+                ].items()
+            },
+            None,
+        )
+    else:
+        feature_config_dict, feature_config = (
+            None,
+            data_processing.convert_to_transform_fn(config["feature_config"].copy()),
+        )
+    im_config = data_processing.convert_to_transform_fn(config["im_config"].copy())
+    train_ds = data_processing.preprocess_ds(
+        train_ds,
+        feature_config=feature_config,
+        feature_config_dict=feature_config_dict,
+        im_config=im_config,
+        use_sample_weights=config["use_sample_weights"],
+        as_dict=multi_output,
+    )
+    val_ds = (
+        val_ds
+        if val_ds is None
+        else data_processing.preprocess_ds(
+            val_ds,
+            feature_config=feature_config,
+            feature_config_dict=feature_config_dict,
+            im_config=im_config,
+            as_dict=multi_output,
+        )
+    )
+
+    # Compile the model
+    model.compile(
+        optimizer=hyperparams["optimizer"],
+        loss=hyperparams["loss"],
+        run_eagerly=False,
+    )
+
+    # Model architecture summary
+    model.summary()
+
+    # Save a plot of the model
+    keras.utils.plot_model(
+        model,
+        output_dir / "model.png",
+        expand_nested=True,
+        show_dtype=True,
+        show_shapes=True,
+    )
+
+    # Callbacks
+    model_dir = output_dir / "best_model"
+    model_dir.mkdir()
+    callbacks = [] if hyperparams.get("callbacks") is None else hyperparams["callbacks"]
+    if hyperparams.get("save_best_val") is True:
+        callbacks += [
+            # Saves the best model (based on the validation loss)
+            keras.callbacks.ModelCheckpoint(
+                str(model_dir), monitor="val_loss", save_best_only=True
+            ),
+        ]
+
+    console.print(f"Preparing datasets")
+    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
+
+    if hyperparams["cache"]:
+        train_ds = train_ds.cache()
+        val_ds = val_ds.cache()
+
+    # Train
+    console.print(f"Training...")
+    history = model.fit(
+        train_ds,
+        epochs=n_epochs,
+        validation_data=val_ds,
+        callbacks=callbacks,
+        verbose=verbose,
+    )
+
+    if not hyperparams.get("save_best_val"):
+        print("Saving the model")
+        model.save(model_dir, save_format="tf")
+
+    # Save model data
+    loss_df = _save_model_data(output_dir, model_dir, config, hyperparams, history)
+
+    # Create loss plot
+    history = history.history
+    ims = list(im_config.keys())
+    fig = ml_tools.plotting.plot_loss(
+        history,
+        # y_lim=(0.0, 1.0),
+        y_label="Loss",
+        multi_keys=ims if len(ims) > 1 else None,
+    )
+    fig.savefig(os.path.join(output_dir, "loss.png"))
+
+    return TrainingResult(config, hyperparams, output_dir, model_dir)
+
+
+def get_loss_function(hyperparams: Dict):
+    loss = hyperparams["loss_key"].lower()
+    if loss == "mse":
+        return tf.losses.MeanSquaredError()
+    if loss == "huber":
+        return tf.losses.Huber(delta=hyperparams["delta"])
+
+
 # class XGBDataIterator(xgb.DataIter):
 #     def __init__(self, tf_ds: tf.data.Dataset):
 #         super().__init__()
@@ -268,189 +456,3 @@ def _save_model_data(
 #     plt.close()
 #
 #     return TrainingResult(io_config, train_config, output_dir, model_ffp)
-
-
-def train_nn(
-    config: Dict,
-    hyperparams: Dict,
-    model: keras.Model = None,
-    model_fn: Callable = None,
-    model_config: Dict = None,
-    verbose: int = 2,
-    multi_output: bool = False,
-    output_dir: Path = None,
-) -> TrainingResult:
-    """
-    Runs the training based on the specified configs
-    Note: Only supports training of a "single" output node model
-
-    Parameters
-    ----------
-    data_config: dictonary
-        The input and output data config
-    config: dictionary
-        The model inputs and outputs config
-    hyperparams: dictionary
-        The training config
-    model: keras model, optional
-        The model to train
-        Either the model or model_specs parameter has to be specified
-    model_fn: callabel, optional
-        The callable must be a function that returns the keras model to train
-        and takes 3 inputs: model_config, n_inputs, n_outputs
-        Either the model or model_specs parameter has to be specified
-    model_config: dictionary
-        The dictionary specifies the details of the model, as required
-        by the model creation function
-        If a model is passed then this config is not used, only saved
-        with the model
-    verbose: int, optional
-        Model fitting verbosity for details, see
-        https://www.tensorflow.org/api_docs/python/tf/keras/Model#fit
-
-    Returns
-    -------
-    TrainingResult
-    """
-    print(
-        f"================================ Training ================================="
-    )
-
-    assert (
-        model is not None or model_fn is not None
-    ), "Either the model or model_specs parameter has to be specified"
-
-    assert (model_fn is None) or (
-        model_fn is not None and model_config is not None
-    ), "If a model creation function is used, then a model config has to be specified"
-
-    # Load hyperparamters
-    batch_size, n_epochs = hyperparams["batch_size"], hyperparams["n_epochs"]
-
-    # Create the output directory
-    output_dir = create_output_dir(config) if output_dir is None else output_dir
-
-    # Save the input, model & training config
-    _save_configs(config, model_config, hyperparams, output_dir)
-
-    train_ds, val_ds = load_datasets(
-        utils.to_path(config["train_data_dirs"]),
-        hyperparams["batch_size"],
-        val_dirs=utils.to_path(config["val_data_dirs"]),
-        shuffle_buffer_size=hyperparams["shuffle_buffer_size"],
-        n_open_files=512,
-    )
-
-    # Pre-processing
-    if config.get("multi_input") is not None:
-        feature_config_dict, feature_config = (
-            {
-                cur_input_name: data_processing.convert_to_transform_fn(
-                    cur_feature_config.copy()
-                )
-                for cur_input_name, cur_feature_config in config[
-                    "feature_config"
-                ].items()
-            },
-            None,
-        )
-    else:
-        feature_config_dict, feature_config = (
-            None,
-            data_processing.convert_to_transform_fn(config["feature_config"].copy()),
-        )
-    im_config = data_processing.convert_to_transform_fn(config["im_config"].copy())
-    train_ds = data_processing.preprocess_ds(
-        train_ds,
-        feature_config=feature_config,
-        feature_config_dict=feature_config_dict,
-        im_config=im_config,
-        use_sample_weights=config["use_sample_weights"],
-        as_dict=multi_output,
-    )
-    val_ds = (
-        val_ds
-        if val_ds is None
-        else data_processing.preprocess_ds(
-            val_ds,
-            feature_config=feature_config,
-            feature_config_dict=feature_config_dict,
-            im_config=im_config,
-            as_dict=multi_output,
-        )
-    )
-
-    # Compile the model
-    model.compile(
-        optimizer=hyperparams["optimizer"], loss=hyperparams["loss"], run_eagerly=False,
-    )
-
-    # Model architecture summary
-    model.summary()
-
-    # Save a plot of the model
-    keras.utils.plot_model(
-        model,
-        output_dir / "model.png",
-        expand_nested=True,
-        show_dtype=True,
-        show_shapes=True,
-    )
-
-    # Callbacks
-    model_dir = output_dir / "best_model"
-    model_dir.mkdir()
-    callbacks = [] if hyperparams.get("callbacks") is None else hyperparams["callbacks"]
-    if hyperparams.get("save_best_val") is True:
-        callbacks += [
-            # Saves the best model (based on the validation loss)
-            keras.callbacks.ModelCheckpoint(
-                str(model_dir), monitor="val_loss", save_best_only=True
-            ),
-        ]
-
-    console.print(f"Preparing datasets")
-    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
-    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
-
-    if hyperparams["cache"]:
-        train_ds = train_ds.cache()
-        val_ds = val_ds.cache()
-
-    # Train
-    console.print(f"Training...")
-    history = model.fit(
-        train_ds,
-        epochs=n_epochs,
-        validation_data=val_ds,
-        callbacks=callbacks,
-        verbose=verbose,
-    )
-
-    if not hyperparams.get("save_best_val"):
-        print("Saving the model")
-        model.save(model_dir, save_format="tf")
-
-    # Save model data
-    loss_df = _save_model_data(output_dir, model_dir, config, hyperparams, history)
-
-    # Create loss plot
-    history = history.history
-    ims = list(im_config.keys())
-    fig = ml_tools.plotting.plot_loss(
-        history,
-        # y_lim=(0.0, 1.0),
-        y_label="Loss",
-        multi_keys=ims if len(ims) > 1 else None,
-    )
-    fig.savefig(os.path.join(output_dir, "loss.png"))
-
-    return TrainingResult(config, hyperparams, output_dir, model_dir)
-
-
-def get_loss_function(hyperparams: Dict):
-    loss = hyperparams["loss_key"].lower()
-    if loss == "mse":
-        return tf.losses.MeanSquaredError()
-    if loss == "huber":
-        return tf.losses.Huber(delta=hyperparams["delta"])

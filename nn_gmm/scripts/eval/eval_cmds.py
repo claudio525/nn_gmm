@@ -150,12 +150,13 @@ def compare_basin_metrics_mag_rrup(
         help="Name of the models to use on the plot\n"
         "Has to be in the same order as model_dirs",
     ),
+    val: bool = typer.Option(False, help="Generate for validation data")
 ):
     """Creates a figure for each metric-region pair,
     showing the metrics trend (wrt. Magnitude and Rrup)
     for the region"""
     nn_gmm.gen_basin_comp_mag_rrup_plots(
-        model_dirs, im, metrics, regions, basin_dir, output_dir, model_names=model_names
+        model_dirs, im, metrics, regions, basin_dir, output_dir, model_names=model_names, val=val
     )
 
 

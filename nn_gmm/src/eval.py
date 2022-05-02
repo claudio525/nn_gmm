@@ -27,7 +27,7 @@ ALL_SPATIAL_METRICS = (
 
 FANCY_METRICS = dict(
     bias=r"Bias, $\frac{1}{N} [\Sigma^N (lnIM - ln\hat{IM})]$",
-    sigma=r"Error Residual, $\sigma_{\Delta_{i, j}}$",
+    sigma=r"$\sigma_{\Delta_{i, j}}$",
     mae="MAE",
     mse="MSE",
 )
@@ -49,24 +49,26 @@ DEFAULT_CONST_FEATURES = dict(
     mag=7.0,
     dip=90,
     rake=0,
-    vs30=450,
+    vs30=600,
     ztor=0,
     vs500=1.5,
     z1p0=0.05,
     z2p5=0.25,
-    theta=45,
-    s=30,
     tect_type="ACTIVE_SHALLOW",
     rrup=50,
     rjb=50,
     rx=50,
-    ry=50,
+    ry=0,
     # CCCC (I think)
     lat=-43.53145848236242,
     lon=172.63054396033107,
     X=-0.8890043834110928,
     Y=0.14077926825788484,
     Z=0.4357205571288063,
+
+    # Delete
+    theta=45,
+    s=30,
 )
 
 
@@ -340,7 +342,7 @@ def compute_metrics(
         y, y_est = data_df[cur_im], data_df[f"{cur_im}_est"]
 
         cur_metrics, counts = _compute_metrics(
-            metrics, "", y, y_est, n_samples, ix == 0
+            metrics, "", y, y_est, n_samples, True
         )
 
         # Compute metric per magnitude bin
@@ -354,7 +356,7 @@ def compute_metrics(
                 y[cur_mask],
                 y_est[cur_mask],
                 n_samples,
-                ix == 0,
+                True,
             )
             cur_metrics = cur_metrics | cur_result[0]
             counts = counts | cur_result[1]
@@ -370,7 +372,7 @@ def compute_metrics(
                 y[cur_mask],
                 y_est[cur_mask],
                 n_samples,
-                ix == 0,
+                True,
             )
             cur_metrics = cur_metrics | cur_result[0]
             counts = counts | cur_result[1]
@@ -382,7 +384,7 @@ def compute_metrics(
 
 
 def comp_train_val_metrics(
-    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS
+    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS, print_metrics: bool = True,
 ):
     """Computes training & validation metrics"""
     ims = GMM.load(model_dir).ims
@@ -465,7 +467,6 @@ def comp_train_val_basin_metrics(
     val_data_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 
     # Compute the basin metrics
-    console.print("Compute metrics")
     train_metrics = comp_basin_metrics(
         train_data_df, basin_dict, ims, mag_bins=mag_bins, rrup_bins=rrup_bins, metrics=metrics
     )

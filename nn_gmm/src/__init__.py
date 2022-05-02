@@ -1,6 +1,6 @@
 from .agg_utils import (
     load_distance_df,
-    load_site_source_df,
+    load_directivity_df,
     load_fault_im_df,
     create_sample_comb,
     drop_missing_data,

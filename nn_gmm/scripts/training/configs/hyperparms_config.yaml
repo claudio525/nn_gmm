@@ -1,18 +1,23 @@
 hidden_layer_func: relu
-l2: null
+l2: 0.1
 dropout: null
 
-units: [32, 32, 32]
-output_units: [32, 32]
+n_units: 16
+n_layers: 1
 
-# batch_size: 5120,
-batch_size: 10240
-# batch_size: 2048
+n_out_units: 32
+n_out_layers: 0
+
+batch_size: 5120
+#batch_size: 10240
+#batch_size: 2048
 shuffle_buffer_size: 5000000
-n_epochs: 50
+n_epochs: 100
 
 optimizer: adam
 learning_rate: null
+learning_rate_patience: null
+learning_rate_factor: null
 
 loss_key: huber
 delta: 1.0

@@ -1,0 +1,52 @@
+program: /home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/train_multi_nn.py
+method: random
+
+parameters:
+  hidden_layer_func:
+    values:
+      - relu
+      - selu
+  l2:
+    min: 0.0
+    max: 0.2
+  batch_size:
+    values:
+      - 1024
+      - 5120
+      - 10240
+  learning_rate:
+    values:
+      - 0.0001
+      - 0.001
+      - 0.01
+  n_units:
+    values:
+      - 8
+      - 16
+      - 32
+  n_layers:
+    min: 1
+    max: 4
+  n_out_units:
+    values:
+      - 8
+      - 16
+      - 32
+  n_out_layers:
+    min: 0
+    max: 3
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/machine_config.yaml"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/withers_io_config.yaml"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/hyperparms_config.yaml"
+  - "fswn"
+  - "--use-wandb"
+  - "--use-sample-weights"
+  - "--early-stopping"
+  - "--tags"
+  - "wither"
+  - ${args}

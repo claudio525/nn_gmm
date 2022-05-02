@@ -30,34 +30,38 @@ def gen_basin_comp_mag_rrup_plots(
     basin_dir: Path,
     output_dir: Path,
     model_names: Sequence[str] = None,
+    val: bool = False,
 ):
     """Creates a figure for each metric-region pair,
     showing the metrics trend (wrt. Magnitude and Rrup)
     for the region"""
     console.print(
-        f"[orange]This function assumes that all models were trained/validated on the same data. Otherwise this plot is not valid.[/]"
+        f"[orange]This function assumes that all models were trained/validated on the same data. "
+        f"Otherwise this plot is not valid.[/]"
     )
 
     YAXIS_LIMITS = dict(bias=(-1.0, 1.0), sigma=(0.0, 0.8))
+    MAG_MIN, MAG_MAX = 3.5, 8.1
+    RRUP_MIN, RRUP_MAX = 0, 390
 
     # Compute the bins
     # As max/min values are the same for all models, just use the first one
     cur_model_dir = model_dirs[0]
     data_df = ResultDB.get_data_static(
-        cur_model_dir / "train_predictions.hdf5",
+        cur_model_dir / "val_predictions.hdf5" if val else cur_model_dir / "train_predictions.hdf5",
         ["mag", "rrup", "site", "fault", "rupture"],
     )
 
     # Create the magnitude and rrup bin sizes
     mag_step = 0.5
     mag_bins = np.arange(
-        data_df.mag.min() - (mag_step / 2.0),
-        data_df.mag.max() + (mag_step / 2.0),
+        MAG_MIN - (mag_step / 2.0),
+        MAG_MAX + (mag_step / 2.0),
         mag_step,
     )
 
     rrup_step = 20
-    rrup_bins = np.arange(0, data_df.rrup.max() + (rrup_step / 2.0), rrup_step)
+    rrup_bins = np.arange(RRUP_MIN, RRUP_MAX + rrup_step + (rrup_step / 2.0), rrup_step)
 
     # Compute the data for each model
     train_metric_results = {}
@@ -80,12 +84,15 @@ def gen_basin_comp_mag_rrup_plots(
         train_metric_results[cur_model_name] = cur_train_basin_metrics
         val_metric_results[cur_model_name] = cur_val_basin_metrics
 
+    metric_results = val_metric_results if val else train_metric_results
+
     # Get the basin stations
     basin_dict = data.load_basin_stations(basin_dir)
 
     model_colors = sns.color_palette("hls", len(model_dirs))
     linewidth = 0.5
 
+    prefix = "val" if val else "train"
     for cur_region in regions:
         # Get the current basin/region stations
         if cur_region == "BaseGrid":
@@ -96,7 +103,9 @@ def gen_basin_comp_mag_rrup_plots(
             try:
                 cur_sites = basin_dict[cur_region]
             except KeyError:
-                console.print(f"[red]Failed to load sites for region {cur_region}. Skipping![/]")
+                console.print(
+                    f"[red]Failed to load sites for region {cur_region}. Skipping![/]"
+                )
                 continue
 
             cur_sites_mask = utils.pandas_isin(
@@ -143,7 +152,7 @@ def gen_basin_comp_mag_rrup_plots(
                 cur_mag_data = pd.Series(
                     index=mag_bins + (mag_step / 2),
                     data=[
-                        train_metric_results[cur_model_name][cur_region][im].get(
+                        metric_results[cur_model_name][cur_region][im].get(
                             cur_key, np.nan
                         )
                         for cur_key in cur_mag_metric_keys
@@ -153,7 +162,7 @@ def gen_basin_comp_mag_rrup_plots(
                 cur_rrup_data = pd.Series(
                     index=rrup_bins + (rrup_step / 2),
                     data=[
-                        train_metric_results[cur_model_name][cur_region][im].get(
+                        metric_results[cur_model_name][cur_region][im].get(
                             cur_key, np.nan
                         )
                         for cur_key in cur_rrup_metric_keys
@@ -200,13 +209,19 @@ def gen_basin_comp_mag_rrup_plots(
             fig.suptitle(cur_region)
             fig.tight_layout()
             fig.subplots_adjust(hspace=0)
-            fig.savefig(output_dir / f"{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png")
+            fig.savefig(
+                output_dir / f"{prefix}_{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png"
+            )
 
             plt.close(fig)
 
 
 def gen_basin_metric_comp_matrix(
-    models: Sequence[Tuple[Path, str]], im: str, metric: str, output_ffp: Path, val: bool = False
+    models: Sequence[Tuple[Path, str]],
+    im: str,
+    metric: str,
+    output_ffp: Path,
+    val: bool = False,
 ):
     """Creates a matrix plot the metric
     for the specified models & available basins
@@ -237,10 +252,9 @@ def gen_basin_metric_comp_matrix(
         }
 
         metric_dict["AllStations"] = pd.read_csv(
-            model_dir / "train_metrics.csv", index_col=0
+            model_dir / "train_metrics.csv" if not val else model_dir / "val_metrics.csv", index_col=0
         ).loc[metric, im]
         return metric_dict
-
 
     CMAP_OPTIONS = dict(
         bias=dict(cmap="seismic_r", vmin=-1.0, vmax=1.0),
@@ -312,7 +326,7 @@ def gen_basin_metric_comp_matrix(
 def gen_residual_plots(
     model_dir: Path, ims: Sequence[str] = None, sites: Dict[str, str] = None
 ):
-    """Generates residual plots for the specified model and IM"""
+    """Generates residual plots for the specified model, IM and sites"""
     # Setup
     fig_output_dir = model_dir / "plots" / "residual_plots"
     fig_output_dir.mkdir(exist_ok=True, parents=True)

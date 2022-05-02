@@ -26,22 +26,22 @@ class ResultDB:
         with h5py.File(self.db_ffp, "r") as db:
             column_ind = np.flatnonzero(np.isin(self.columns, columns))
             data = db["data"][:, column_ind]
-            ids = db["ids"][:]
+            ids = db["ids"][:].astype(str)
 
             df = pd.DataFrame(data=data, index=ids, columns=self.columns[column_ind])
 
             if "fault" in columns:
-                fault_names = db["fault_names"][:]
+                fault_names = db["fault_names"][:].astype(str)
                 fault_ids = db["fault_ids"][:]
                 df["fault"] = fault_names[fault_ids]
 
             if "rupture" in columns:
-                rupture_names = db["rupture_names"][:]
+                rupture_names = db["rupture_names"][:].astype(str)
                 rupture_ids = db["rupture_ids"][:]
                 df["rupture"] = rupture_names[rupture_ids]
 
             if "site" in columns:
-                site_names = db["site_names"][:]
+                site_names = db["site_names"][:].astype(str)
                 site_ids = db["site_ids"][:]
                 df["site"] = site_names[site_ids]
 

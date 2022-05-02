@@ -1,3 +1,8 @@
+"""Script for creating the tfrecord files
+
+Disable GPU for this
+"""
+
 import time
 
 import pickle
@@ -13,6 +18,7 @@ from scipy import spatial
 
 from qcore import geo
 import nn_gmm
+from nn_gmm import console
 
 IMs = np.asarray(
     [
@@ -190,7 +196,7 @@ def gen_tf_records(
     rel_df: pd.DataFrame,
     site_df: pd.DataFrame,
     distance_df: pd.DataFrame,
-    site_source_df: pd.DataFrame,
+    directivity_df: pd.DataFrame,
     im_db_ffps: List[Path],
     output_dir: Path,
     tect_type_one_hot_dict: Dict,
@@ -201,18 +207,18 @@ def gen_tf_records(
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
     """
-    print("Generating tfrecord files")
+    console.print("Generating tfrecord files")
     n_sources = sources.size
     for ix, cur_source in enumerate(sources):
-        print(f"Processing {ix + 1}/{n_sources}")
+        console.print(f"Processing {ix + 1}/{n_sources}")
         cur_output_ffp = output_dir / f"{cur_source}.tfrecord"
         if cur_output_ffp.exists():
-            print(f"Skipping source {cur_source} as output tfrecord already exists")
+            console.print(f"Skipping source {cur_source} as output tfrecord already exists")
             continue
 
         cur_im_df = nn_gmm.load_fault_im_df(cur_source, im_db_ffps)
         if cur_im_df is None:
-            print(f"No IM data found for source {cur_source}, skipping.")
+            console.print(f"No IM data found for source {cur_source}, skipping.")
             continue
 
         cur_im_df.sort_index(inplace=True)
@@ -236,10 +242,10 @@ def gen_tf_records(
             cur_input_df, site_df, how="inner", left_on="site", right_index=True
         )
 
-        # Merge with site-source parameters
+        # Merge with directivity parameters
         cur_input_df = pd.merge(
             cur_input_df,
-            site_source_df.loc[:, ["theta", "s"]],
+            directivity_df.loc[:, ["T", "U", "S", "D"]],
             how="inner",
             left_index=True,
             right_index=True,
@@ -308,7 +314,7 @@ def gen_tf_records(
 
         feature_details_ffp = output_dir / "feature_details.pickle"
         if ix == 0 or not feature_details_ffp.exists():
-            print(f"Writing feature details")
+            console.print(f"Writing feature details")
             feature_description = {
                 **{
                     col: tf.io.FixedLenFeature([], tf.float32)
@@ -341,7 +347,7 @@ def gen_tf_records(
 def main(
     site_params_dir: Path,
     distance_dir: Path,
-    site_source_dir: Path,
+    directivity: Path,
     source_params_dir: Path,
     im_db_dir: Path,
     output_dir: str,
@@ -354,7 +360,7 @@ def main(
     output_dir = Path(output_dir)
 
     # Load Site params
-    print("Loading site params")
+    console.print("Loading site params")
     site_df = nn_gmm.load_dfs(list(site_params_dir.glob("*.csv")))
 
     # Perform X, Y, Z coordinate transform as per
@@ -385,20 +391,20 @@ def main(
         site_df = site_df.loc[~mask]
 
     # Load site-source params
-    print("Loading distance params")
+    console.print("Loading distance params")
     distance_db_ffps = list(distance_dir.glob("*.db"))
     distance_df = nn_gmm.load_distance_df(site_df, distance_db_ffps, n_procs=n_procs)
 
-    print("Loading site-source params")
-    site_source_db_ffps = list(site_source_dir.glob("*.db"))
-    site_source_df = nn_gmm.load_site_source_df(site_source_db_ffps, n_procs=n_procs)
+    console.print("Loading directivity params")
+    directivity_db_ffps = list(directivity.glob("*.db"))
+    directivity_df = nn_gmm.load_directivity_df(directivity_db_ffps, n_procs=n_procs)
     assert (
-        np.unique(site_source_df.index.values.astype(str)).shape[0]
-        == site_source_df.shape[0]
+        np.unique(directivity_df.index.values.astype(str)).shape[0]
+        == directivity_df.shape[0]
     )
 
     # Load source params
-    print("Loading realisation params")
+    console.print("Loading realisation params")
     rel_df = nn_gmm.load_dfs(
         list(source_params_dir.glob("*.csv")), index_col="realisation"
     )
@@ -417,7 +423,7 @@ def main(
 
         fault_density_weights = None
         if use_fault_density_weights:
-            print("Computing fault density weights for each site")
+            console.print("Computing fault density weights for each site")
             if n_procs == 1:
                 site_counters = []
                 for ix, cur_source in enumerate(train_sources):
@@ -445,7 +451,7 @@ def main(
 
         station_density_weights = None
         if use_site_density_weights:
-            print(f"Computing station density weights for each site")
+            console.print(f"Computing station density weights for each site")
             site_nztm200_coords = geo.wgs_nztm2000x(np.stack((site_df.lon.values, site_df.lat.values), axis=1))
 
             # Create kd-tree and run lookup
@@ -470,7 +476,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
-            site_source_df,
+            directivity_df,
             im_db_ffps,
             output_dir / "train",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -485,7 +491,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
-            site_source_df,
+            directivity_df,
             im_db_ffps,
             output_dir / "val",
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -500,7 +506,7 @@ def main(
             rel_df,
             site_df,
             distance_df,
-            site_source_df,
+            directivity_df,
             im_db_ffps,
             output_dir,
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
@@ -546,7 +552,6 @@ if __name__ == "__main__":
         action="store_true",
         help="If set then samples are weighted based on number "
         "of other datapoints (i.e. faults/realisations) at a given site",
-        default=True,
     )
     parser.add_argument(
         "--station_density_weights",

@@ -1,7 +1,9 @@
 import os
 import time
-from typing import Sequence, List, Optional, Dict, Union
+import multiprocessing as mp
+from typing import Sequence, List, Optional, Dict, Union, Tuple
 from pathlib import Path
+from importlib import reload
 
 import pygmt
 import seaborn as sns
@@ -14,7 +16,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from scipy import spatial
 from scipy import interpolate
-from qcore import geo
+from qcore import geo, nhm
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -140,10 +142,60 @@ def gen_location_dependence_plot(
         )
 
 
-@app.command("im-map")
-def gen_im_map(data_dir: Path, rel_name: str, im: str, output_ffp: Path):
-    record_ffp = next(data_dir.rglob(f"**/{rel_name.split('_')[0]}.tfrecord"))
+def __gen_im_map(
+    data_df: pd.DataFrame,
+    im: str,
+    rel_name: str,
+    hypo_loc: Tuple[float, float],
+    fault_trace: np.ndarray,
+    cb_limits: Union[Tuple[float, float], None],
+    out_ffp: Path,
+    mp: bool = False,
+):
+    if mp:
+        import pygmt
 
+        reload(pygmt)
+
+    qcore_data_dir = os.environ.get("QCORE_DATA_DIR")
+    fig = nn_gmm.im_plot(
+        data_df,
+        im,
+        rel_name,
+        cb_limits=cb_limits,
+        fault_trace=fault_trace,
+        qcore_data_dir=None if qcore_data_dir is None else Path(qcore_data_dir),
+        hypo_loc=hypo_loc,
+    )
+    fig.savefig(str(out_ffp), dpi=1200)
+
+
+@app.command("im-map")
+def gen_im_map(
+    data_dir: Path = typer.Argument(
+        ..., help="The tfrecord data directory that contains the fault file to plot"
+    ),
+    fault: str = typer.Argument(..., help="Name of the fault to plot"),
+    im: str = typer.Argument(..., help="IM to plot"),
+    out: Path = typer.Argument(
+        ...,
+        help="Output directory or filepath, depending on if `rel_name` is specified",
+    ),
+    rel_name: str = typer.Option(
+        None,
+        help="Realisation to plot, if not given then all realisation for the specified fault are plotted",
+    ),
+    nhm_ffp: Path = typer.Option(
+        None, help="Path to the NHM file, to allow showing the fault trace"
+    ),
+    n_procs: int = typer.Option(
+        1,
+        help="Number of processes to use, only matters when plotting multiple realisations",
+    ),
+):
+    record_ffp = next(data_dir.rglob(f"**/{fault}.tfrecord"))
+
+    # Load the data
     data_df = nn_gmm.load_tfrecord(
         str(record_ffp), nn_gmm.load_feature_details(record_ffp.parent)
     )
@@ -151,10 +203,64 @@ def gen_im_map(data_dir: Path, rel_name: str, im: str, output_ffp: Path):
         np.char.rsplit(data_df.index.values.astype(str), "_", maxsplit=1)
     )[:, 0]
 
-    data_df = data_df.loc[data_df.rel == rel_name]
+    # Load the trace if possible
+    fault_trace = (
+        nhm.load_nhm(str(nhm_ffp))[fault].trace if nhm_ffp is not None else None
+    )
 
-    fig = nn_gmm.im_plot(data_df, im, rel_name, Path(os.environ.get("QCORE_DATA_DIR")))
-    fig.savefig(str(output_ffp), dpi=1200)
+    # Generate the plot/s
+    if rel_name is not None:
+        __gen_im_map(
+            data_df.loc[data_df.rel == rel_name, [im, "lat", "lon"]],
+            im,
+            rel_name,
+            tuple(data_df.loc[data_df.rel == rel_name, ["hlon", "hlat"]].iloc[0]),
+            fault_trace,
+            None,
+            out,
+        )
+    else:
+        # Common colormap/bar limits
+        cb_limits = (
+            np.round(np.quantile(np.exp(data_df[im].values), 0.02), 3),
+            np.round(np.quantile(np.exp(data_df[im].values), 0.98), 3),
+        )
+
+        if n_procs == 1:
+            for cur_rel in np.unique(data_df.rel):
+                __gen_im_map(
+                    data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
+                    im,
+                    cur_rel,
+                    tuple(
+                        data_df.loc[data_df.rel == cur_rel, ["hlon", "hlat"]].iloc[0]
+                    ),
+                    fault_trace,
+                    cb_limits,
+                    out / f"{nn_gmm.get_im_name(im)}_{cur_rel}.png",
+                )
+        else:
+            with mp.Pool(n_procs) as p:
+                p.starmap(
+                    __gen_im_map,
+                    [
+                        (
+                            data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
+                            im,
+                            cur_rel,
+                            tuple(
+                                data_df.loc[
+                                    data_df.rel == cur_rel, ["hlon", "hlat"]
+                                ].iloc[0]
+                            ),
+                            fault_trace,
+                            cb_limits,
+                            out / f"{im.replace('.', 'p')}_{cur_rel}.png",
+                            True,
+                        )
+                        for cur_rel in np.unique(data_df.rel)
+                    ],
+                )
 
 
 @app.command("station-density")

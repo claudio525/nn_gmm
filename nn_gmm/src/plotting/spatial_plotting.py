@@ -12,6 +12,8 @@ from shapely import geometry
 
 from qcore import nhm
 
+from . import plotting_utils as utils
+
 
 class NZMapData(NamedTuple):
     road_df: pd.DataFrame = None
@@ -343,6 +345,9 @@ def im_plot(
     data_df: pd.DataFrame,
     im: str,
     rupture_name: str,
+    hypo_loc: Tuple[float, float] = None,
+    fault_trace: np.ndarray = None,
+    cb_limits: Tuple[float, float] = None,
     qcore_data_dir: Path = None,
     region: Union[str, Tuple[float, float, float, float]] = None,
 ):
@@ -359,15 +364,16 @@ def im_plot(
         Name of IM (and key into data_df)
     rupture_name: str
         Used in the title
-    qcore_data_dir: Path
+    hypo_loc: pair of floats, optional
+        Longitude and latitude of the hypocentre
+    cb_limits: pair of floats, optional
+        Colormap/bar limits, (min, max)
+        Note: These need to be in IM-space (i.e. not logged)
+    fault_trace: array of floats, optional
+    qcore_data_dir: Path, optional
         Path to qcore data dir,
         required for plotting road & topo
         Set to None to plot no roads or topo
-    low_bg_quality: bool
-        If True then no roads or topo are
-        plotted. Good for tuning the figure
-        due to long run-time required to topo
-        and roads
 
     Returns
     -------
@@ -395,19 +401,33 @@ def im_plot(
 
     grid = create_grid(cur_df, im, region=region)
 
-    cb_min, cb_max = (
-        np.round(np.quantile(cur_df[im].values, 0.02), 3),
-        np.round(np.quantile(cur_df[im].values, 0.98), 3),
-    )
+    # Colormap/bar limits
+    if cb_limits is None:
+        cb_min, cb_max = (
+            np.round(np.quantile(cur_df[im].values, 0.02), 3),
+            np.round(np.quantile(cur_df[im].values, 0.98), 3),
+        )
+    else:
+        cb_min, cb_max = cb_limits
+
     plot_grid(
         fig,
         grid,
         "hot",
-        (cb_min, cb_max, np.abs(cb_max - cb_min) / 10),
+        (cb_min, cb_max, np.round(np.abs(cb_max - cb_min) / 12, 5)),
         ("white", "black"),
         reverse_cmap=True,
         transparency=35,
+        cb_label=utils.get_im_name(im),
     )
+
+    if fault_trace is not None:
+        fig.plot(x=fault_trace[:, 0], y=fault_trace[:, 1], pen="0.5p,blue")
+
+    if hypo_loc is not None:
+        fig.plot(
+            x=hypo_loc[0], y=hypo_loc[1], style="a0.3c", color="red", pen="black",
+        )
 
     return fig
 
@@ -422,7 +442,7 @@ def faults_plot(
         -36.0,
     ),
     map_data: NZMapData = None,
-    title: str = "Faults"
+    title: str = "Faults",
 ):
     """
     Creates a figure showing all
