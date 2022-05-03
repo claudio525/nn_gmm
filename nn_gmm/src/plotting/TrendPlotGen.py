@@ -18,27 +18,44 @@ from . import plotting_utils as plt_utils
 
 class TrendPlotGen:
 
-    DATA_CONSTRAINTS = dict(
-        mag=0.25,
-        dip=15,
-        rake=25,
-        vs30=50,
-        ztor=10,
-        vs500=0.25,
-        z1p0=0.1,
-        z2p5=0.5,
-        rrup=10,
-        rjb=10,
-        rx=10,
-        ry=10,
-    )
-
     def __init__(self, model: GMM, feature: str, feature_values: np.ndarray):
         self.model = model
 
         self.feature_values = feature_values
         self.feature = feature
-        self.linewidth = 0.75
+        self.linewidth = 1.25
+
+    def _get_feature_contraints(
+        self, const_features: Dict, train_data: pd.DataFrame, interval_half_size: float
+    ):
+        cdf_step_size = 1 / train_data.shape[0]
+        data_constraints = {}
+        for cur_feature, cur_value in const_features.items():
+            if cur_feature not in train_data.keys():
+                continue
+
+            cur_feature_data = train_data[cur_feature].sort_values()
+
+            # Compute the constraints
+            cur_nearest_ix = ml_tools.array_utils.find_nearest(
+                cur_feature_data.values, cur_value
+            )
+            cur_min_value = cur_feature_data.iloc[
+                max(
+                    cur_nearest_ix - int(interval_half_size / cdf_step_size),
+                    0,
+                )
+            ]
+            cur_max_value = cur_feature_data.iloc[
+                min(
+                    cur_nearest_ix + int(interval_half_size / cdf_step_size),
+                    train_data.shape[0] - 1,
+                )
+            ]
+
+            data_constraints[cur_feature] = (cur_min_value, cur_max_value)
+
+        return data_constraints
 
     def gen_trend_plot(
         self,
@@ -46,7 +63,6 @@ class TrendPlotGen:
         im: str,
         output_dir: Path,
         model_dir: Path = None,
-        data_constraints: Dict[str, Any] = None,
     ):
         """Creates a trend plot for the specified feature"""
         # Get the model predictions
@@ -59,16 +75,59 @@ class TrendPlotGen:
 
         # Add training/val data
         if model_dir is not None:
-            self.add_data(
-                ax,
-                model_dir / "train_predictions.hdf5",
-                im,
-                plot_std=True,
-                label="Training Data",
-                color="royalblue",
-                constraints=self.DATA_CONSTRAINTS
-                if data_constraints is None
-                else data_constraints,
+            interval_half_size = 0.15
+
+            columns = [im] + list(const_features.keys())
+            train_data = ResultDB.get_data_static(
+                model_dir / "train_predictions.hdf5", columns
+            )
+            val_data = ResultDB.get_data_static(
+                model_dir / "val_predictions.hdf5", columns
+            )
+
+            # Get relevant feature constraints
+            data_constraints = self._get_feature_contraints(
+                const_features, train_data, interval_half_size
+            )
+
+            train_data_mask = np.ones(train_data.shape[0], dtype=bool)
+            val_data_mask = np.ones(val_data.shape[0], dtype=bool)
+            for cur_feature in const_features.keys():
+                if (
+                    self.feature == "rrup" and cur_feature in ["rrup", "rx", "rjb"]
+                ) or cur_feature not in train_data.columns:
+                    continue
+
+                # Apply the current constraints
+                train_data_mask[
+                    (train_data[cur_feature].values < data_constraints[cur_feature][0])
+                    | (
+                        train_data[cur_feature].values
+                        > data_constraints[cur_feature][1]
+                    )
+                ] = False
+                val_data_mask[
+                    (val_data[cur_feature].values < data_constraints[cur_feature][0])
+                    | (
+                        val_data[cur_feature].values
+                        > data_constraints[cur_feature][1]
+                    )
+                ] = False
+
+            print(f"Number of training events: {np.count_nonzero(train_data_mask)}")
+            print(f"Number of validation events: {np.count_nonzero(val_data_mask)}")
+
+            ax.scatter(
+                train_data.loc[train_data_mask, self.feature].values,
+                np.exp(train_data.loc[train_data_mask, im].values),
+                alpha=0.3,
+                c="skyblue",
+            )
+            ax.scatter(
+                val_data.loc[val_data_mask, self.feature].values,
+                np.exp(val_data.loc[val_data_mask, im].values),
+                alpha=0.3,
+                c="orange",
             )
 
         # Add empirical model
@@ -86,56 +145,54 @@ class TrendPlotGen:
         fig.tight_layout()
         fig.savefig(output_dir / f"{im.replace('.', 'p')}_{self.feature}_trend.png")
 
-    def add_data(
-        self,
-        ax: plt.Axes,
-        result_db_ffp: Path,
-        im: str,
-        plot_std: bool = True,
-        n_bins: int = 10,
-        label: str = None,
-        **scatter_kwgs,
-    ):
-        """Adds the data-trend from the given ResultDB, by binning along the
-        feature of interest and computing the average value for each bin
-
-        TODO: This should probably be improved to weight samples in a given bin,
-        TODO: based on how close these are to the constant features
-        """
-        columns = [im, self.feature]
-        data_df = ResultDB.get_data_static(result_db_ffp, columns)
-
-        bins = np.linspace(self.feature_values.min(), self.feature_values.max(), n_bins)
-        data_df["bin_ix"] = np.digitize(data_df[self.feature].values, bins)
-        bin_means = data_df.groupby("bin_ix").mean()
-        ax.plot(
-            bin_means[self.feature].values,
-            np.exp(bin_means[im]),
-            linewidth=self.linewidth,
-            label=label,
-            marker="x",
-            **scatter_kwgs,
-        )
-
-        # Plot the standard deviation
-        if plot_std:
-            bin_std = data_df.groupby("bin_ix").std()
-            ax.plot(
-                bin_means[self.feature].values,
-                np.exp(bin_means[im]) * np.exp(bin_std[im]),
-                linewidth=self.linewidth,
-                linestyle="dashdot",
-                **scatter_kwgs,
-            )
-            ax.plot(
-                bin_means[self.feature].values,
-                np.exp(bin_means[im]) * np.exp(-bin_std[im]),
-                linewidth=self.linewidth,
-                linestyle="dashdot",
-                **scatter_kwgs,
-            )
-
-        return bins, bin_means
+    # def add_data(
+    #     self,
+    #     ax: plt.Axes,
+    #     result_db_ffp: Path,
+    #     im: str,
+    #     plot_std: bool = True,
+    #     n_bins: int = 10,
+    #     label: str = None,
+    #     **scatter_kwgs,
+    # ):
+    #     """Adds the data-trend from the given ResultDB, by binning along the
+    #     feature of interest and computing the average value for each bin
+    #
+    #     """
+    #     columns = [im, self.feature]
+    #     data_df = ResultDB.get_data_static(result_db_ffp, columns)
+    #
+    #     bins = np.linspace(self.feature_values.min(), self.feature_values.max(), n_bins)
+    #     data_df["bin_ix"] = np.digitize(data_df[self.feature].values, bins)
+    #     bin_means = data_df.groupby("bin_ix").mean()
+    #     ax.plot(
+    #         bin_means[self.feature].values,
+    #         np.exp(bin_means[im]),
+    #         linewidth=self.linewidth,
+    #         label=label,
+    #         marker="x",
+    #         **scatter_kwgs,
+    #     )
+    #
+    #     # Plot the standard deviation
+    #     if plot_std:
+    #         bin_std = data_df.groupby("bin_ix").std()
+    #         ax.plot(
+    #             bin_means[self.feature].values,
+    #             np.exp(bin_means[im]) * np.exp(bin_std[im]),
+    #             linewidth=self.linewidth,
+    #             linestyle="dashdot",
+    #             **scatter_kwgs,
+    #         )
+    #         ax.plot(
+    #             bin_means[self.feature].values,
+    #             np.exp(bin_means[im]) * np.exp(-bin_std[im]),
+    #             linewidth=self.linewidth,
+    #             linestyle="dashdot",
+    #             **scatter_kwgs,
+    #         )
+    #
+    #     return bins, bin_means
 
     def add_model(
         self,
@@ -191,7 +248,7 @@ class TrendPlotGen:
         b13_df = self.get_B13_values(im, x_var, x_values, const_features)
 
         if b13_df is not None:
-            plt_funcs.add_emp(b13_df, label="Bradley 2013", ax=ax)
+            plt_funcs.add_emp(b13_df, label="Bradley 2013", ax=ax, plt_kwargs={"linewidth": self.linewidth})
 
     def add_data_in_range(
         self,

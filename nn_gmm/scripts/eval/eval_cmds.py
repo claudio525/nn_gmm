@@ -63,10 +63,22 @@ def gen_rrup_bin_plot(model_dir: Path, ims: List[str]):
     nn_gmm.gen_rrup_bin_plots(model_dir, ims)
 
 
-@app.command("trend")
-def trend_plot(model_dir: Path, im: str):
+@app.command("trend-rrup")
+def trend_plot_rrup(
+    model_dir: Path,
+    im: str,
+    source_config_ffp: Path,
+    site_config_ffp: Path,
+    site_source_config_ffp: Path,
+):
     """Generates an Rrup trend plot"""
-    nn_gmm.gen_rrup_trend_plots(model_dir, [im])
+    nn_gmm.gen_rrup_trend_plots(
+        model_dir,
+        [im],
+        ml_tools.utils.load_yaml(source_config_ffp),
+        ml_tools.utils.load_yaml(site_config_ffp),
+        ml_tools.utils.load_yaml(site_source_config_ffp),
+    )
 
 
 @app.command("residuals")
@@ -150,13 +162,20 @@ def compare_basin_metrics_mag_rrup(
         help="Name of the models to use on the plot\n"
         "Has to be in the same order as model_dirs",
     ),
-    val: bool = typer.Option(False, help="Generate for validation data")
+    val: bool = typer.Option(False, help="Generate for validation data"),
 ):
     """Creates a figure for each metric-region pair,
     showing the metrics trend (wrt. Magnitude and Rrup)
     for the region"""
     nn_gmm.gen_basin_comp_mag_rrup_plots(
-        model_dirs, im, metrics, regions, basin_dir, output_dir, model_names=model_names, val=val
+        model_dirs,
+        im,
+        metrics,
+        regions,
+        basin_dir,
+        output_dir,
+        model_names=model_names,
+        val=val,
     )
 
 
@@ -175,7 +194,7 @@ def compare_basin_metrics_matrix(
         help="The names of the models to use on the plot\n"
         "If not specified then the run_id (without tags) is used",
     ),
-    val: bool = typer.Option(False, help="Generate for validation data")
+    val: bool = typer.Option(False, help="Generate for validation data"),
 ):
     """Creates a matrix plot the metric
     for the specified models & available basins
@@ -188,8 +207,10 @@ def compare_basin_metrics_matrix(
             ],
             im,
             cur_metric,
-            output_dir / f"val_{cur_metric}.png" if val else output_dir / f"train_{cur_metric}.png",
-            val=val
+            output_dir / f"val_{cur_metric}.png"
+            if val
+            else output_dir / f"train_{cur_metric}.png",
+            val=val,
         )
 
 

@@ -372,7 +372,7 @@ def main(
     site_df["Y"] = np.cos(site_df.lat) * np.sin(site_df.lon)
     site_df["Z"] = np.sin(site_df.lat)
 
-    # Drop duplicates & check for duplicates
+    # Check & Drop duplicates
     n_unique_stations = np.unique(site_df.station.values.astype(str)).shape[0]
     site_df = site_df.drop_duplicates()
     assert n_unique_stations == site_df.shape[0]

@@ -52,6 +52,9 @@ MARKERS = [
 ]
 
 
+DEFAULT_PLOT_KWARGS = dict(linewidth=0.75)
+
+
 def plot_mag_vs30_res_bins(
     df: pd.DataFrame,
     mean_est_df: pd.DataFrame,
@@ -211,7 +214,12 @@ def plot_mag_vs30_bins(
     plt.close()
 
 
-def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = None):
+def add_emp(
+    emp_df: pd.DataFrame,
+    label: str = "Bradley 2013",
+    ax: plt.Axes = None,
+    plt_kwargs: Dict = None,
+):
     """Adds the empirical data to the
     current plot
 
@@ -224,13 +232,19 @@ def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = No
     if ax is None:
         ax = plt.gca()
 
+    plt_kwargs = (
+        {**DEFAULT_PLOT_KWARGS, **plt_kwargs}
+        if plt_kwargs is not None
+        else DEFAULT_PLOT_KWARGS
+    )
+
     # mean prediction
     ax.plot(
         emp_df.index.values,
         emp_df["mu"].values,
         c="r",
         label=f"{label}",
-        linewidth=0.75,
+        linewidth=plt_kwargs["linewidth"],
     )
     # +- sigma
     ax.plot(
@@ -239,14 +253,14 @@ def add_emp(emp_df: pd.DataFrame, label: str = "Bradley 2013", ax: plt.Axes = No
         c="r",
         linestyle="--",
         # label=f"Std {label}",
-        linewidth=0.75,
+        linewidth=plt_kwargs["linewidth"],
     )
     ax.plot(
         emp_df.index.values,
         emp_df["mu"].values * np.exp(-emp_df["sigma"].values),
         c="r",
         linestyle="--",
-        linewidth=0.75,
+        linewidth=plt_kwargs["linewidth"],
     )
 
 

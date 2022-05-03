@@ -48,16 +48,16 @@ def gen_basin_comp_mag_rrup_plots(
     # As max/min values are the same for all models, just use the first one
     cur_model_dir = model_dirs[0]
     data_df = ResultDB.get_data_static(
-        cur_model_dir / "val_predictions.hdf5" if val else cur_model_dir / "train_predictions.hdf5",
+        cur_model_dir / "val_predictions.hdf5"
+        if val
+        else cur_model_dir / "train_predictions.hdf5",
         ["mag", "rrup", "site", "fault", "rupture"],
     )
 
     # Create the magnitude and rrup bin sizes
     mag_step = 0.5
     mag_bins = np.arange(
-        MAG_MIN - (mag_step / 2.0),
-        MAG_MAX + (mag_step / 2.0),
-        mag_step,
+        MAG_MIN - (mag_step / 2.0), MAG_MAX + (mag_step / 2.0), mag_step,
     )
 
     rrup_step = 20
@@ -210,7 +210,8 @@ def gen_basin_comp_mag_rrup_plots(
             fig.tight_layout()
             fig.subplots_adjust(hspace=0)
             fig.savefig(
-                output_dir / f"{prefix}_{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png"
+                output_dir
+                / f"{prefix}_{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png"
             )
 
             plt.close(fig)
@@ -252,7 +253,10 @@ def gen_basin_metric_comp_matrix(
         }
 
         metric_dict["AllStations"] = pd.read_csv(
-            model_dir / "train_metrics.csv" if not val else model_dir / "val_metrics.csv", index_col=0
+            model_dir / "train_metrics.csv"
+            if not val
+            else model_dir / "val_metrics.csv",
+            index_col=0,
         ).loc[metric, im]
         return metric_dict
 
@@ -415,10 +419,20 @@ def gen_residual_plots(
 
 
 def gen_rrup_trend_plots(
-    model_dir: Path, ims: Sequence[str], const_features: Dict = DEFAULT_CONST_FEATURES
+    model_dir: Path,
+    ims: Sequence[str],
+    source_config: Dict = None,
+    site_config: Dict = None,
+    site_source_config: Dict = None,
+    const_features: Dict = None,
 ):
     """Creates a Rrup trend plots for the specified IMs"""
     fig_output_dir = model_dir / "plots" / "trend_plots"
+
+    # Read constant features from the given config files
+    if const_features is None and source_config is not None:
+        assert site_config is not None and site_source_config is not None
+        const_features = {**source_config, **site_config, **site_source_config}
 
     gmm = GMM.load(model_dir)
     tplot = TrendPlotGen(gmm, "rrup", np.linspace(20, 200, 1000))
