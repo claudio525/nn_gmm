@@ -42,7 +42,7 @@ def train_val_metrics(model_dir: Path, save: bool = False):
 
 @app.command("basin-metrics")
 def train_val_basin_metrics(
-    model_dir: Path, basin_dir: Path, save: bool = False, print: bool = True
+    model_dir: Path, basin_dir: Path, save: bool = True, print: bool = False
 ):
     """Computes training & validation metrics"""
     nn_gmm.comp_train_val_basin_metrics(
@@ -57,34 +57,85 @@ def train_val_spatial_metrics(model_dir: Path, save: bool = True):
 
 
 @app.command("rrup-bin")
-def gen_rrup_bin_plot(model_dir: Path, ims: List[str]):
+def gen_rrup_bin_plot(model_dir: Path, ims: List[str] = None):
     """Creates a Rrup based bin (mag, vs30)
     plot for the specified IM"""
+    ims = nn_gmm.GMM.load(model_dir).ims if len(ims) == 0 else ims
+
     nn_gmm.gen_rrup_bin_plots(model_dir, ims)
 
 
-@app.command("trend-rrup")
-def trend_plot_rrup(
-    model_dir: Path,
-    im: str,
+@app.command("trend-rrup-multi")
+def trend_plot_rrup_multi(
+    model_dirs: List[Path],
+    output_dir: Path,
     source_config_ffp: Path,
     site_config_ffp: Path,
     site_source_config_ffp: Path,
+    ims: List[str] = None,
+    model_names: List[str] = None,
 ):
-    """Generates an Rrup trend plot"""
+    """Generates an Rrup trend plot for multiple models"""
     nn_gmm.gen_rrup_trend_plots(
-        model_dir,
-        [im],
-        ml_tools.utils.load_yaml(source_config_ffp),
-        ml_tools.utils.load_yaml(site_config_ffp),
-        ml_tools.utils.load_yaml(site_source_config_ffp),
+        model_dirs,
+        output_dir,
+        ims=ims if len(ims) > 0 else None,
+        source_config=ml_tools.utils.load_yaml(source_config_ffp),
+        site_config=ml_tools.utils.load_yaml(site_config_ffp),
+        site_source_config=ml_tools.utils.load_yaml(site_source_config_ffp),
+        model_names=model_names,
     )
 
 
-@app.command("residuals")
+@app.command("trend-rrup-multi-combo")
+def trend_plot_rrup_multi(
+    model_dirs: List[Path],
+    output_dir: Path,
+    source_config_ffps: List[Path] = typer.Option(..., help="The source configs"),
+    site_config_ffps: List[Path] = typer.Option(..., help="The site configs"),
+    site_source_config_ffps: List[Path] = typer.Option(..., help="The site-source configs"),
+    ims: List[str] = None,
+    model_names: List[str] = None,
+):
+    """Generates an Rrup trend plot for multiple models
+    for each of the possible combinations of specified
+    site, site-source and source config
+
+    For naming purposes, assumes that the configs have the
+    following prefixes: site_, site_source_, source_
+    """
+    for cur_source_config_ffp in source_config_ffps:
+        cur_source_name = cur_source_config_ffp.stem.replace("source_", "")
+        for cur_site_source_config_ffp in site_source_config_ffps:
+            cur_site_source_name = cur_site_source_config_ffp.stem.replace(
+                "site_source_", ""
+            )
+            for cur_site_config_ffp in site_config_ffps:
+                cur_site_name = cur_site_config_ffp.stem.replace("site_", "")
+
+                cur_out_dir = (
+                    output_dir
+                    / f"{cur_source_name}_{cur_site_source_name}_{cur_site_name}"
+                )
+                cur_out_dir.mkdir()
+
+                nn_gmm.gen_rrup_trend_plots(
+                    model_dirs,
+                    cur_out_dir,
+                    ims=list(ims) if len(ims) > 0 else None,
+                    source_config=ml_tools.utils.load_yaml(cur_source_config_ffp),
+                    site_config=ml_tools.utils.load_yaml(cur_site_config_ffp),
+                    site_source_config=ml_tools.utils.load_yaml(
+                        cur_site_source_config_ffp
+                    ),
+                    model_names=model_names,
+                )
+
+
+@app.command("spec-residuals")
 def residual_plots(model_dir: Path, ims: List[str] = None):
-    """Generates residual plots"""
-    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else ims)
+    """Generates spectral residual plots"""
+    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else list(ims))
 
 
 @app.command("spec-comp-bias-std")
@@ -130,6 +181,7 @@ def compare_spec_basin_bias_std(
 
 @app.command("spec-comp-loss")
 def compare_spec_loss(output_ffp: Path, model_dirs: List[Path], val_only: bool = False):
+    """Generates a spectral loss plot for the specified models"""
     loss_dfs = [
         pd.read_csv(cur_model_dir / "loss.csv", index_col=0)
         for cur_model_dir in model_dirs
@@ -224,5 +276,12 @@ def avg_spatial_bias_std(
     nn_gmm.gen_spatial_metric_plots(model_dir, ims, n_procs=n_procs, metrics=metrics)
 
 
+@app.command("loss-comp")
+def loss_compare(model_dirs: List[Path]):
+    print("wtf")
+
+
 if __name__ == "__main__":
     app()
+
+

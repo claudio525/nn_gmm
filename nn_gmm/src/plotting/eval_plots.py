@@ -11,7 +11,7 @@ import seaborn as sns
 from nn_gmm.src import eval
 from nn_gmm.src.model import GMM
 from nn_gmm.src.plotting.ResPlotGen import ResPlotGen
-from nn_gmm.src.plotting.TrendPlotGen import TrendPlotGen
+from nn_gmm.src.plotting import trend_plots
 from nn_gmm.src.plotting.BinPlotGen import BinPlotGen
 from nn_gmm.src.eval import DEFAULT_CONST_FEATURES, DEFAULT_METRICS
 from nn_gmm.src.plotting import plotting_utils
@@ -347,7 +347,9 @@ def gen_residual_plots(
 
     # plt_gen.gen_spectral_bias_plot([train_db_ffp, val_db_ffp], ims, fig_output_dir)
     plt_gen.gen_spectral_bias_std_plot(
-        [train_db_ffp, val_db_ffp], ims, fig_output_dir / "spectral_bias_std.png"
+        [train_db_ffp, val_db_ffp],
+        [im for im in ims if im.startswith("pSA") or im == "PGA"],
+        fig_output_dir / "spectral_bias_std.png",
     )
 
     # General residual distribution
@@ -419,25 +421,36 @@ def gen_residual_plots(
 
 
 def gen_rrup_trend_plots(
-    model_dir: Path,
-    ims: Sequence[str],
+    model_dirs: Sequence[Path],
+    output_dir: Path,
+    ims: Sequence[str] = None,
+    model_names: Sequence[str] = None,
     source_config: Dict = None,
     site_config: Dict = None,
     site_source_config: Dict = None,
     const_features: Dict = None,
 ):
     """Creates a Rrup trend plots for the specified IMs"""
-    fig_output_dir = model_dir / "plots" / "trend_plots"
 
     # Read constant features from the given config files
     if const_features is None and source_config is not None:
         assert site_config is not None and site_source_config is not None
         const_features = {**source_config, **site_config, **site_source_config}
 
-    gmm = GMM.load(model_dir)
-    tplot = TrendPlotGen(gmm, "rrup", np.linspace(20, 200, 1000))
-    for im in ims:
-        tplot.gen_trend_plot(const_features, im, fig_output_dir, model_dir=model_dir)
+    if ims is None:
+        ims = set()
+        for cur_model_dir in model_dirs:
+            ims = ims.union(GMM.load(cur_model_dir).ims)
+        ims = list(ims)
+
+    trend_plots.gen_rrup_trend_plot(
+        const_features,
+        ims,
+        output_dir,
+        model_dirs,
+        model_names,
+        plt_kwargs=dict(linewidth=2.0),
+    )
 
 
 def gen_rrup_bin_plots(model_dir: Path, ims: Sequence[str]):

@@ -1,8 +1,9 @@
 """Train a multi-output NN"""
 import os
+import shutil
 import time
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Sequence
 from pathlib import Path
 
 import wandb
@@ -49,7 +50,6 @@ DATA_DIRS_LOOKUP = {
         "val_data_dirs": ["_fault_station_weighted_norm/val"],
         "stats_df": "_fault_station_weighted_norm/train/stats.csv",
     },
-
     # Fault station weighted normalised
     "fswn": {
         "train_data_dirs": ["fault_station_weighted_norm/train"],
@@ -66,10 +66,11 @@ def run(
     data_key: str,
     use_wandb: bool = False,
     eval: bool = True,
-    # n_epochs: int = None,
     tags: List[str] = None,
     use_sample_weights: bool = False,
     early_stopping: bool = False,
+    delete: bool = False,
+    ims: Sequence[str] = None,
     args_hyperparams: Dict = None,
 ):
     tags = list(tags)
@@ -80,6 +81,13 @@ def run(
 
     if args_hyperparams is not None:
         hyperparams = hyperparams | args_hyperparams
+
+    if ims is not None:
+        io_config["im_config"] = {
+            cur_im: cur_value
+            for cur_im, cur_value in io_config["im_config"].items()
+            if cur_im in ims
+        }
 
     # Add the data entries
     if data_key not in DATA_DIRS_LOOKUP.keys():
@@ -106,7 +114,9 @@ def run(
     if early_stopping:
         hyperparams["callbacks"] = [
             keras.callbacks.EarlyStopping(
-                monitor="val_loss", patience=5, min_delta=0.01 * len(config["im_config"])
+                monitor="val_loss",
+                patience=5,
+                min_delta=0.01 * len(config["im_config"]),
             )
         ]
 
@@ -122,7 +132,10 @@ def run(
         tags = [] if tags is None else list(tags)
         tags = tags + list(config["im_config"].keys()) + ["NN"]
 
-        if "lat" in config["feature_config"].keys():
+        if (
+            "lat" in config["feature_config"].keys()
+            or "X" in config["feature_config"].keys()
+        ):
             tags.append("location")
 
         wandb.init(
@@ -150,11 +163,7 @@ def run(
 
     # Run training
     train_result = nn_gmm.train_nn(
-        config,
-        hyperparams,
-        model=model,
-        multi_output=False,
-        verbose=2,
+        config, hyperparams, model=model, multi_output=False, verbose=2,
     )
     output_dir = train_result.output_dir
 
@@ -196,6 +205,10 @@ def run(
                 wandb.run, ims, "val", val_metrics, val_basin_metrics
             )
 
+    if delete:
+        console.print(f"Deleting output dir {output_dir}")
+        shutil.rmtree(output_dir)
+
         # console.print("Generating binned Rrup plot")
         # nn_gmm.gen_rrup_bin_plot(output_dir, ims)
 
@@ -221,6 +234,14 @@ if __name__ == "__main__":
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--use-sample-weights", action="store_true")
     parser.add_argument("--early-stopping", action="store_true")
+    parser.add_argument("--delete", action="store_true")
+    parser.add_argument(
+        "--ims",
+        default=None,
+        type=str,
+        help="Exclude any IMs not in this list",
+        nargs="+",
+    )
 
     # Hyperparameters (required for tuning via wandb sweep)
     # Using -1 as the default as None can be a valid value
@@ -257,5 +278,7 @@ if __name__ == "__main__":
         args.tags,
         args.use_sample_weights,
         args.early_stopping,
+        args.delete,
+        ims=args.ims,
         args_hyperparams=args_hyperparams,
     )

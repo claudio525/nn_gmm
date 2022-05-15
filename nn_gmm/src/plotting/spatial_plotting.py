@@ -443,6 +443,7 @@ def faults_plot(
     ),
     map_data: NZMapData = None,
     title: str = "Faults",
+    show_hypo: bool = False,
 ):
     """
     Creates a figure showing all
@@ -483,7 +484,7 @@ def faults_plot(
         size=0.005 * (2 ** rupture_df.loc[rupture_df.historic].mag),
         style="cc",
         color="white",
-        pen="0.15p,black",
+        pen="0.1p,black",
     )
 
     # Plot the fault traces
@@ -492,12 +493,13 @@ def faults_plot(
         fig.plot(x=cur_trace[:, 0], y=cur_trace[:, 1], pen="0.5p,black")
 
     # Plot the cybershake hypocentres
-    # fig.plot(
-    #     x=rupture_df.loc[~rupture_df.historic].hlon,
-    #     y=rupture_df.loc[~rupture_df.historic].hlat,
-    #     style="c0.05c",
-    #     color="black",
-    #     pen="black",
-    # )
+    if show_hypo:
+        fig.plot(
+            x=rupture_df.loc[~rupture_df.historic].hlon,
+            y=rupture_df.loc[~rupture_df.historic].hlat,
+            style="x0.04c",
+            color="black",
+            pen="black",
+        )
 
     return fig

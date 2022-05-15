@@ -37,6 +37,7 @@ class TrainingResult:
         training_config: Dict,
         output_dir: Path,
         best_model_dir: Path,
+        loss_df: pd.DataFrame
     ):
 
         self.input_config = input_config
@@ -44,6 +45,8 @@ class TrainingResult:
         self.output_dir = output_dir
 
         self.model_location = best_model_dir
+
+        self.loss_df = loss_df
 
     def save(self, output_ffp: str):
         with open(output_ffp, "wb") as f:
@@ -298,15 +301,36 @@ def train_nn(
     # Create loss plot
     history = history.history
     ims = list(im_config.keys())
-    fig = ml_tools.plotting.plot_loss(
-        history,
-        # y_lim=(0.0, 1.0),
-        y_label="Loss",
-        multi_keys=ims if len(ims) > 1 else None,
-    )
+
+    if config["use_sample_weights"]:
+        fig = plt.figure(figsize=(16, 10), dpi=200)
+        ax_1 = fig.add_subplot(1, 2, 1)
+        ml_tools.plotting.plot_loss(
+            history,
+            ax=ax_1,
+            y_label="Training Loss",
+            multi_keys=ims if len(ims) > 1 else None,
+            plot_val=False
+        )
+
+        ax_2 = fig.add_subplot(1, 2, 2)
+        ml_tools.plotting.plot_loss(
+            history,
+            ax=ax_2,
+            y_label="Validation Loss",
+            multi_keys=ims if len(ims) > 1 else None,
+            plot_train=False,
+        )
+    else:
+        fig = ml_tools.plotting.plot_loss(
+            history,
+            y_label="Loss",
+            multi_keys=ims if len(ims) > 1 else None,
+        )
+    fig.tight_layout()
     fig.savefig(os.path.join(output_dir, "loss.png"))
 
-    return TrainingResult(config, hyperparams, output_dir, model_dir)
+    return TrainingResult(config, hyperparams, output_dir, model_dir, loss_df)
 
 
 def get_loss_function(hyperparams: Dict):

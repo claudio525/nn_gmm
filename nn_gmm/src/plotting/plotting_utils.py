@@ -19,64 +19,10 @@ FEATUER_NAME_LOOKUP = {
 
 IM_NAME_LOOKUP = {}
 
-IM_MEAN_KEY, IM_STD_KEY = "{}_mean", "{}_std"
-TEMPLATE_OPTIONS_DICT = {"flags": [], "options": {}}
-
-DEFAULT_RES_GEN_GMT_PLOT_OPTIONS = {
-    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours"],
-    "options": {
-        "xyz-grid-search": "12m",
-        "xyz-grid-automask": "12k",
-        "xyz-cpt": "polar",
-        "xyz-cpt-bg": "0/0/80",
-        "xyz-cpt-fg": "80/0/0",
-        "xyz-transparency": "30",
-        "xyz-size": "1k",
-        "xyz-cpt-inc": "0.125",
-        "xyz-cpt-tick": "0.25",
-        "xyz-cpt-min": "-1.0",
-        "xyz-cpt-max": "1.0",
-    },
-}
-
-DEFAULT_STANDARD_GMT_PLOT_OPTIONS = {
-    "flags": ["xyz-grid", "xyz-landmask", "xyz-grid-contours", "xyz-cpt-invert"],
-    "options": {
-        "xyz-grid-search": "12m",
-        "xyz-grid-automask": "12k",
-        "xyz-cpt": "hot",
-        "xyz-transparency": "30",
-        "xyz-size": "1k",
-        "xyz-cpt-min": "0",
-        "xyz-cpt-max": "0.6",
-    },
-}
-
-DEFAULT_GMT_CB_OPTIONS = {
-    "sigma": {
-    "xyz-cpt-min": "0",
-    "xyz-cpt-max": "0.6",
-    },
-    "bias": {
-        "xyz-cpt-inc": "0.025",
-        "xyz-cpt-tick": "0.05",
-        "xyz-cpt-min": "-0.2",
-        "xyz-cpt-max": "0.2",
-    }
-}
-
-
-PLOT_TYPE_OPTIONS_MAPPING = {
-    # "sim": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
-    # "est_mean": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
-    # "est_std": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
-    # "res_mean": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
-    "bias": DEFAULT_RES_GEN_GMT_PLOT_OPTIONS,
-    "sigma": DEFAULT_STANDARD_GMT_PLOT_OPTIONS,
-}
-
 DEFAULT_VS30_BINS = [0, 200, 400, 600, 800, 1200]
 
+
+DEFAULT_PLOT_KWARGS = dict(linewidth=0.75)
 
 def get_feature_name(id: str):
     """Gets the proper feature name for the specified 'id'"""

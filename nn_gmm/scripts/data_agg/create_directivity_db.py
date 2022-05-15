@@ -34,27 +34,47 @@ def _process_realisation(
     srf_points: np.ndarray,
     header: List[Dict],
     sites_df: pd.DataFrame,
+    srf_info_dir: Path,
 ):
     cur_id_prefix = (
         f"{realisation}_" if realisation != source else f"{source}_{source}_"
     )
+
+    # Find the srf info file
+    srf_info_ffp = next(srf_info_dir.glob(f"{realisation}.info"))
+    with h5py.File(srf_info_ffp, "r") as f:
+        srf_info = dict(f.attrs)
+
+    # Compute S and Theta
+    theta_values, s_values = nn_gmm.compute_theta_s(
+        srf_info["corners"],
+        srf_info["strike"],
+        srf_info["rake"],
+        (srf_info["hlon"], srf_info["hlat"]),
+        sites_df.loc[:, ["lon", "lat"]].values,
+        n_procs=1,
+    )
+    result_df = pd.DataFrame(
+        index=np.char.add(cur_id_prefix, sites_df.index.values.astype(str)),
+        columns=["theta_custom", "S_custom"],
+        data=np.stack([theta_values, s_values], axis=1),
+    )
+
+    # Compute U & T
     T, U = src_site_dist.calc_rx_ry_GC2(
         srf_points,
         header,
         sites_df.loc[:, ["lon", "lat"]].values,
         hypocentre_origin=True,
     )
-    result_df = pd.DataFrame(
-        index=np.char.add(cur_id_prefix, sites_df.index.values.astype(str)),
-        columns=["T", "U"],
-        data=np.stack([T, U], axis=1),
-    )
+    result_df["T"] = T
+    result_df["U"] = U
 
     # Compute
-    # S = Horizontal length of the rupture travel between the site and the origin
+    # S = Horizontal length of the rupture travel between  the site and the origin
     # D = The effective rupture travel width, measured from the hypocentre to the
     # shallowest depth of the rupture plane
-    result_df["S"] = result_df.U
+    result_df["S_bayless"] = result_df.U
     if srf_points.size > 1:
         # Get the start and end coordinates of the trace
         trace_start = srf_points[0, :2]
@@ -76,14 +96,14 @@ def _process_realisation(
             hypocentre_origin=True,
         )
 
-        result_df.loc[result_df.U > trace_U.max(), "S"] = trace_U.max()
-        result_df.loc[result_df.U < trace_U.min(), "S"] = trace_U.min()
+        result_df.loc[result_df.U > trace_U.max(), "S_bayless"] = trace_U.max()
+        result_df.loc[result_df.U < trace_U.min(), "S_bayless"] = trace_U.min()
 
     # Point-source
     else:
-        result_df["S"] = 0
+        result_df["S_bayless"] = 0
 
-    result_df["D"] = np.max([cur_plane["dhyp"] for cur_plane in header])
+    result_df["D_bayless"] = np.max([cur_plane["dhyp"] for cur_plane in header])
     return result_df
 
 
@@ -91,6 +111,7 @@ def main(
     srf_data_dir: Path = typer.Argument(
         ..., help="Path to the srf data directory (one srf per source)"
     ),
+    srf_info_dir: Path = typer.Argument(..., help="Path to the srf info data directory (one per realisation)"),
     srf_header_ffp: Path = typer.Argument(..., help="Path to the srf header data"),
     imdb_ffp: Path = typer.Argument(..., help="Path to the corresponding IMDB"),
     sites_ffp: Path = typer.Argument(..., help="Path to the sites csv"),
@@ -155,6 +176,7 @@ def main(
                         cur_srf_points.astype(np.float32),
                         cur_header,
                         cur_sites_df,
+                        srf_info_dir / cur_source,
                     )
                     results.append(cur_result)
             else:
@@ -168,6 +190,7 @@ def main(
                                 cur_srf_points.astype(np.float32),
                                 cur_header,
                                 cur_sites_df,
+                                srf_info_dir / cur_source
                             )
                             for cur_rel, cur_header in cur_headers.items()
                         ],

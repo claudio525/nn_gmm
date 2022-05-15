@@ -203,6 +203,9 @@ def gen_tf_records(
     n_procs: int = 8,
     fault_density_weights: pd.Series = None,
     station_density_weights: pd.Series = None,
+    mag_rrup_weights_db_ffp: Path = None,
+    use_mag_bin_weights: bool = True,
+    use_rrup_bin_weights: bool = True,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
@@ -213,7 +216,9 @@ def gen_tf_records(
         console.print(f"Processing {ix + 1}/{n_sources}")
         cur_output_ffp = output_dir / f"{cur_source}.tfrecord"
         if cur_output_ffp.exists():
-            console.print(f"Skipping source {cur_source} as output tfrecord already exists")
+            console.print(
+                f"Skipping source {cur_source} as output tfrecord already exists"
+            )
             continue
 
         cur_im_df = nn_gmm.load_fault_im_df(cur_source, im_db_ffps)
@@ -245,7 +250,9 @@ def gen_tf_records(
         # Merge with directivity parameters
         cur_input_df = pd.merge(
             cur_input_df,
-            directivity_df.loc[:, ["T", "U", "S", "D"]],
+            directivity_df.loc[
+                :, ["T", "U", "S_bayless", "D_bayless", "theta_custom", "S_custom"]
+            ],
             how="inner",
             left_index=True,
             right_index=True,
@@ -298,7 +305,26 @@ def gen_tf_records(
                 cur_site_source_ids.site.values
             ].values
         if station_density_weights is not None:
-            sample_weights *= station_density_weights.loc[cur_site_source_ids.site.values].values
+            sample_weights *= station_density_weights.loc[
+                cur_site_source_ids.site.values
+            ].values
+
+        if use_rrup_bin_weights or use_mag_bin_weights:
+            mag_rrup_weights_df = pd.read_hdf(mag_rrup_weights_db_ffp, f"/{cur_source}")
+
+            if use_mag_bin_weights:
+                sample_weights *= mag_rrup_weights_df.loc[
+                    cur_site_source_ids.index.values, "mag_weights"
+                ].values
+
+            if use_rrup_bin_weights:
+                sample_weights *= mag_rrup_weights_df.loc[
+                    cur_site_source_ids.index.values, "rrup_weights"
+                ].values
+
+        print(
+            f"Source: {cur_source}, Sample weight - Min: {sample_weights.min()}, Max: {sample_weights.max()}"
+        )
 
         # Serialize
         assert np.all(
@@ -354,9 +380,16 @@ def main(
     base_grid_only: bool = False,
     val_events_ffp: Path = None,
     n_procs: int = 8,
-    use_fault_density_weights: bool = False,
-    use_site_density_weights: bool = False,
+    mag_rrup_weights_db_ffp: Path = None,
+    use_fault_density_weights: bool = True,
+    use_site_density_weights: bool = True,
+    use_mag_bin_weights: bool = True,
+    use_rrup_bin_weights: bool = True,
 ):
+    assert (not use_mag_bin_weights and not use_rrup_bin_weights) or (
+        mag_rrup_weights_db_ffp is not None
+    )
+
     output_dir = Path(output_dir)
 
     # Load Site params
@@ -394,6 +427,9 @@ def main(
     console.print("Loading distance params")
     distance_db_ffps = list(distance_dir.glob("*.db"))
     distance_df = nn_gmm.load_distance_df(site_df, distance_db_ffps, n_procs=n_procs)
+    assert (
+        np.unique(distance_df.index.values.astype(str)).shape[0] == distance_df.shape[0]
+    )
 
     console.print("Loading directivity params")
     directivity_db_ffps = list(directivity.glob("*.db"))
@@ -412,6 +448,7 @@ def main(
         split_list[0]
         for split_list in np.char.split(rel_df.index.values.astype(str), "_")
     ]
+    assert np.unique(rel_df.index.values.astype(str)).shape[0] == rel_df.shape[0]
 
     # Split events/sources into train/validation data
     im_db_ffps = list(im_db_dir.glob("*.h5"))
@@ -444,15 +481,21 @@ def main(
             fault_density_weights = fault_density_weights.loc[
                 ~np.isinf(fault_density_weights)
             ]
-            assert np.all((fault_density_weights <= 1.0) & (fault_density_weights > 0.0))
+            assert np.all(
+                (fault_density_weights <= 1.0) & (fault_density_weights > 0.0)
+            )
 
             # Normalise to sum to the number of stations
-            fault_density_weights = fault_density_weights * (fault_density_weights.shape[0] / fault_density_weights.sum())
+            fault_density_weights = fault_density_weights * (
+                fault_density_weights.shape[0] / fault_density_weights.sum()
+            )
 
         station_density_weights = None
         if use_site_density_weights:
             console.print(f"Computing station density weights for each site")
-            site_nztm200_coords = geo.wgs_nztm2000x(np.stack((site_df.lon.values, site_df.lat.values), axis=1))
+            site_nztm200_coords = geo.wgs_nztm2000x(
+                np.stack((site_df.lon.values, site_df.lat.values), axis=1)
+            )
 
             # Create kd-tree and run lookup
             kd_tree = spatial.KDTree(site_nztm200_coords)
@@ -460,15 +503,20 @@ def main(
                 [
                     len(cur_c)
                     for cur_c in kd_tree.query_ball_point(
-                    site_nztm200_coords, r=3.99 * 1000, p=2,
-                    workers=-1
-                )
+                        site_nztm200_coords, r=3.99 * 1000, p=2, workers=-1
+                    )
                 ]
             )
 
-            station_density_weights = 1 / pd.Series(index=site_df.index, data=station_count)
-            # Normalise so that sum of weights == number of stations (not really needed tbh)
-            station_density_weights = station_density_weights * site_df.shape[0] / station_density_weights.sum()
+            station_density_weights = 1 / pd.Series(
+                index=site_df.index, data=station_count
+            )
+            # Normalise to sum to the number of stations
+            station_density_weights = (
+                station_density_weights
+                * site_df.shape[0]
+                / station_density_weights.sum()
+            )
 
         # Training dataset
         gen_tf_records(
@@ -482,7 +530,10 @@ def main(
             nn_gmm.TECT_TYPE_ONE_HOT_DICT,
             n_procs=n_procs,
             fault_density_weights=fault_density_weights,
-            station_density_weights=station_density_weights
+            station_density_weights=station_density_weights,
+            mag_rrup_weights_db_ffp=mag_rrup_weights_db_ffp,
+            use_mag_bin_weights=use_mag_bin_weights,
+            use_rrup_bin_weights=use_rrup_bin_weights,
         )
 
         # Validation dataset
@@ -524,7 +575,7 @@ if __name__ == "__main__":
         "distance_dir", type=str, help="The path to the distance site-source dir"
     )
     parser.add_argument(
-        "site_source_dir", type=str, help="The path to the site-source dir"
+        "directivity_dir", type=str, help="The path to the directivity dir"
     )
     parser.add_argument(
         "source_params_dir",
@@ -559,12 +610,29 @@ if __name__ == "__main__":
         help="If set then sites are weight based "
         "on the number of other stations in their vicinity (radius of 3.8km)",
     )
+    parser.add_argument(
+        "--mag_rrup_weights_db_ffp",
+        type=Path,
+        help="File path to the Magnitude/Rrrup sample weights db",
+        default=None,
+    )
+    parser.add_argument(
+        "--mag_weights",
+        action="store_true",
+        help="Use magnitude sample weighting",
+    )
+    parser.add_argument(
+        "--rrup_weights",
+        action="store_true",
+        help="Use rrup sample weighting",
+    )
+
     args = parser.parse_args()
 
     main(
         nn_gmm.to_path(args.site_params_dir),
         nn_gmm.to_path(args.distance_dir),
-        nn_gmm.to_path(args.site_source_dir),
+        nn_gmm.to_path(args.directivity_dir),
         nn_gmm.to_path(args.source_params_dir),
         nn_gmm.to_path(args.im_db_dir),
         nn_gmm.to_path(args.output_dir),
@@ -573,4 +641,7 @@ if __name__ == "__main__":
         val_events_ffp=nn_gmm.to_path(args.val_events_ffp),
         use_fault_density_weights=args.fault_density_weights,
         use_site_density_weights=args.station_density_weights,
+        mag_rrup_weights_db_ffp=args.mag_rrup_weights_db_ffp,
+        use_mag_bin_weights=args.mag_weights,
+        use_rrup_bin_weights=args.rrup_weights,
     )

@@ -2,13 +2,20 @@ program: /home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/train_multi_nn
 method: random
 
 parameters:
-  hidden_layer_func:
-    values:
-      - relu
-      - selu
+#  hidden_layer_func:
+#    values:
+#      - relu
+#      - selu
   l2:
-    min: 0.0
-    max: 0.2
+    values:
+      - 0.01
+      - 0.025
+      - 0.05
+      - 0.075
+      - 0.1
+      - 0.125
+      - 0.15
+      - 0.2
   batch_size:
     values:
       - 1024
@@ -42,11 +49,11 @@ command:
   - ${program}
   - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/machine_config.yaml"
   - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/withers_io_config.yaml"
-  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/hyperparms_config.yaml"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/tuning_configs/hyperparms_config.yaml"
   - "fswn"
   - "--use-wandb"
   - "--use-sample-weights"
-  - "--early-stopping"
   - "--tags"
   - "wither"
+  - "--delete"
   - ${args}

@@ -1,21 +1,14 @@
 import os
-import time
 import multiprocessing as mp
-from typing import Sequence, List, Optional, Dict, Union, Tuple
+from typing import List, Union, Tuple
 from pathlib import Path
 from importlib import reload
 
-import pygmt
-import seaborn as sns
-import ml_tools.utils
 import numpy as np
-import h5py
 import pandas as pd
 import typer
 import tensorflow as tf
-import matplotlib.pyplot as plt
 from scipy import spatial
-from scipy import interpolate
 from qcore import geo, nhm
 
 # Grow the GPU memory usage as needed
@@ -32,8 +25,95 @@ if gpus:
         print(e)
 
 import nn_gmm
+import ml_tools
 
 app = typer.Typer()
+
+
+@app.command("faults-plot")
+def gen_faults_plot(
+    output_dir: Path,
+    source_rel_data_dir: Path,
+    nshm_ffp: Path,
+    map_data_ffp: Path,
+    val_events_ffp: Path = None,
+    show_hypo: bool = False,
+):
+    """Generates two plots (or one if val_events_ffp is not specified)
+    showing all the fault traces (future events) and historic events (circles)
+
+    Note, is not fully generalised, i.e. only works for
+    small, moderate and cybershake data
+    """
+    # Load the data
+    nhm_data = nhm.load_nhm(str(nshm_ffp))
+
+    cybershake_df = pd.read_csv(
+        source_rel_data_dir / "cybershake_v20p4_200.csv", index_col=0
+    )
+    cybershake_df["fault"] = np.stack(
+        np.char.split(cybershake_df.index.values.astype(str), "_", maxsplit=1), axis=1
+    )[0, :]
+    cybershake_df["historic"] = False
+
+    small_df = pd.read_csv(source_rel_data_dir / "val_small.csv", index_col=0)
+    small_df["fault"] = small_df.index.values.astype(str)
+    small_df["historic"] = True
+
+    mod_df = pd.read_csv(source_rel_data_dir / "val_moderate.csv", index_col=0)
+    mod_df["fault"] = mod_df.index.values.astype(str)
+    mod_df["historic"] = True
+
+    rupture_df = pd.concat((cybershake_df, small_df, mod_df), axis=0)
+
+    # Plotting data
+    map_data = nn_gmm.NZMapData.load(map_data_ffp)
+
+    if val_events_ffp is not None:
+        val_faults = ml_tools.utils.load_txt(val_events_ffp)
+        val_mask = np.isin(rupture_df.fault, val_faults)
+        val_faults = [
+            cur_fault
+            for cur_name, cur_fault in nhm_data.items()
+            if cur_name in val_faults
+        ]
+        train_faults = [
+            cur_fault
+            for cur_name, cur_fault in nhm_data.items()
+            if cur_name not in val_faults
+        ]
+
+        fig = nn_gmm.faults_plot(
+            rupture_df.loc[~val_mask],
+            train_faults,
+            map_data=map_data,
+            title="Training Faults",
+            show_hypo=show_hypo
+        )
+        fig.savefig(
+            output_dir / f"train_faults.png", dpi=900, anti_alias=True,
+        )
+
+        fig = nn_gmm.faults_plot(
+            rupture_df.loc[val_mask],
+            val_faults,
+            map_data=map_data,
+            title="Validation Faults",
+            show_hypo=show_hypo
+        )
+        fig.savefig(
+            output_dir / f"train_faults.png", dpi=900, anti_alias=True,
+        )
+
+    else:
+        faults = [cur_fault for cur_name, cur_fault in nhm_data.items()]
+
+        fig = nn_gmm.faults_plot(
+            rupture_df, faults, map_data=map_data, title="Faults", show_hypo=show_hypo
+        )
+        fig.savefig(
+            output_dir / f"faults.png", dpi=900, anti_alias=True,
+        )
 
 
 @app.command("metrics")
