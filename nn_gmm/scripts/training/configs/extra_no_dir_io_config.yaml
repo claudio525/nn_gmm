@@ -13,7 +13,7 @@ feature_config:
         active_shallow: null
         volcanic: null
 im_config:
-  #        PGV: standard
+        PGV: standard
         PGA: standard
         pSA_0.05: standard
         pSA_0.1: standard

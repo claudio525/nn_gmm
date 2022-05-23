@@ -55,6 +55,7 @@ im_config:
         PGA: standard
         pSA_0.05: standard
         pSA_0.1: standard
+        pSA_0.25: standard
         pSA_0.5: standard
         pSA_1.0: standard
         pSA_3.0: standard

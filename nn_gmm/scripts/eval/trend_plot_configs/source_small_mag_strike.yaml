@@ -1,9 +1,30 @@
-mag: 4.5
-rake: 0.0
-dip: 90
-width: 2.0
-ztor: 0.0
-hdepth: 10.0
-is_point_source: True
-active_shallow: True
-volcanic: False
+mag:
+  value: 4.5
+  constraints: [3.5, 5.5]
+rake:
+  value: 0.0
+  constraints:
+    - [-180, -150]
+    - [-30, 30]
+    - [150, 180]
+dip:
+  value: 90
+  constraints: [45, 90]
+width:
+  value: 2.5
+  constraints: [0.0, 10.0]
+ztor:
+  value: 0.0
+  constraints: [0.0, 20.0]
+hdepth:
+  value: 10.0
+  constraints: [0.0, 20.0]
+is_point_source:
+  value: True
+  constraints: True
+active_shallow:
+  value: True
+  constraints: True
+volcanic:
+  value: False
+  constraints: False

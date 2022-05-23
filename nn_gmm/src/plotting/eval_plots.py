@@ -22,6 +22,107 @@ from nn_gmm.src import data
 from nn_gmm.src import utils
 
 
+def loss_comp(model_dirs: Sequence[Path], output_ffp: Path):
+    # Create dictionary of the models
+    model_dict = {
+        cur_model_dir.stem: (GMM.load(cur_model_dir), cur_model_dir, cur_c)
+        for cur_model_dir, cur_c in zip(
+            model_dirs, sns.color_palette("hls", n_colors=len(model_dirs))
+        )
+    }
+
+    # Get the super-set of IMs (and sort them)
+    ims = np.unique(
+        np.concatenate([cur_model.ims for (cur_model, _, __) in model_dict.values()])
+    )
+    ims = np.asarray(
+        sorted(
+            ims,
+            key=lambda im: float(im.split("_")[-1])
+            if im.startswith("pSA")
+            else -1
+            if im == "PGV"
+            else 0,
+        )
+    )
+
+    fig = plt.figure(figsize=(16, len(ims) * 10))
+    for ix, cur_im in enumerate(ims):
+        ax_train = ax_val = fig.add_subplot(len(ims), 1, ix + 1)
+        # ax_train = fig.add_subplot(len(ims), 2, (2 * ix) + 1)
+        # ax_val = fig.add_subplot(len(ims), 2, (2 * ix) + 2)
+
+        cur_loss_min, cur_loss_max = np.inf, -np.inf
+        for cur_model_id, (cur_model, cur_model_dir, cur_color) in model_dict.items():
+            if cur_im not in cur_model.ims:
+                continue
+
+            cur_loss_df = pd.read_csv(cur_model_dir / "loss.csv", index_col=0)
+
+            # Single output model
+            if len(cur_model.ims) == 1:
+                ax_train.plot(
+                    cur_loss_df.index.values,
+                    cur_loss_df["loss"].values,
+                    c=cur_color,
+                    label=cur_model_id,
+                )
+                ax_val.plot(
+                    cur_loss_df.index.values,
+                    cur_loss_df["val_loss"].values,
+                    linestyle="--",
+                    c=cur_color,
+                )
+
+                cur_loss_min = min(
+                    cur_loss_min, cur_loss_df[["loss", "val_loss"]].min().min(),
+                )
+                cur_loss_max = max(
+                    cur_loss_max, cur_loss_df[["loss", "val_loss"]].max().max(),
+                )
+
+            # Multiple output model
+            else:
+                loss_key, val_loss_key = f"{cur_im}_loss", f"val_{cur_im}_loss"
+
+                ax_train.plot(
+                    cur_loss_df.index.values,
+                    cur_loss_df[loss_key].values,
+                    c=cur_color,
+                    label=cur_model_id,
+                )
+                ax_val.plot(
+                    cur_loss_df.index.values,
+                    cur_loss_df[val_loss_key].values,
+                    linestyle="--",
+                    c=cur_color,
+                )
+
+                cur_loss_min = min(
+                    cur_loss_min, cur_loss_df[[loss_key, val_loss_key]].min().min(),
+                )
+                cur_loss_max = max(
+                    cur_loss_max, cur_loss_df[[loss_key, val_loss_key]].max().max(),
+                )
+
+            ax_train.legend()
+
+            ax_train.set_title(f"{cur_im}")
+            ax_train.set_xlabel(f"Epoch")
+            ax_train.set_ylabel(f"Loss")
+            ax_train.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+            ax_train.set_ylim(cur_loss_min, cur_loss_max)
+
+            ax_val.set_xlabel(f"Epoch")
+            ax_val.set_ylabel(f"Loss")
+            ax_val.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+            ax_val.set_ylim(cur_loss_min, cur_loss_max)
+
+        fig.tight_layout()
+        fig.savefig(output_ffp)
+        plt.close(fig)
+
+
 def gen_basin_comp_mag_rrup_plots(
     model_dirs: Sequence[Path],
     im: str,
@@ -437,11 +538,25 @@ def gen_rrup_trend_plots(
         assert site_config is not None and site_source_config is not None
         const_features = {**source_config, **site_config, **site_source_config}
 
+    # Split into constant features (for prediction)
+    # and data constraints (for plotting data points)
+    data_constraints = {
+        key: tuple(value["constraints"])
+        if isinstance(value["constraints"], list)
+        else value["constraints"]
+        for key, value in const_features.items()
+        if isinstance(value, dict)
+    }
+    const_features = {
+        key: value["value"] if isinstance(value, dict) else value
+        for key, value in const_features.items()
+    }
+
     if ims is None:
         ims = set()
         for cur_model_dir in model_dirs:
             ims = ims.union(GMM.load(cur_model_dir).ims)
-        ims = list(ims)
+    ims = list(ims)
 
     trend_plots.gen_rrup_trend_plot(
         const_features,
@@ -449,6 +564,7 @@ def gen_rrup_trend_plots(
         output_dir,
         model_dirs,
         model_names,
+        data_constraints=data_constraints if len(data_constraints) > 0 else None,
         plt_kwargs=dict(linewidth=2.0),
     )
 

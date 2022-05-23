@@ -1,18 +1,18 @@
-hidden_layer_func: selu
-l2: null
+hidden_layer_func: relu
+l2: 0.01
 dropout: null
 
 n_units: 32
-n_layers: 2
+n_layers: 1
 
 n_out_units: 32
-n_out_layers: 2
+n_out_layers: 0
 
 batch_size: 5120
 #batch_size: 10240
 #batch_size: 1024
 shuffle_buffer_size: 5000000
-n_epochs: 35
+n_epochs: 150
 
 optimizer: adam
 learning_rate: 0.001

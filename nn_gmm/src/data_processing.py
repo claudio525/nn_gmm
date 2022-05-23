@@ -194,29 +194,33 @@ def preprocess_ds(
             for name, func in im_config.items():
                 target_dict[name] = func(item[name]) if func is not None else item[name]
 
-            # Include sample weights, returns tuple (X, y, sample_weights)
-            if use_sample_weights:
-                if as_dict:
-                    raise NotImplementedError(
-                        "Sample weights and dictionary "
-                        "format is currently not supported."
+            # Single IM output
+            if len(im_config) == 1:
+                im = list(im_config.keys())[0]
+                if use_sample_weights:
+                    return (
+                        feature_dict["inputs"],
+                        target_dict[im],
+                        item["sample_weight"],
                     )
-
-                return (
-                    feature_dict["inputs"],
-                    tf.stack([target_dict[im] for im in im_config], axis=1),
-                    item["sample_weight"],
-                )
-
-            # Return tuple of two dictionary, (input_dict, output_dict)
-            if as_dict:
-                return feature_dict, target_dict
-
-            # Return as tuple of two Tensors (X, y)
-            return (
-                feature_dict["inputs"],
-                tf.stack([target_dict[im] for im in im_config], axis=1),
-            )
+                else:
+                    return (
+                        feature_dict["inputs"],
+                        target_dict[im],
+                    )
+            # Multi-output
+            else:
+                if use_sample_weights:
+                    return (
+                        feature_dict["inputs"],
+                        target_dict,
+                        item["sample_weight"]
+                    )
+                else:
+                    return (
+                        feature_dict["inputs"],
+                        target_dict
+                    )
 
         # Only return the features (either as dictionary or Tensor)
         return feature_dict if as_dict else feature_dict["inputs"]

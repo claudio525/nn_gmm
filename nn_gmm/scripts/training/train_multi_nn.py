@@ -163,7 +163,8 @@ def run(
 
     # Run training
     train_result = nn_gmm.train_nn(
-        config, hyperparams, model=model, multi_output=False, verbose=2,
+        # config, hyperparams, model=model, multi_output=True if len(io_config["im_config"]) > 1 else False, verbose=2,
+        config, hyperparams, model=model, as_dict=False, verbose=2,
     )
     output_dir = train_result.output_dir
 
@@ -208,18 +209,6 @@ def run(
     if delete:
         console.print(f"Deleting output dir {output_dir}")
         shutil.rmtree(output_dir)
-
-        # console.print("Generating binned Rrup plot")
-        # nn_gmm.gen_rrup_bin_plot(output_dir, ims)
-
-        # console.print("Generating residual plots")
-        # nn_gmm.gen_residual_plots(output_dir, ims)
-
-        # console.print("Generating Rrup trend plot")
-        # nn_gmm.gen_rrup_trend_plots(output_dir, ims)
-
-        # console.print("Generating spatial metric plots")
-        # nn_gmm.gen_spatial_metric_plots(output_dir, ims, n_procs=14)
 
 
 if __name__ == "__main__":

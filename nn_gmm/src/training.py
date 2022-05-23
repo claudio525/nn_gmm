@@ -1,3 +1,4 @@
+import time
 import pickle
 import json
 import os
@@ -139,7 +140,7 @@ def train_nn(
     model_fn: Callable = None,
     model_config: Dict = None,
     verbose: int = 2,
-    multi_output: bool = False,
+    as_dict: bool = False,
     output_dir: Path = None,
 ) -> TrainingResult:
     """
@@ -200,6 +201,7 @@ def train_nn(
         hyperparams["batch_size"],
         val_dirs=utils.to_path(config["val_data_dirs"]),
         shuffle_buffer_size=hyperparams["shuffle_buffer_size"],
+        # shuffle_buffer_size=None,
         n_open_files=512,
     )
 
@@ -222,13 +224,15 @@ def train_nn(
             data_processing.convert_to_transform_fn(config["feature_config"].copy()),
         )
     im_config = data_processing.convert_to_transform_fn(config["im_config"].copy())
+
+
     train_ds = data_processing.preprocess_ds(
         train_ds,
         feature_config=feature_config,
         feature_config_dict=feature_config_dict,
         im_config=im_config,
         use_sample_weights=config["use_sample_weights"],
-        as_dict=multi_output,
+        as_dict=as_dict,
     )
     val_ds = (
         val_ds
@@ -238,15 +242,27 @@ def train_nn(
             feature_config=feature_config,
             feature_config_dict=feature_config_dict,
             im_config=im_config,
-            as_dict=multi_output,
+            as_dict=as_dict,
         )
     )
+
+    # Cache if specified
+    if hyperparams["cache"]:
+        train_ds = train_ds.cache()
+        val_ds = val_ds.cache()
+
+    # Shuffle the batches
+    train_ds.shuffle(128)
+
+    console.print(f"Preparing datasets")
+    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
+    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
     # Compile the model
     model.compile(
         optimizer=hyperparams["optimizer"],
         loss=hyperparams["loss"],
-        run_eagerly=False,
+        run_eagerly=True,
     )
 
     # Model architecture summary
@@ -272,14 +288,6 @@ def train_nn(
                 str(model_dir), monitor="val_loss", save_best_only=True
             ),
         ]
-
-    console.print(f"Preparing datasets")
-    train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
-    val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
-
-    if hyperparams["cache"]:
-        train_ds = train_ds.cache()
-        val_ds = val_ds.cache()
 
     # Train
     console.print(f"Training...")

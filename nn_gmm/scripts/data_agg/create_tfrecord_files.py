@@ -204,8 +204,8 @@ def gen_tf_records(
     fault_density_weights: pd.Series = None,
     station_density_weights: pd.Series = None,
     mag_rrup_weights_db_ffp: Path = None,
-    use_mag_bin_weights: bool = True,
-    use_rrup_bin_weights: bool = True,
+    use_mag_bin_weights: bool = False,
+    use_rrup_bin_weights: bool = False,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
@@ -381,10 +381,10 @@ def main(
     val_events_ffp: Path = None,
     n_procs: int = 8,
     mag_rrup_weights_db_ffp: Path = None,
-    use_fault_density_weights: bool = True,
-    use_site_density_weights: bool = True,
-    use_mag_bin_weights: bool = True,
-    use_rrup_bin_weights: bool = True,
+    use_fault_density_weights: bool = False,
+    use_site_density_weights: bool = False,
+    use_mag_bin_weights: bool = False,
+    use_rrup_bin_weights: bool = False,
 ):
     assert (not use_mag_bin_weights and not use_rrup_bin_weights) or (
         mag_rrup_weights_db_ffp is not None

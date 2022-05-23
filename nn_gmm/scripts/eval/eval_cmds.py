@@ -1,14 +1,13 @@
-import time
 from typing import Sequence, List, Optional
 from pathlib import Path
 
-import seaborn as sns
 import ml_tools.utils
 import numpy as np
-import h5py
 import pandas as pd
 import typer
 import tensorflow as tf
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -83,17 +82,19 @@ def trend_plot_rrup_multi(
         source_config=ml_tools.utils.load_yaml(source_config_ffp),
         site_config=ml_tools.utils.load_yaml(site_config_ffp),
         site_source_config=ml_tools.utils.load_yaml(site_source_config_ffp),
-        model_names=model_names,
+        model_names=None if len(model_names) == 0 else model_names,
     )
 
 
 @app.command("trend-rrup-multi-combo")
-def trend_plot_rrup_multi(
+def trend_plot_rrup_multi_combo(
     model_dirs: List[Path],
     output_dir: Path,
     source_config_ffps: List[Path] = typer.Option(..., help="The source configs"),
     site_config_ffps: List[Path] = typer.Option(..., help="The site configs"),
-    site_source_config_ffps: List[Path] = typer.Option(..., help="The site-source configs"),
+    site_source_config_ffps: List[Path] = typer.Option(
+        ..., help="The site-source configs"
+    ),
     ims: List[str] = None,
     model_names: List[str] = None,
 ):
@@ -128,7 +129,7 @@ def trend_plot_rrup_multi(
                     site_source_config=ml_tools.utils.load_yaml(
                         cur_site_source_config_ffp
                     ),
-                    model_names=model_names,
+                    model_names=None if len(model_names) == 0 else model_names,
                 )
 
 
@@ -277,11 +278,13 @@ def avg_spatial_bias_std(
 
 
 @app.command("loss-comp")
-def loss_compare(model_dirs: List[Path]):
-    print("wtf")
+def loss_compare(model_dirs: List[Path], output_ffp: Path):
+    """
+    Generates a plot comparing all the specified models
+    for the superset of IMs
+    """
+    nn_gmm.loss_comp(model_dirs, output_ffp)
 
 
 if __name__ == "__main__":
     app()
-
-

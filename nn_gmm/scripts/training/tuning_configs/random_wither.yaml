@@ -1,13 +1,13 @@
 program: /home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/train_multi_nn.py
-method: random
+method: bayes
+metric:
+  name: best_val_loss
+  goal: minimize
 
 parameters:
-#  hidden_layer_func:
-#    values:
-#      - relu
-#      - selu
   l2:
     values:
+      - 0.0
       - 0.01
       - 0.025
       - 0.05
@@ -16,16 +16,6 @@ parameters:
       - 0.125
       - 0.15
       - 0.2
-  batch_size:
-    values:
-      - 1024
-      - 5120
-      - 10240
-  learning_rate:
-    values:
-      - 0.0001
-      - 0.001
-      - 0.01
   n_units:
     values:
       - 8
@@ -56,4 +46,5 @@ command:
   - "--tags"
   - "wither"
   - "--delete"
+  - "--no-eval"
   - ${args}
