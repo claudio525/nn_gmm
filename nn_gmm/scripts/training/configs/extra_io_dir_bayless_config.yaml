@@ -3,6 +3,10 @@ feature_config:
         rake: min_max
         mag: standard
         vs30: standard
+        U: standard
+        T: standard
+        D_bayless: standard
+        S_bayless: standard
         z1p0: standard
         z2p5: standard
         vs500: standard
@@ -24,3 +28,4 @@ im_config:
         pSA_3.0: standard
         pSA_5.0: standard
         pSA_10.0: standard
+

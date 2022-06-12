@@ -237,13 +237,13 @@ class ResPlotGen:
 
         bias_max_value = np.max(bias_max_values) + 0.025
         bias_ax.set_ylim(-bias_max_value, +bias_max_value)
-        bias_ax.set_ylabel(r"$\mathbb{E}_{i \in Rup}[\Delta_i]$")
+        bias_ax.set_ylabel(r"Bias, $\mathbb{E}[\Delta]$")
         bias_ax.set_xlabel("Period, T")
         bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
         bias_ax.semilogx()
         bias_ax.legend()
 
-        std_ax.set_ylabel(r"$\sigma_{\mathbf{\Delta}}$")
+        std_ax.set_ylabel(r"Residual Standard Deviation, $\sigma_{\mathbf{\Delta}}$")
         std_ax.set_xlabel("Period, T")
         std_ax.grid(which="both", linewidth=0.5, alpha=0.5)
         std_ax.semilogx()

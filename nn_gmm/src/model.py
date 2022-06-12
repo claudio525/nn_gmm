@@ -221,7 +221,14 @@ class NeuralNetworkGMM(GMM):
         pre_process: bool = True,
         result_df_index: np.ndarray = None,
     ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
-        X = self._pre_process(X.copy()) if pre_process else X
+        if pre_process:
+            X = X.copy()
+
+            # Hack
+            if "rrup_ln" not in X.columns and "rrup_ln" in self.features:
+                X["rrup_ln"] = X["rrup"].values.copy()
+
+            X = self._pre_process(X)
 
         # Ensure that all the required features exist
         if not np.all(np.isin(self.features, X.columns.values.astype(str))):
@@ -297,6 +304,11 @@ class NeuralNetworkGMM(GMM):
                 }
             )
             cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
+
+            # Hack
+            if "rrup_ln" not in cur_df.columns and "rrup_ln" in self.features:
+                cur_df["rrup_ln"] = cur_df["rrup"].values.copy()
+
             cur_mean_df, cur_std_df = self.predict(cur_df, pre_process=True)
 
             # Only keep some IMs (to reduce size of resulting data)

@@ -38,25 +38,28 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
                 cur_state["min"][key] = tf.minimum(cur_state["min"][key], cur_min)
                 cur_state["max"][key] = tf.maximum(cur_state["max"][key], cur_max)
                 cur_state["sum"][key] += tf.reduce_sum(items[key])
-                # cur_state["ln_sum"]["key"] += tf.reduce_sum(tf.math.log(items[key]))
+                # cur_state["ln_sum"][key] += tf.reduce_sum(tf.math.log(items[key]))
+                cur_state["ln_sum"][key] += tf.reduce_sum(tf.math.log(items[key]))
 
         return cur_state
 
-    initial_state = {"count": 0, "min": {}, "max": {}, "sum": {}}
+    initial_state = {"count": 0, "min": {}, "max": {}, "sum": {}, "ln_sum": {}}
     std_initial_state = {}
+    std_ln_initial_state = {}
     for item in parsed_dataset.take(1):
         for key in item.keys():
             if key not in IGNORE_FIELDS:
                 initial_state["min"][key] = 99999.0
                 initial_state["max"][key] = -99999.0
                 initial_state["sum"][key] = 0.0
+                initial_state["ln_sum"][key] = 0.0
                 std_initial_state[key] = 0.0
+                std_ln_initial_state[key] = 0.0
 
     start_time = time.time()
     stats = parsed_dataset.prefetch(tf.data.experimental.AUTOTUNE).reduce(initial_state,
                                                                           _get_stats)
     print(f"Took {time.time() - start_time}")
-    # stats = initial_state
 
     count = stats["count"].numpy()
     del stats["count"]
@@ -64,13 +67,20 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
     stats_df = pd.DataFrame.from_dict(stats)
     stats_df = stats_df.applymap(lambda t: t.numpy())
     stats_df["mean"] = stats_df["sum"] / count
+    stats_df["mean_ln"] = stats_df["ln_sum"] / count
 
     def _get_sigma_sum(cur_state, items):
         for key in items.keys():
             if key not in IGNORE_FIELDS:
                 cur_state[key] += tf.reduce_sum(tf.math.pow(items[key] - stats_df.loc[key, "mean"],
                                               tf.constant(2, dtype=tf.float32)))
+        return cur_state
 
+    def _get_sigma_ln_sum(cur_state, items):
+        for key in items.keys():
+            if key not in IGNORE_FIELDS:
+                cur_state[key] += tf.reduce_sum(tf.math.pow(items[key] - stats_df.loc[key, "mean_ln"],
+                                              tf.constant(2, dtype=tf.float32)))
         return cur_state
 
     # def _get_ln_sigma_sum(cur_state, items):
@@ -87,12 +97,26 @@ def main(data_dir: Path, glob_filter: str, feature_details_ffp: Path, output_ffp
         std_initial_state, _get_sigma_sum)
     print(f"Took {time.time() - start_time}")
 
+    start_time = time.time()
+    std_ln_sum = parsed_dataset.prefetch(tf.data.experimental.AUTOTUNE).reduce(
+        std_ln_initial_state, _get_sigma_ln_sum)
+    print(f"Took {time.time() - start_time}")
+
     std_sum_df = pd.Series(std_sum).to_frame("std_sum")
     std_sum_df = std_sum_df.applymap(lambda t: t.numpy())
     std_sum_df["std"] = np.sqrt(std_sum_df["std_sum"] / (count - 1))
 
     stats_df = pd.merge(stats_df, std_sum_df, how="left", left_index=True,
                         right_index=True)
+
+    # Get the standard deviation of the ln(input)
+    std_ln_sum_df = pd.Series(std_ln_sum).to_frame("std_ln_sum")
+    std_ln_sum_df = std_ln_sum_df.applymap(lambda t: t.numpy())
+    std_ln_sum_df["std_ln"] = np.sqrt(std_ln_sum_df["std_ln_sum"] / (count - 1))
+
+    stats_df = pd.merge(stats_df, std_ln_sum_df, how="left", left_index=True,
+                        right_index=True)
+
     stats_df.to_csv(output_ffp, index_label="feature")
 
 

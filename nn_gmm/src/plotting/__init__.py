@@ -5,7 +5,7 @@ from .plotting_funcs import gen_spectral_loss_plot
 from .plotting_utils import get_im_name
 from .eval_plots import (
     gen_residual_plots,
-    gen_rrup_trend_plots,
+    gen_trend_plots,
     gen_rrup_bin_plots,
     gen_spatial_metric_plots,
     gen_basin_metric_comp_matrix,
@@ -19,4 +19,5 @@ from .spatial_plotting import (
     NZMapData,
     im_plot,
     faults_plot,
+    im_plots,
 )

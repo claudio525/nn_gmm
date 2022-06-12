@@ -102,8 +102,8 @@ def main(
     mag_sample_bin_ind -= 1
 
     # Compute the bin weights
-    rrup_bin_weights = 1 / mag_count
-    mag_sample_weights = rrup_bin_weights[mag_sample_bin_ind]
+    mag_bin_weights = 1 / mag_count
+    mag_sample_weights = mag_bin_weights[mag_sample_bin_ind]
 
     # Normalise to number of data points
     mag_sample_weights = mag_sample_weights * (

@@ -521,7 +521,8 @@ def gen_residual_plots(
         )
 
 
-def gen_rrup_trend_plots(
+def gen_trend_plots(
+    feature: str,
     model_dirs: Sequence[Path],
     output_dir: Path,
     ims: Sequence[str] = None,
@@ -558,15 +559,59 @@ def gen_rrup_trend_plots(
             ims = ims.union(GMM.load(cur_model_dir).ims)
     ims = list(ims)
 
-    trend_plots.gen_rrup_trend_plot(
-        const_features,
-        ims,
-        output_dir,
-        model_dirs,
-        model_names,
-        data_constraints=data_constraints if len(data_constraints) > 0 else None,
-        plt_kwargs=dict(linewidth=2.0),
-    )
+    if feature == "rrup":
+        rrup_values = np.arange(5, 205, 5)
+        dependent_feature_values = {
+            cur_key: rrup_values for cur_key in ["rx", "ry", "rjb"]
+        }
+        trend_plots.gen_trend_plot(
+            "rrup",
+            rrup_values,
+            dependent_feature_values,
+            const_features,
+            ims,
+            output_dir,
+            model_dirs,
+            model_names,
+            data_constraints=data_constraints if len(data_constraints) > 0 else None,
+            plt_kwargs=dict(linewidth=2.0),
+            add_Br13=True,
+        )
+    elif feature == "mag":
+        mag_values = np.arange(3, 8.6, 0.1)
+        trend_plots.gen_trend_plot(
+            "mag",
+            mag_values,
+            None,
+            const_features,
+            ims,
+            output_dir,
+            model_dirs,
+            model_names=model_names,
+            data_constraints=data_constraints,
+            plt_kwargs=dict(linewidth=2.0),
+            add_Br13=True,
+        )
+    elif feature == "vs30":
+        vs30_values = np.arange(100, 1010, 10)
+        dependent_features = dict(
+            vs500=np.ones_like(vs30_values) * 1.4,
+            z1p0=np.interp(vs30_values, [250, 450, 800], [0.065, 0.055, 0.04]),
+            z2p5=np.ones_like(vs30_values) * 3.1,
+        )
+        trend_plots.gen_trend_plot(
+            "vs30",
+            vs30_values,
+            dependent_features,
+            const_features,
+            ims,
+            output_dir,
+            model_dirs,
+            model_names=model_names,
+            data_constraints=data_constraints,
+            plt_kwargs=dict(linewidth=2.0),
+            add_Br13=True,
+        )
 
 
 def gen_rrup_bin_plots(model_dir: Path, ims: Sequence[str]):

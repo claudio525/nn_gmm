@@ -1,7 +1,9 @@
+import multiprocessing as mp
 import pandas as pd
 from pathlib import Path
 import tempfile
-from typing import Tuple, Union, NamedTuple, Sequence
+from importlib import reload
+from typing import Tuple, Union, NamedTuple, Sequence, Dict
 
 import pygmt
 import geopandas
@@ -341,6 +343,123 @@ def create_grid(
     return grid
 
 
+def im_plots(
+    data_df: pd.DataFrame,
+    fault: str,
+    ims: Union[Sequence[str], str],
+    output_dir: Path,
+    rel_name: str = None,
+    nhm_ffp: Path = None,
+    qcore_data_dir: Path = None,
+    cb_limits_dict: Dict[str, Tuple[float, float]] = None,
+    n_procs: int = 1,
+):
+    """Generates IM plots using the given data"""
+    nz_map_data = None if qcore_data_dir is None else NZMapData.load(qcore_data_dir)
+
+    # Load the trace if possible
+    fault_trace = (
+        nhm.load_nhm(str(nhm_ffp))[fault].trace if nhm_ffp is not None else None
+    )
+
+    # Generate the plot/s
+    for im in ims:
+        cur_out_dir = output_dir / (im).replace(".", "p")
+        cur_out_dir.mkdir(exist_ok=True)
+
+        # Single realisation
+        if rel_name is not None:
+            __gen_im_map(
+                data_df.loc[data_df.rel == rel_name, [im, "lat", "lon"]],
+                im,
+                rel_name,
+                tuple(data_df.loc[data_df.rel == rel_name, ["hlon", "hlat"]].iloc[0]),
+                fault_trace,
+                None,
+                cur_out_dir / f"{utils.get_im_name(im)}_{cur_rel}.png",
+                nz_map_data=nz_map_data,
+            )
+        # Multiple realisations
+        else:
+            # Common colormap/bar limits
+            if cb_limits_dict is None:
+                cb_limits = (
+                    np.round(np.quantile(np.exp(data_df[im].values), 0.02), 3),
+                    np.round(np.quantile(np.exp(data_df[im].values), 0.98), 3)
+                )
+            else:
+                cb_limits = cb_limits_dict[im]
+
+            if n_procs == 1:
+                for cur_rel in np.unique(data_df.rel):
+                    __gen_im_map(
+                        data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
+                        im,
+                        cur_rel,
+                        tuple(
+                            data_df.loc[data_df.rel == cur_rel, ["hlon", "hlat"]].iloc[
+                                0
+                            ]
+                        ),
+                        fault_trace,
+                        cb_limits,
+                        cur_out_dir / f"{im.replace('.', 'p')}_{cur_rel}.png",
+                        nz_map_data=nz_map_data,
+                    )
+            else:
+                with mp.Pool(n_procs) as p:
+                    p.starmap(
+                        __gen_im_map,
+                        [
+                            (
+                                data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
+                                im,
+                                cur_rel,
+                                tuple(
+                                    data_df.loc[
+                                        data_df.rel == cur_rel, ["hlon", "hlat"]
+                                    ].iloc[0]
+                                ),
+                                fault_trace,
+                                cb_limits,
+                                cur_out_dir / f"{im.replace('.', 'p')}_{cur_rel}.png",
+                                nz_map_data,
+                                True,
+                            )
+                            for cur_rel in np.unique(data_df.rel)
+                        ],
+                    )
+
+
+def __gen_im_map(
+    data_df: pd.DataFrame,
+    im: str,
+    rel_name: str,
+    hypo_loc: Tuple[float, float],
+    fault_trace: np.ndarray,
+    cb_limits: Union[Tuple[float, float], None],
+    out_ffp: Path,
+    nz_map_data: NZMapData = None,
+    mp: bool = False,
+):
+    """MP Helper function"""
+    if mp:
+        import pygmt
+
+        reload(pygmt)
+
+    fig = im_plot(
+        data_df,
+        im,
+        rel_name,
+        cb_limits=cb_limits,
+        fault_trace=fault_trace,
+        nz_map_data=nz_map_data,
+        hypo_loc=hypo_loc,
+    )
+    fig.savefig(str(out_ffp), dpi=1200)
+
+
 def im_plot(
     data_df: pd.DataFrame,
     im: str,
@@ -348,11 +467,11 @@ def im_plot(
     hypo_loc: Tuple[float, float] = None,
     fault_trace: np.ndarray = None,
     cb_limits: Tuple[float, float] = None,
-    qcore_data_dir: Path = None,
+    nz_map_data: NZMapData = None,
     region: Union[str, Tuple[float, float, float, float]] = None,
 ):
     """
-    Creates an IM plot figure for
+    Creates a (single) IM plot figure for
     the given rupture
 
     Parameters
@@ -370,10 +489,9 @@ def im_plot(
         Colormap/bar limits, (min, max)
         Note: These need to be in IM-space (i.e. not logged)
     fault_trace: array of floats, optional
-    qcore_data_dir: Path, optional
-        Path to qcore data dir,
-        required for plotting road & topo
-        Set to None to plot no roads or topo
+    nz_map_data: NZMapData, optional
+        Required for plotting roads & topo
+
 
     Returns
     -------
@@ -385,7 +503,6 @@ def im_plot(
         else region
     )
 
-    nz_map_data = None if qcore_data_dir is None else NZMapData.load(qcore_data_dir)
     fig = gen_region_fig(
         rupture_name,
         region,

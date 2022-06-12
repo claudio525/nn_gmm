@@ -124,6 +124,13 @@ def convert_pre_config(config: Dict, stats_df: pd.DataFrame):
             config[key] = (item, stats_df.loc[key, "min"], stats_df.loc[key, "max"])
         elif item == "ln":
             config[key] = (item,)
+        elif item == "ln_standard":
+            # Hack
+            if key == "rrup_ln":
+                config[key] = (item, stats_df.loc["rrup", "mean_ln"], stats_df.loc["rrup", "std_ln"])
+                continue
+
+            config[key] = (item, stats_df.loc[key, "mean_ln"], stats_df.loc[key, "std_ln"])
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 

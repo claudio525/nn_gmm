@@ -12,7 +12,7 @@ from nn_gmm.src import utils
 from nn_gmm.src import data
 
 FEATUER_NAME_LOOKUP = {
-    "rrup": r"$R_{rup}$",
+    "rrup": r"$R_{Rup}$",
     "vs30": r"$V_{S30}$",
     "mag": r"$M_w$"
 }
@@ -27,9 +27,6 @@ DEFAULT_PLOT_KWARGS = dict(linewidth=0.75)
 def get_feature_name(id: str):
     """Gets the proper feature name for the specified 'id'"""
     name = FEATUER_NAME_LOOKUP.get(id)
-
-    if id.startswith("pSA"):
-        return f"pSA({id.split('_')[-1]}s)"
 
     if name is None:
         return id

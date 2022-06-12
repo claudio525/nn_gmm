@@ -1,3 +1,5 @@
+import gc
+import psutil
 from typing import Sequence, List, Optional
 from pathlib import Path
 
@@ -64,8 +66,9 @@ def gen_rrup_bin_plot(model_dir: Path, ims: List[str] = None):
     nn_gmm.gen_rrup_bin_plots(model_dir, ims)
 
 
-@app.command("trend-rrup-multi")
+@app.command("trend-multi")
 def trend_plot_rrup_multi(
+    feature: str,
     model_dirs: List[Path],
     output_dir: Path,
     source_config_ffp: Path,
@@ -75,7 +78,8 @@ def trend_plot_rrup_multi(
     model_names: List[str] = None,
 ):
     """Generates an Rrup trend plot for multiple models"""
-    nn_gmm.gen_rrup_trend_plots(
+    nn_gmm.gen_trend_plots(
+        feature,
         model_dirs,
         output_dir,
         ims=ims if len(ims) > 0 else None,
@@ -86,7 +90,7 @@ def trend_plot_rrup_multi(
     )
 
 
-@app.command("trend-rrup-multi-combo")
+@app.command("trend-multi-combo")
 def trend_plot_rrup_multi_combo(
     model_dirs: List[Path],
     output_dir: Path,
@@ -97,6 +101,7 @@ def trend_plot_rrup_multi_combo(
     ),
     ims: List[str] = None,
     model_names: List[str] = None,
+    features: List[str] = None,
 ):
     """Generates an Rrup trend plot for multiple models
     for each of the possible combinations of specified
@@ -105,6 +110,8 @@ def trend_plot_rrup_multi_combo(
     For naming purposes, assumes that the configs have the
     following prefixes: site_, site_source_, source_
     """
+    features = ["rrup", "mag", "vs30"] if len(features) == 0 else features
+
     for cur_source_config_ffp in source_config_ffps:
         cur_source_name = cur_source_config_ffp.stem.replace("source_", "")
         for cur_site_source_config_ffp in site_source_config_ffps:
@@ -118,19 +125,52 @@ def trend_plot_rrup_multi_combo(
                     output_dir
                     / f"{cur_source_name}_{cur_site_source_name}_{cur_site_name}"
                 )
-                cur_out_dir.mkdir()
+                cur_out_dir.mkdir(exist_ok=True)
 
-                nn_gmm.gen_rrup_trend_plots(
-                    model_dirs,
-                    cur_out_dir,
-                    ims=list(ims) if len(ims) > 0 else None,
-                    source_config=ml_tools.utils.load_yaml(cur_source_config_ffp),
-                    site_config=ml_tools.utils.load_yaml(cur_site_config_ffp),
-                    site_source_config=ml_tools.utils.load_yaml(
-                        cur_site_source_config_ffp
-                    ),
-                    model_names=None if len(model_names) == 0 else model_names,
-                )
+                print(f"Memory usage: {psutil.Process().memory_info().rss / 1e9}")
+                if "rrup" in features:
+                    nn_gmm.gen_trend_plots(
+                        "rrup",
+                        model_dirs,
+                        cur_out_dir,
+                        ims=list(ims) if len(ims) > 0 else None,
+                        source_config=ml_tools.utils.load_yaml(cur_source_config_ffp),
+                        site_config=ml_tools.utils.load_yaml(cur_site_config_ffp),
+                        site_source_config=ml_tools.utils.load_yaml(
+                            cur_site_source_config_ffp
+                        ),
+                        model_names=None if len(model_names) == 0 else model_names,
+                    )
+
+                if "mag" in features:
+                    nn_gmm.gen_trend_plots(
+                        "mag",
+                        model_dirs,
+                        cur_out_dir,
+                        ims=list(ims) if len(ims) > 0 else None,
+                        source_config=ml_tools.utils.load_yaml(cur_source_config_ffp),
+                        site_config=ml_tools.utils.load_yaml(cur_site_config_ffp),
+                        site_source_config=ml_tools.utils.load_yaml(
+                            cur_site_source_config_ffp
+                        ),
+                        model_names=None if len(model_names) == 0 else model_names,
+                    )
+
+                if "vs30" in features:
+                    nn_gmm.gen_trend_plots(
+                        "vs30",
+                        model_dirs,
+                        cur_out_dir,
+                        ims=list(ims) if len(ims) > 0 else None,
+                        source_config=ml_tools.utils.load_yaml(cur_source_config_ffp),
+                        site_config=ml_tools.utils.load_yaml(cur_site_config_ffp),
+                        site_source_config=ml_tools.utils.load_yaml(
+                            cur_site_source_config_ffp
+                        ),
+                        model_names=None if len(model_names) == 0 else model_names,
+                    )
+                tf.keras.backend.clear_session()
+                gc.collect()
 
 
 @app.command("spec-residuals")
@@ -150,7 +190,7 @@ def compare_spec_bias_std(
             cur_model_dir / "train_predictions.hdf5" for cur_model_dir in model_dirs
         ]
 
-    ims = nn_gmm.GMM.load(model_dirs[0]).ims
+    ims = [im for im in nn_gmm.GMM.load(model_dirs[0]).ims if im.startswith("pSA") or im == "PGA"]
 
     res_plot_gen = nn_gmm.ResPlotGen()
     res_plot_gen.gen_spectral_bias_std_plot(db_ffps, ims, output_ffp)

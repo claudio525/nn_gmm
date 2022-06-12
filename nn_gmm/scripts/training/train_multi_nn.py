@@ -56,6 +56,12 @@ DATA_DIRS_LOOKUP = {
         "val_data_dirs": ["fault_station_weighted_norm/val"],
         "stats_df": "fault_station_weighted_norm/train/stats.csv",
     },
+    # Fault & Station & Magnitude & Rrup weighted normalised data
+    "fsmrwn": {
+        "train_data_dirs": ["fault_station_mag_rrup_weighted_norm/train"],
+        "val_data_dirs": ["fault_station_mag_rrup_weighted_norm/val"],
+        "stats_df": "fault_station_mag_rrup_weighted_norm/train/stats.csv",
+    },
 }
 
 
@@ -163,7 +169,6 @@ def run(
 
     # Run training
     train_result = nn_gmm.train_nn(
-        # config, hyperparams, model=model, multi_output=True if len(io_config["im_config"]) > 1 else False, verbose=2,
         config, hyperparams, model=model, as_dict=False, verbose=2,
     )
     output_dir = train_result.output_dir

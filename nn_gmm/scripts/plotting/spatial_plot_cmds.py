@@ -25,6 +25,7 @@ if gpus:
         print(e)
 
 import nn_gmm
+from nn_gmm import console
 import ml_tools
 
 app = typer.Typer()
@@ -88,7 +89,7 @@ def gen_faults_plot(
             train_faults,
             map_data=map_data,
             title="Training Faults",
-            show_hypo=show_hypo
+            show_hypo=show_hypo,
         )
         fig.savefig(
             output_dir / f"train_faults.png", dpi=900, anti_alias=True,
@@ -99,7 +100,7 @@ def gen_faults_plot(
             val_faults,
             map_data=map_data,
             title="Validation Faults",
-            show_hypo=show_hypo
+            show_hypo=show_hypo,
         )
         fig.savefig(
             output_dir / f"train_faults.png", dpi=900, anti_alias=True,
@@ -222,45 +223,14 @@ def gen_location_dependence_plot(
         )
 
 
-def __gen_im_map(
-    data_df: pd.DataFrame,
-    im: str,
-    rel_name: str,
-    hypo_loc: Tuple[float, float],
-    fault_trace: np.ndarray,
-    cb_limits: Union[Tuple[float, float], None],
-    out_ffp: Path,
-    mp: bool = False,
-):
-    if mp:
-        import pygmt
-
-        reload(pygmt)
-
-    qcore_data_dir = os.environ.get("QCORE_DATA_DIR")
-    fig = nn_gmm.im_plot(
-        data_df,
-        im,
-        rel_name,
-        cb_limits=cb_limits,
-        fault_trace=fault_trace,
-        qcore_data_dir=None if qcore_data_dir is None else Path(qcore_data_dir),
-        hypo_loc=hypo_loc,
-    )
-    fig.savefig(str(out_ffp), dpi=1200)
-
-
-@app.command("im-map")
+@app.command("sim-im-map")
 def gen_im_map(
     data_dir: Path = typer.Argument(
         ..., help="The tfrecord data directory that contains the fault file to plot"
     ),
     fault: str = typer.Argument(..., help="Name of the fault to plot"),
-    im: str = typer.Argument(..., help="IM to plot"),
-    out: Path = typer.Argument(
-        ...,
-        help="Output directory or filepath, depending on if `rel_name` is specified",
-    ),
+    ims: List[str] = typer.Argument(..., help="IM to plot"),
+    output_dir: Path = typer.Argument(..., help="Output directory",),
     rel_name: str = typer.Option(
         None,
         help="Realisation to plot, if not given then all realisation for the specified fault are plotted",
@@ -268,11 +238,15 @@ def gen_im_map(
     nhm_ffp: Path = typer.Option(
         None, help="Path to the NHM file, to allow showing the fault trace"
     ),
+    qcore_data_dir: Path = typer.Option(
+        None, help="Path to the qcore data dir. Required for road & topo mapping."
+    ),
     n_procs: int = typer.Option(
         1,
         help="Number of processes to use, only matters when plotting multiple realisations",
     ),
 ):
+    """Generates simulation based IM maps from a tfrecord file"""
     record_ffp = next(data_dir.rglob(f"**/{fault}.tfrecord"))
 
     # Load the data
@@ -283,64 +257,117 @@ def gen_im_map(
         np.char.rsplit(data_df.index.values.astype(str), "_", maxsplit=1)
     )[:, 0]
 
-    # Load the trace if possible
-    fault_trace = (
-        nhm.load_nhm(str(nhm_ffp))[fault].trace if nhm_ffp is not None else None
+    nn_gmm.im_plots(
+        data_df,
+        fault,
+        ims,
+        output_dir,
+        rel_name=rel_name,
+        nhm_ffp=nhm_ffp,
+        qcore_data_dir=qcore_data_dir,
+        n_procs=n_procs,
     )
 
-    # Generate the plot/s
-    if rel_name is not None:
-        __gen_im_map(
-            data_df.loc[data_df.rel == rel_name, [im, "lat", "lon"]],
-            im,
-            rel_name,
-            tuple(data_df.loc[data_df.rel == rel_name, ["hlon", "hlat"]].iloc[0]),
-            fault_trace,
-            None,
-            out,
-        )
-    else:
-        # Common colormap/bar limits
-        cb_limits = (
-            np.round(np.quantile(np.exp(data_df[im].values), 0.02), 3),
-            np.round(np.quantile(np.exp(data_df[im].values), 0.98), 3),
-        )
 
-        if n_procs == 1:
-            for cur_rel in np.unique(data_df.rel):
-                __gen_im_map(
-                    data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
-                    im,
-                    cur_rel,
-                    tuple(
-                        data_df.loc[data_df.rel == cur_rel, ["hlon", "hlat"]].iloc[0]
-                    ),
-                    fault_trace,
-                    cb_limits,
-                    out / f"{nn_gmm.get_im_name(im)}_{cur_rel}.png",
-                )
-        else:
-            with mp.Pool(n_procs) as p:
-                p.starmap(
-                    __gen_im_map,
-                    [
-                        (
-                            data_df.loc[data_df.rel == cur_rel, [im, "lat", "lon"]],
-                            im,
-                            cur_rel,
-                            tuple(
-                                data_df.loc[
-                                    data_df.rel == cur_rel, ["hlon", "hlat"]
-                                ].iloc[0]
-                            ),
-                            fault_trace,
-                            cb_limits,
-                            out / f"{im.replace('.', 'p')}_{cur_rel}.png",
-                            True,
-                        )
-                        for cur_rel in np.unique(data_df.rel)
-                    ],
-                )
+@app.command("model-im-map")
+def gen_model_im_map(
+    model_dir: Path = typer.Argument(
+        ..., help="The model directory. Must contain the prediction DBs"
+    ),
+    source_params_dir: Path = typer.Argument(
+        ..., help="Path to the source parameters directory"
+    ),
+    fault: str = typer.Argument(..., help="Name of the fault to plot"),
+    ims: List[str] = typer.Argument(..., help="IM to plot"),
+    output_dir: Path = typer.Option(None, help="Output directory",),
+    rel_name: str = typer.Option(
+        None,
+        help="Realisation to plot, if not given then all realisation for the specified fault are plotted",
+    ),
+    nhm_ffp: Path = typer.Option(
+        None, help="Path to the NHM file, to allow showing the fault trace"
+    ),
+    qcore_data_dir: Path = typer.Option(
+        None, help="Path to the qcore data dir. Required for road & topo mapping."
+    ),
+    cb_min_values: List[float] = typer.Option(
+        None, help="List of minimum color-bar (and colormap) values, same order as ims"
+    ),
+    cb_max_values: List[float] = typer.Option(
+        None, help="List of maximum color-bar (and colormap) value, same order as ims"
+    ),
+    n_procs: int = typer.Option(
+        1,
+        help="Number of processes to use, only matters when plotting multiple realisations",
+    ),
+):
+    """Generates IM maps for the specified using the given model"""
+    # Load source params
+    rel_df = nn_gmm.load_dfs(
+        list(source_params_dir.glob("*.csv")), index_col="realisation"
+    )
+    rel_df["fault"] = [
+        split_list[0]
+        for split_list in np.char.split(rel_df.index.values.astype(str), "_")
+    ]
+    rel_df = rel_df.loc[rel_df.fault == fault]
+
+    console.print("Loading predictions")
+    im_keys = [f"{im}_est" for im in ims]
+    columns = im_keys + ["fault", "lat", "lon", "hlat", "hlon"]
+    train_data = nn_gmm.ResultDB.get_data_static(
+        model_dir / "train_predictions.hdf5", columns
+    )
+    val_data = nn_gmm.ResultDB.get_data_static(
+        model_dir / "val_predictions.hdf5", columns
+    )
+
+    # Prepare data frame for plotting
+    data_df = (
+        train_data.loc[train_data.fault == fault].copy()
+        if fault in train_data.fault.values
+        else val_data.loc[val_data.fault == fault].copy()
+    )
+    del train_data, val_data
+    data_df["rel"] = np.stack(
+        np.char.rsplit(data_df.index.values.astype(str), "_", maxsplit=1)
+    )[:, 0]
+
+    # Rename im columns
+    data_df.rename(
+        columns={cur_im_key: cur_im for cur_im_key, cur_im in zip(im_keys, ims)},
+        inplace=True,
+    )
+
+    # Merge with source/realisation params
+    data_df = data_df.merge(
+        rel_df, left_on="rel", right_index=True, suffixes=("", "_right")
+    )
+    data_df.drop(columns=["fault_right"], inplace=True)
+
+    if output_dir is None:
+        output_dir = model_dir / "plots" / "im_plots"
+        output_dir.mkdir(exist_ok=True)
+
+    cb_limits = None
+    if len(cb_min_values) > 0 and len(cb_max_values) > 0:
+        cb_limits = {
+            cur_im: (cur_min, cur_max)
+            for cur_min, cur_max, cur_im in zip(cb_min_values, cb_max_values, ims)
+        }
+
+    console.print(f"Generating maps")
+    nn_gmm.im_plots(
+        data_df,
+        fault,
+        ims,
+        output_dir,
+        rel_name=rel_name,
+        nhm_ffp=nhm_ffp,
+        qcore_data_dir=qcore_data_dir,
+        cb_limits_dict=cb_limits,
+        n_procs=n_procs,
+    )
 
 
 @app.command("station-density")

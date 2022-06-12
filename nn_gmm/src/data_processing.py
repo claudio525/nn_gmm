@@ -38,6 +38,15 @@ def get_standard_inv_scaling_fn(mean: float, std: float, tf_fn: bool = True):
         else inv_standard_fn
     )
 
+def get_ln_standard_scaling_fn(mean: float, std: float, tf_fn: bool = True):
+    def ln_standard_fn(data):
+        return (tf.math.log(data) - mean) / std
+
+    return (
+        tf.function(ln_standard_fn, experimental_relax_shapes=True)
+        if tf_fn is True
+        else ln_standard_fn
+    )
 
 def get_min_max_scaling_fn(
     data_min: float,
@@ -171,6 +180,11 @@ def preprocess_ds(
         if feature_config is not None:
             features = []
             for name, func in feature_config.items():
+                # Hack
+                if name == "rrup_ln":
+                    features.append(func(item["rrup"]) if func is not None else item["rrup"])
+                    continue
+
                 features.append(func(item[name]) if func is not None else item[name])
 
             feature_dict = {"inputs": tf.stack(features, axis=1)}
@@ -243,6 +257,8 @@ def convert_to_transform_fn(config: Dict, tf_fn: bool = True):
             config[key] = get_min_max_scaling_fn(item[1], item[2], tf_fn=tf_fn)
         elif item[0] == "ln":
             config[key] = tf.math.log
+        elif item[0] == "ln_standard":
+            config[key] = get_ln_standard_scaling_fn(item[1], item[2], tf_fn=tf_fn)
         else:
             raise ValueError(f"{item} is not a valid preprocessing config value")
 
