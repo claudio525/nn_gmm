@@ -35,6 +35,7 @@ def main(
     site_params_dir: Path,
     distance_db_dir: Path,
     im_dbs_dir: Path,
+    base_grid_only: bool = False
 ):
     print("Loading realisation params")
     rel_df = nn_gmm.load_dfs(
@@ -58,8 +59,18 @@ def main(
     idx_values = np.concatenate(idx_values)
     sample_df = nn_gmm.create_sample_comb(pd.DataFrame(index=idx_values))
 
+    if base_grid_only:
+        station_ids = sample_df.site.values.astype(str)
+        mask = (
+            np.char.startswith(station_ids, "1")
+            | np.char.startswith(station_ids, "2")
+            | np.char.startswith(station_ids, "3")
+            | np.char.startswith(station_ids, "4")
+        )
+        sample_df = sample_df.loc[~mask]
+
     # Add magnitude
-    sample_df["mag"] = rel_df.loc[sample_df.realisation, "mag"].values
+    sample_df.loc[:, "mag"] = rel_df.loc[sample_df.realisation, "mag"].values
 
     # Load sites
     site_df = nn_gmm.load_dfs(list(site_params_dir.glob("*.csv")))
@@ -121,11 +132,11 @@ def main(
     fig = plt.figure(figsize=(20, 12))
 
     ax_1 = fig.add_subplot(2, 1, 1)
-    ax_1.hist(sample_df.mag.values)
+    ax_1.hist(sample_df.mag.values, bins=25)
     ax_1.set_title("Original")
 
     ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
-    ax_3.hist(sample_df.mag.values, weights=mag_sample_weights)
+    ax_3.hist(sample_df.mag.values, weights=mag_sample_weights, bins=25)
     ax_3.set_title("Weighted")
 
     ax_3.set_xlabel(f"Magnitude")
@@ -171,11 +182,11 @@ def main(
     fig = plt.figure(figsize=(20, 12))
 
     ax_1 = fig.add_subplot(2, 1, 1)
-    ax_1.hist(sample_df.rrup.values)
+    ax_1.hist(sample_df.rrup.values, bins=25)
     ax_1.set_title("Original")
 
     ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
-    ax_3.hist(sample_df.rrup.values, weights=rrup_sample_weights)
+    ax_3.hist(sample_df.rrup.values, weights=rrup_sample_weights, bins=25)
     ax_3.set_title("Weighted")
 
     ax_3.set_xlabel(f"Magnitude")

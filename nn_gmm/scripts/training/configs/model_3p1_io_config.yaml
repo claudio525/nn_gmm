@@ -10,8 +10,6 @@ feature_config:
         rjb: standard
         U: standard
         T: standard
-        S_bayless: standard
-        D_bayless: standard
 
         vs30: standard
         z1p0: standard

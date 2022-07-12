@@ -14,6 +14,7 @@ import tensorflow.keras as keras
 from wandb.keras import WandbCallback
 
 import ml_tools as mlt
+import typer
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -32,103 +33,29 @@ import nn_gmm
 from nn_gmm import console
 
 
-DATA_DIRS_LOOKUP = {
-    "base": {
-        "train_data_dirs": ["base_grid/train"],
-        "val_data_dirs": ["base_grid/val"],
-        "stats_df": "base_grid/train/stats.csv",
-    },
-    "base_fw": {
-        "train_data_dirs": ["base-grid_fault-weighted/train"],
-        "val_data_dirs": ["base-grid_fault-weighted/val"],
-        "stats_df": "base-grid_fault-weighted/train/stats.csv",
-    },
-    "base_mrfwn": {
-        "train_data_dirs": ["base-grid-mag-rrup-fault-weighted_norm/train"],
-        "val_data_dirs": ["base-grid-mag-rrup-fault-weighted_norm/val"],
-        "stats_df": "base-grid-mag-rrup-fault-weighted_norm/train/stats.csv",
-    },
-    # Fault station weighted normalised (with theta & s)
-    "fswn_old": {
-        "train_data_dirs": ["_fault_station_weighted_norm/train"],
-        "val_data_dirs": ["_fault_station_weighted_norm/val"],
-        "stats_df": "_fault_station_weighted_norm/train/stats.csv",
-    },
-    # Fault station weighted normalised
-    "fswn": {
-        "train_data_dirs": ["fault_station_weighted_norm/train"],
-        "val_data_dirs": ["fault_station_weighted_norm/val"],
-        "stats_df": "fault_station_weighted_norm/train/stats.csv",
-    },
-    # Fault & Station & Magnitude & Rrup weighted normalised data
-    "fsmrwn": {
-        "train_data_dirs": ["fault_station_mag_rrup_weighted_norm/train"],
-        "val_data_dirs": ["fault_station_mag_rrup_weighted_norm/val"],
-        "stats_df": "fault_station_mag_rrup_weighted_norm/train/stats.csv",
-    },
-}
-
-
 def run(
-    machine_config_ffp: Path,
-    io_config_ffp: Path,
+    base_model_dir: Path,
     hyper_config_ffp: Path,
-    data_key: str,
     use_wandb: bool = False,
     eval: bool = True,
     tags: List[str] = None,
     use_sample_weights: bool = False,
-    early_stopping: bool = False,
     delete: bool = False,
-    ims: Sequence[str] = None,
     args_hyperparams: Dict = None,
 ):
-    tags = list(tags)
+    tags = list(tags) if tags is not None else []
 
-    machine_config = mlt.utils.load_yaml(machine_config_ffp)
-    io_config = mlt.utils.load_yaml(io_config_ffp)
+    config = mlt.utils.load_json(base_model_dir / "input_config.json")
     hyperparams = mlt.utils.load_yaml(hyper_config_ffp)
+
+    # Save base model used
+    config["base_model_dir"] = str(base_model_dir)
+
+    # Get list of output IMs
+    ims = list(config["im_config"].keys())
 
     if args_hyperparams is not None:
         hyperparams = hyperparams | args_hyperparams
-
-    if ims is not None:
-        io_config["im_config"] = {
-            cur_im: cur_value
-            for cur_im, cur_value in io_config["im_config"].items()
-            if cur_im in ims
-        }
-
-    # Add the data entries
-    if data_key not in DATA_DIRS_LOOKUP.keys():
-        raise ValueError(f"Invalid data key {data_key}")
-    train_data_dir = machine_config["train_data_dir"]
-    data_dirs = {
-        cur_key: [os.path.join(train_data_dir, cur_dir) for cur_dir in cur_item]
-        if isinstance(cur_item, list)
-        else os.path.join(train_data_dir, cur_item)
-        for cur_key, cur_item in DATA_DIRS_LOOKUP[data_key].items()
-    }
-    config = {**data_dirs, **io_config, **machine_config}
-
-    # Prepare model input/output config for preprocesing
-    stats_df = pd.read_csv(config["stats_df"], index_col="feature")
-    config["feature_config"] = nn_gmm.convert_pre_config(
-        config["feature_config"], stats_df
-    )
-    config["im_config"] = nn_gmm.convert_pre_config(config["im_config"], stats_df)
-
-    # if n_epochs is not None:
-    #     hyperparams["n_epochs"] = n_epochs
-
-    if early_stopping:
-        hyperparams["callbacks"] = [
-            keras.callbacks.EarlyStopping(
-                monitor="val_loss",
-                patience=5,
-                min_delta=0.01 * len(config["im_config"]),
-            )
-        ]
 
     # Create a run ID
     run_id = nn_gmm.create_run_id(tags)
@@ -137,6 +64,14 @@ def run(
     if use_sample_weights:
         tags.append("sample_weights")
     config["use_sample_weights"] = use_sample_weights
+
+    # Update config to be multi-input
+    config["feature_config"] = {"inputs": config["feature_config"]}
+    config["feature_config"]["loc_inputs"] = nn_gmm.convert_pre_config(
+        {"X": "standard", "Y": "standard", "Z": "standard"},
+        pd.read_csv(config["stats_df"], index_col="feature"),
+    )
+    config["multi_input"] = True
 
     if use_wandb:
         tags = [] if tags is None else list(tags)
@@ -164,22 +99,88 @@ def run(
             hyperparams["callbacks"] = [WandbCallback()]
 
     # Create the model
-    model = nn_gmm.create_reg_multi_output_model(
-        hyperparams, len(config["feature_config"]), list(config["im_config"].keys())
-    )
+    n_pre_layers = hyperparams["n_pre_layers"]
+    n_pre_units = hyperparams["n_pre_units"]
+
+    n_core_layers = hyperparams["n_core_layers"]
+    n_core_units = hyperparams["n_core_units"]
+
+    n_out_layers = hyperparams["n_out_layers"]
+    n_out_units = hyperparams["n_out_units"]
+
+    # Load the base model
+    base_model = keras.models.load_model(base_model_dir / "best_model")
+    base_model.trainable = False
+    # base_input = base_model.layers[0]
+    #
+    # # Get the base dense layers
+    # x_base = None
+    # for cur_layer in base_model.layers:
+    #     if "dense" in cur_layer.name:
+    #         cur_layer.trainable = False
+    #         x_base = cur_layer
+
+    # Rename the out layers
+    for cur_layer in base_model.layers:
+        if "dense" not in cur_layer.name and "inputs" not in cur_layer.name:
+            cur_layer._name = f"{cur_layer.name}_base"
+
+    # Add the pre location layers
+    x_loc = loc_input = keras.layers.Input(3, name="loc_inputs")
+    for ix in range(n_pre_layers):
+        x_loc = mlt.hidden_layers.relu(
+            x_loc, n_pre_units, name=f"loc_pre_dense_{ix}"
+        )
+
+    # No core layers
+    if n_core_layers == 0:
+        outputs = []
+        for cur_base_out in base_model.outputs:
+            # Hydra layers
+            cur_x = keras.layers.Concatenate()([cur_base_out, x_loc])
+            if n_out_layers > 0:
+                for ix in range(n_out_layers):
+                    cur_x = mlt.hidden_layers.relu(
+                        cur_x, n_out_units, name=f"{cur_base_out.name.split('/')[0]}_dense_{ix}"
+                    )
+
+            outputs.append(keras.layers.Dense(1, activation=None, name=f"{cur_base_out.name.split('/')[0]}")(cur_x))
+    else:
+        x_base_output = keras.layers.Concatenate()(base_model.outputs)
+
+        # Concatenate
+        x = keras.layers.Concatenate()([x_loc, x_base_output])
+
+        # Core layers
+        for ix in range(n_core_layers):
+            x = mlt.hidden_layers.relu(x, n_core_units, name=f"loc_core_dense_{ix}")
+
+        # Hydra layers
+        outputs = []
+        for cur_im in ims:
+            cur_x = x
+            if n_out_layers > 0:
+                for ix in range(n_out_layers):
+                    cur_x = mlt.hidden_layers.relu(
+                        cur_x, n_out_units, name=f"{cur_im}_dense_{ix}"
+                    )
+
+            outputs.append(keras.layers.Dense(1, activation=None, name=f"{cur_im}")(cur_x))
+
+    model = keras.Model(inputs=[loc_input, base_model.input], outputs=outputs)
 
     # Get the loss function
     hyperparams["loss"] = nn_gmm.get_loss_function(hyperparams)
 
     # Run training
     train_result = nn_gmm.train_nn(
-        config, hyperparams, model=model, as_dict=False, verbose=2,
+        config, hyperparams, model=model, as_dict=True, verbose=2,
     )
     output_dir = train_result.output_dir
 
     # Write predictions
     if eval:
-        ims = list(io_config["im_config"].keys())
+        ims = list(config["im_config"].keys())
 
         start_time = time.time()
         nn_gmm.write_train_val_predictions(
@@ -223,23 +224,14 @@ def run(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("machine_config_ffp", type=Path)
-    parser.add_argument("io_config_ffp", type=Path)
+    parser.add_argument("base_model_dir", type=Path, help="Path to the base model")
     parser.add_argument("hyper_config_ffp", type=Path)
-    parser.add_argument("data_key", type=str)
     parser.add_argument("--tags", nargs="+", type=str)
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--use-sample-weights", action="store_true")
     parser.add_argument("--early-stopping", action="store_true")
     parser.add_argument("--delete", action="store_true")
-    parser.add_argument(
-        "--ims",
-        default=None,
-        type=str,
-        help="Exclude any IMs not in this list",
-        nargs="+",
-    )
 
     # Hyperparameters (required for tuning via wandb sweep)
     # Using -1 as the default as None can be a valid value
@@ -251,8 +243,10 @@ if __name__ == "__main__":
     hyper_parser.add_argument("--l2", type=float, default=-1)
     hyper_parser.add_argument("--batch_size", type=int, default=-1)
     hyper_parser.add_argument("--learning_rate", type=float, default=-1)
-    hyper_parser.add_argument("--n_units", type=int, default=-1)
-    hyper_parser.add_argument("--n_layers", type=int, default=-1)
+    hyper_parser.add_argument("--n_pre_units", type=int, default=-1)
+    hyper_parser.add_argument("--n_pre_layers", type=int, default=-1)
+    hyper_parser.add_argument("--n_core_units", type=int, default=-1)
+    hyper_parser.add_argument("--n_core_layers", type=int, default=-1)
     hyper_parser.add_argument("--n_out_units", type=int, default=-1)
     hyper_parser.add_argument("--n_out_layers", type=int, default=-1)
 
@@ -267,16 +261,12 @@ if __name__ == "__main__":
     }
 
     run(
-        args.machine_config_ffp,
-        args.io_config_ffp,
+        args.base_model_dir,
         args.hyper_config_ffp,
-        args.data_key,
         args.use_wandb,
         not args.no_eval,
         args.tags,
         args.use_sample_weights,
-        args.early_stopping,
         args.delete,
-        ims=args.ims,
         args_hyperparams=args_hyperparams,
     )

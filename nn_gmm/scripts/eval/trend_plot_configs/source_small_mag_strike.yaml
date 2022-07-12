@@ -1,6 +1,6 @@
 mag:
   value: 4.5
-  constraints: [3.5, 5.5]
+  constraints: [4.4, 4.6]
 rake:
   value: 0.0
   constraints:

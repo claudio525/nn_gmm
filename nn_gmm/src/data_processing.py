@@ -194,6 +194,11 @@ def preprocess_ds(
             for cur_input_key, cur_feature_config in feature_config_dict.items():
                 cur_features = []
                 for cur_name, cur_func in cur_feature_config.items():
+                    # Hack
+                    if cur_name == "rrup_ln":
+                        cur_features.append(cur_func(item["rrup"]) if cur_func is not None else item["rrup"])
+                        continue
+
                     cur_features.append(
                         cur_func(item[cur_name])
                         if cur_func is not None
@@ -213,26 +218,26 @@ def preprocess_ds(
                 im = list(im_config.keys())[0]
                 if use_sample_weights:
                     return (
-                        feature_dict["inputs"],
+                        feature_dict if as_dict else feature_dict["inputs"],
                         target_dict[im],
                         item["sample_weight"],
                     )
                 else:
                     return (
-                        feature_dict["inputs"],
+                        feature_dict if as_dict else feature_dict["inputs"],
                         target_dict[im],
                     )
             # Multi-output
             else:
                 if use_sample_weights:
                     return (
-                        feature_dict["inputs"],
+                        feature_dict if as_dict else feature_dict["inputs"],
                         target_dict,
                         item["sample_weight"]
                     )
                 else:
                     return (
-                        feature_dict["inputs"],
+                        feature_dict if as_dict else feature_dict["inputs"],
                         target_dict
                     )
 

@@ -25,7 +25,7 @@ class ResultDB:
     def get_data(self, columns: Sequence[str]):
         with h5py.File(self.db_ffp, "r") as db:
             column_ind = np.flatnonzero(np.isin(self.columns, columns))
-            data = db["data"][:, column_ind]
+            data = db["data"][:, column_ind].astype(np.float32)
             ids = db["ids"][:].astype(str)
 
             df = pd.DataFrame(data=data, index=ids, columns=self.columns[column_ind])
@@ -59,7 +59,7 @@ class ResultDB:
     def write_data(result_df: pd.DataFrame, db_ffp: Path):
         ids = result_df.index.values.astype(str)
         data_columns = np.asarray([col for col in result_df.columns.values if col not in ["site", "fault", "rupture"]])
-        data = result_df.loc[:, data_columns].values
+        data = result_df.loc[:, data_columns].values.astype(np.float32)
 
         with h5py.File(db_ffp, "w") as db:
             id_ds = db.create_dataset("ids", data=ids.astype(h5py.string_dtype()))

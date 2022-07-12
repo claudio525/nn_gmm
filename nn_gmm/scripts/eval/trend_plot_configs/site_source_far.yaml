@@ -1,4 +1,12 @@
-rrup: 150
-rjb: 150
-rx: 150
-ry: 150
+rrup:
+  value: 150
+  constraints: [140, 160]
+rjb:
+  value: 150
+  constraints: [140, 160]
+rx:
+  value: 150
+  constraints: [140, 160]
+ry:
+  value: 150
+  constraints: [140, 160]

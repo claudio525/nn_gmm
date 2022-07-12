@@ -52,9 +52,9 @@ def train_val_basin_metrics(
 
 
 @app.command("spatial-metrics")
-def train_val_spatial_metrics(model_dir: Path, save: bool = True):
+def train_val_spatial_metrics(model_dir: Path, ims: List[str] = None, save: bool = True):
     """Computes training & validation metrics"""
-    nn_gmm.comp_train_val_spatial_metrics(model_dir, save=save)
+    nn_gmm.comp_train_val_spatial_metrics(model_dir, ims=None if len(ims) == 0 else ims, save=save)
 
 
 @app.command("rrup-bin")
@@ -77,7 +77,7 @@ def trend_plot_rrup_multi(
     ims: List[str] = None,
     model_names: List[str] = None,
 ):
-    """Generates an Rrup trend plot for multiple models"""
+    """Generates an trend plot for multiple models"""
     nn_gmm.gen_trend_plots(
         feature,
         model_dirs,
@@ -103,7 +103,7 @@ def trend_plot_rrup_multi_combo(
     model_names: List[str] = None,
     features: List[str] = None,
 ):
-    """Generates an Rrup trend plot for multiple models
+    """Generates an trend plot for multiple models
     for each of the possible combinations of specified
     site, site-source and source config
 
@@ -173,7 +173,7 @@ def trend_plot_rrup_multi_combo(
                 gc.collect()
 
 
-@app.command("spec-residuals")
+@app.command("residuals")
 def residual_plots(model_dir: Path, ims: List[str] = None):
     """Generates spectral residual plots"""
     nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else list(ims))
@@ -272,7 +272,7 @@ def compare_basin_metrics_mag_rrup(
     )
 
 
-@app.command("comp-basin-metrics")
+@app.command("comp-basin-matrix")
 def compare_basin_metrics_matrix(
     model_dirs: List[Path] = typer.Argument(
         ..., help="The directories of the models to compare"
@@ -280,7 +280,7 @@ def compare_basin_metrics_matrix(
     output_dir: Path = typer.Argument(
         ..., help="Output directory path for the resulting plots"
     ),
-    im: str = typer.Argument(...),
+    ims: List[str] = typer.Option(...),
     metrics: List[str] = typer.Option(..., help="The comparison metrics"),
     model_names: List[str] = typer.Option(
         None,
@@ -293,28 +293,19 @@ def compare_basin_metrics_matrix(
     for the specified models & available basins
     """
     for cur_metric in metrics:
-        nn_gmm.gen_basin_metric_comp_matrix(
-            [
-                (cur_model_dir, model_names[ix] if model_names is not None else None)
-                for ix, cur_model_dir in enumerate(model_dirs)
-            ],
-            im,
-            cur_metric,
-            output_dir / f"val_{cur_metric}.png"
-            if val
-            else output_dir / f"train_{cur_metric}.png",
-            val=val,
-        )
-
-
-@app.command("avg-bias-std-spatial")
-def avg_spatial_bias_std(
-    model_dir: Path, ims: List[str] = None, metrics: List[str] = None, n_procs: int = 4
-):
-    ims = nn_gmm.GMM.load(model_dir).ims if not ims else ims
-    metrics = None if not metrics else metrics
-
-    nn_gmm.gen_spatial_metric_plots(model_dir, ims, n_procs=n_procs, metrics=metrics)
+        for im in ims:
+            nn_gmm.gen_basin_metric_comp_matrix(
+                [
+                    (cur_model_dir, model_names[ix] if len(model_names) > 0 else None)
+                    for ix, cur_model_dir in enumerate(model_dirs)
+                ],
+                im,
+                cur_metric,
+                output_dir / f"val_{im.replace('.', 'p')}_{cur_metric}.png"
+                if val
+                else output_dir / f"train_{im.replace('.', 'p')}_{cur_metric}.png",
+                val=val,
+            )
 
 
 @app.command("loss-comp")

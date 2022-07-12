@@ -149,8 +149,6 @@ def train_nn(
 
     Parameters
     ----------
-    data_config: dictonary
-        The input and output data config
     config: dictionary
         The model inputs and outputs config
     hyperparams: dictionary
@@ -224,7 +222,6 @@ def train_nn(
             data_processing.convert_to_transform_fn(config["feature_config"].copy()),
         )
     im_config = data_processing.convert_to_transform_fn(config["im_config"].copy())
-
 
     train_ds = data_processing.preprocess_ds(
         train_ds,
@@ -310,33 +307,37 @@ def train_nn(
     history = history.history
     ims = list(im_config.keys())
 
-    if config["use_sample_weights"]:
-        fig = plt.figure(figsize=(16, 10), dpi=200)
-        ax_1 = fig.add_subplot(1, 2, 1)
-        ml_tools.plotting.plot_loss(
-            history,
-            ax=ax_1,
-            y_label="Training Loss",
-            multi_keys=ims if len(ims) > 1 else None,
-            plot_val=False
-        )
+    # Hypocentre sometimes fails to create plots
+    try:
+        if config["use_sample_weights"]:
+            fig = plt.figure(figsize=(16, 10), dpi=200)
+            ax_1 = fig.add_subplot(1, 2, 1)
+            ml_tools.plotting.plot_loss(
+                history,
+                ax=ax_1,
+                y_label="Training Loss",
+                multi_keys=ims if len(ims) > 1 else None,
+                plot_val=False
+            )
 
-        ax_2 = fig.add_subplot(1, 2, 2)
-        ml_tools.plotting.plot_loss(
-            history,
-            ax=ax_2,
-            y_label="Validation Loss",
-            multi_keys=ims if len(ims) > 1 else None,
-            plot_train=False,
-        )
-    else:
-        fig = ml_tools.plotting.plot_loss(
-            history,
-            y_label="Loss",
-            multi_keys=ims if len(ims) > 1 else None,
-        )
-    fig.tight_layout()
-    fig.savefig(os.path.join(output_dir, "loss.png"))
+            ax_2 = fig.add_subplot(1, 2, 2)
+            ml_tools.plotting.plot_loss(
+                history,
+                ax=ax_2,
+                y_label="Validation Loss",
+                multi_keys=ims if len(ims) > 1 else None,
+                plot_train=False,
+            )
+        else:
+            fig = ml_tools.plotting.plot_loss(
+                history,
+                y_label="Loss",
+                multi_keys=ims if len(ims) > 1 else None,
+            )
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, "loss.png"))
+    except RuntimeError as ex:
+        console.print(f"Failed loss plot creation due to the following exception:\n{ex}")
 
     return TrainingResult(config, hyperparams, output_dir, model_dir, loss_df)
 

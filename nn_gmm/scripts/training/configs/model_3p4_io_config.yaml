@@ -4,19 +4,13 @@ feature_config:
         dip: min_max
         rake: min_max
         width: standard
-
         rrup: standard
         rrup_ln: ln
         rjb: standard
-        U: standard
-        T: standard
-        S_bayless: standard
-        D_bayless: standard
-
+        rx: standard
         vs30: standard
         z1p0: standard
         z2p5: standard
-        vs500: standard
 
         X: standard
         Y: standard
@@ -25,6 +19,7 @@ feature_config:
         active_shallow: null
         volcanic: null
         is_point_source: null
+
 im_config:
 #        PGV: standard
 #        PGA: standard

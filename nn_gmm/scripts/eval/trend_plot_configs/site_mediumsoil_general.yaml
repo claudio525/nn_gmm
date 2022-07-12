@@ -4,4 +4,7 @@ vs30:
 vs500: 1.25
 z1p0: 0.065
 z2p5: 0.3
-
+est_z1p0: 0.33
+delta_z1p0: -0.265
+comb_z1p0: 0.33
+comb_delta_z1p0: 0.0

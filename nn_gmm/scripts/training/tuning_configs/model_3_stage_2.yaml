@@ -1,0 +1,71 @@
+program: /home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/train_loc_nn.py
+method: bayes
+metric:
+  name: best_val_loss
+  goal: minimize
+
+parameters:
+  batch_size:
+    values:
+      - 4096
+      - 8192
+      - 16384
+      - 32768
+      - 65536
+  l2:
+    values:
+      - 0.0
+      - 0.01
+      - 0.025
+      - 0.05
+      - 0.075
+      - 0.1
+      - 0.125
+      - 0.15
+      - 0.2
+  learning_rate:
+    values:
+      - 0.001
+      - 0.0001
+  n_pre_units:
+    values:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+  n_pre_layers:
+    min: 1
+    max: 4
+  n_core_units:
+    values:
+      - 8
+      - 16
+      - 32
+      - 64
+      - 128
+  n_core_layers:
+    min: 1
+    max: 4
+  n_out_units:
+    values:
+      - 8
+      - 16
+      - 32
+  n_out_layers:
+    min: 0
+    max: 3
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "/home/cbs51/dev/work/data/nn_gmm/results/base_models/0708_084236_model-1_comp-delta-z1p0_hypocentre"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/tuning_configs/hyperparams_loc_config.yaml"
+  - "--use-wandb"
+  - "--use-sample-weights"
+  - "--tags"
+  - "model-3-stage-2"
+  - "--delete"
+  - "--no-eval"
+  - ${args}

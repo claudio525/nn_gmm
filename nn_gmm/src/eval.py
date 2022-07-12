@@ -196,6 +196,7 @@ def compute_spatial_metrics(
 
     obs_keys, est_keys = ims, [f"{cur_im}_est" for cur_im in ims]
     residuals_df = data_df.loc[:, obs_keys] - data_df.loc[:, est_keys].values
+    residuals_df["site"] = data_df["site"]
     residuals_df["lon"] = data_df["lon"]
     residuals_df["lat"] = data_df["lat"]
 
@@ -222,6 +223,9 @@ def compute_spatial_metrics(
     # Number of data points at each location
     if "count" in metrics:
         metric_results["count"] = residuals_grouped.count()
+
+    for cur_key in metric_results.keys():
+        metric_results[cur_key]["site"] = residuals_grouped.first()["site"]
 
     return metric_results
 
@@ -396,11 +400,12 @@ def comp_train_val_metrics(
     train_metrics = compute_metrics(train_df, ims, metrics=metrics)
     val_metrics = compute_metrics(val_df, ims, metrics=metrics)
 
-    console.rule("Training")
-    console.print(train_metrics)
+    if print_metrics:
+        console.rule("Training")
+        console.print(train_metrics)
 
-    console.rule("Validation")
-    console.print(val_metrics)
+        console.rule("Validation")
+        console.print(val_metrics)
 
     if save:
         train_metrics.to_csv(model_dir / "train_metrics.csv")
@@ -410,13 +415,13 @@ def comp_train_val_metrics(
 
 
 def comp_train_val_spatial_metrics(
-    model_dir: Path, save: bool = False, metrics: Sequence[str] = ALL_SPATIAL_METRICS
+    model_dir: Path, ims: Sequence[str] = None, save: bool = False, metrics: Sequence[str] = ALL_SPATIAL_METRICS
 ):
     """Computes the specified metrics for each site,
     for both training and validation data"""
-    ims = GMM.load(model_dir).ims
-
+    ims = GMM.load(model_dir).ims if ims is None else ims
     columns = [f"{im}_est" for im in ims] + list(ims) + ["site", "lat", "lon"]
+
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
     val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
 

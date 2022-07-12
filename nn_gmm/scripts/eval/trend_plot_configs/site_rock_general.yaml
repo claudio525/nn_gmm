@@ -1,8 +1,10 @@
-
 vs30:
   value: 800
   constraints: [750, 850]
 vs500: 1.5
 z1p0: 0.04
 z2p5: 0.3
-
+est_z1p0: 0.019
+delta_z1p0: 0.021
+comb_z1p0: 0.019
+comb_delta_z1p0: 0.0

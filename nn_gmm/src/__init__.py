@@ -58,7 +58,8 @@ from .eval import (
     wandb_log_metrics,
     tf_mse,
     compute_spatial_metrics,
-    comp_train_val_spatial_metrics
+    comp_train_val_spatial_metrics,
+    load_spatial_metrics
 )
 from .plotting import *
 

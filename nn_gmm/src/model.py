@@ -24,14 +24,33 @@ class GMM:
         self.feature_config = input_config["feature_config"]
         self.im_config = input_config["im_config"]
 
-        self.feature_config_prcd = data_processing.convert_to_transform_fn(
-            self.feature_config.copy(), tf_fn=True
-        )
+        self._multi_input = self.input_config.get("multi_input")
+
+        # Multi input
+        if self._multi_input:
+            self.feature_config_prcd = {
+                cur_input: data_processing.convert_to_transform_fn(
+                    cur_feature_config.copy(), tf_fn=True
+                )
+                for cur_input, cur_feature_config in self.feature_config.items()
+            }
+
+            self.features = {
+                cur_input: np.asarray(list(cur_feature_config.keys()))
+                for cur_input, cur_feature_config in self.feature_config.items()
+            }
+
+        # Single input
+        else:
+            self.feature_config_prcd = data_processing.convert_to_transform_fn(
+                self.feature_config.copy(), tf_fn=True
+            )
+
+            self.features = list(self.feature_config.keys())
+
         self.im_config_prcd = data_processing.convert_to_inv_transform_fn(
             self.im_config.copy(), tf_fn=True
         )
-
-        self.features = np.asarray(list(self.feature_config.keys()))
         self.outputs = np.asarray(list(self.im_config.keys()))
 
     @property
@@ -91,12 +110,13 @@ class GMM:
 
     @classmethod
     def load(cls, model_dir: Union[str, Path]):
-        # if (model_dir / "xgb.model").exists():
-            # return XGBoostGMM.load(model_dir)
-        # else:
-        return NeuralNetworkGMM.load(model_dir)
+        io_config = mlt.utils.load_json(model_dir / "input_config.json")
+        if io_config.get("multi_input"):
+            return MultiInputNNGMM.load(model_dir)
+        else:
+            return NeuralNetworkGMM.load(model_dir)
 
-    def _pre_process(self, X: pd.DataFrame):
+    def _pre_process(self, X: pd.DataFrame, feature_config: Dict = None):
         # Deal with the categorial features
         if "tect_type" in X.columns:
             X = data_processing.apply_one_hot_enc(
@@ -104,7 +124,10 @@ class GMM:
             )
 
         # All other pre-processing
-        X = data_processing.preprocess_df(X, self.feature_config_prcd)
+        feature_config = (
+            feature_config if feature_config is not None else self.feature_config_prcd
+        )
+        X = data_processing.preprocess_df(X, feature_config)
         return X
 
     def _post_process(self, mean_df: pd.DataFrame):
@@ -119,6 +142,336 @@ class GMM:
                 )
 
         return mean_df
+
+
+class NeuralNetworkGMM(GMM):
+    def __init__(self, model: keras.Model, input_config: Dict):
+        super().__init__(input_config)
+        self.model = model
+
+    def predict(
+        self,
+        X: pd.DataFrame,
+        pre_process: bool = True,
+        result_df_index: np.ndarray = None,
+    ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
+        if pre_process:
+            X = X.copy()
+
+            # Hack
+            if "rrup_ln" not in X.columns and "rrup_ln" in self.features:
+                X["rrup_ln"] = X["rrup"].values.copy()
+
+            X = self._pre_process(X)
+
+        # Ensure that all the required features exist
+        if not np.all(np.isin(self.features, X.columns.values.astype(str))):
+            raise ValueError("Not all required features exist in the given dataframe")
+
+        # Run estimation
+        y_est = self.model(X.loc[:, self.features].values.astype(float))
+        # y_est = self.model.predict(X.loc[:, self.features].values.astype(float), batch_size=1024)
+
+        # Multi-output model
+        if isinstance(y_est, list):
+            y_est = np.stack(y_est, axis=1).reshape(-1, self.outputs.size)
+        else:
+            y_est = y_est.numpy()
+
+        # Convert to dataframes
+        result_df_index = (
+            result_df_index if result_df_index is not None else X.index.values
+        )
+        mean_df = pd.DataFrame(
+            data=y_est[:, : self.outputs.size],
+            columns=self.outputs,
+            index=result_df_index,
+        )
+
+        # Apply inverse pre-processing for outputs if required
+        mean_df = self._post_process(mean_df)
+
+        if y_est.shape[1] == 2 * self.outputs.size:
+            std_df = pd.DataFrame(
+                data=y_est[:, self.outputs.size :],
+                columns=self.outputs,
+                index=result_df_index,
+            )
+            assert (
+                self.im_config.items()[0] == None
+            ), "No post-processing currently supported when using NLL"
+            return mean_df, std_df
+
+        return mean_df, None
+
+    def predict_dirs(
+        self,
+        data_dirs: List[Path],
+        batch_size: int = 1_000_000,
+        ims: List[str] = None,
+        features: List[str] = None,
+        metadata: List[str] = None,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
+        """See GMM base class for the full docstring"""
+        features = [] if features is None else features
+        metadata = [] if metadata is None else metadata
+
+        # Get feature details, have to be same across all directories
+        with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
+            feature_details = pickle.load(f)
+
+        ds = data.load_dataset(
+            data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
+        ).prefetch(tf.data.AUTOTUNE)
+
+        ims = ims if ims is not None else list(self.outputs)
+        sim_dfs, mean_dfs, std_dfs = [], [], []
+        if self._multi_input:
+            data_columns = (
+                list(np.concatenate([cur_features for cur_features in self.features.values()]))
+                + ims
+                + metadata
+            )
+        else:
+            data_columns = self.features + ims + metadata
+        for ix, cur_data in enumerate(ds.as_numpy_iterator()):
+            console.print(f"Processing batch - {ix + 1}")
+            cur_df = pd.DataFrame.from_dict(
+                {
+                    cur_key: cur_value
+                    for cur_key, cur_value in cur_data.items()
+                    if cur_key in data_columns + ["id"]
+                }
+            )
+            cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True, drop=False)
+
+            # Hack
+            if "rrup_ln" not in cur_df.columns and "rrup_ln" in data_columns:
+                cur_df["rrup_ln"] = cur_df["rrup"].values.copy()
+
+            cur_mean_df, cur_std_df = self.predict(cur_df, pre_process=True)
+
+            # Only keep some IMs (to reduce size of resulting data)
+            cur_mean_df = cur_mean_df[ims]
+            cur_std_df = cur_std_df[ims] if cur_std_df is not None else None
+
+            sim_dfs.append(cur_df[data_columns])
+
+            mean_dfs.append(cur_mean_df)
+            del cur_df
+
+            if cur_std_df is not None:
+                std_dfs.append(cur_std_df)
+
+        mean_df = pd.concat(mean_dfs)
+        std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
+        return pd.concat(sim_dfs), mean_df, std_df
+
+    @classmethod
+    def load(cls, model_dir: Union[str, Path]):
+        model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
+        model_dir = model_dir / "best_model"
+
+        model = keras.models.load_model(str(model_dir))
+
+        with open(model_dir / "input_config.json", "r") as f:
+            input_config = json.load(f)
+
+        return cls(model, input_config)
+
+
+class MultiInputNNGMM(NeuralNetworkGMM):
+    def __init__(self, model: keras.Model, input_config: Dict):
+        super().__init__(model, input_config)
+
+    def predict(
+        self,
+        X: pd.DataFrame,
+        pre_process: bool = True,
+        result_df_index: np.ndarray = None,
+    ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
+        inputs = {}
+
+        for cur_input, cur_feature_config in self.feature_config.items():
+            cur_X = X.loc[:, list(cur_feature_config.keys())]
+            if pre_process:
+                cur_X = self._pre_process(
+                    cur_X.copy(), self.feature_config_prcd[cur_input]
+                )
+
+            inputs[cur_input] = cur_X.values.astype(float)
+
+        # Get model predictions
+        y_est = self.model(inputs)
+
+        # Multi-output model
+        if isinstance(y_est, list):
+            y_est = np.stack(y_est, axis=1).reshape(-1, self.outputs.size)
+        else:
+            y_est = y_est.numpy()
+
+        # Convert to dataframes
+        result_df_index = (
+            result_df_index if result_df_index is not None else X.index.values
+        )
+        mean_df = pd.DataFrame(
+            data=y_est[:, : self.outputs.size],
+            columns=self.outputs,
+            index=result_df_index,
+        )
+
+        # Apply inverse pre-processing for outputs if required
+        mean_df = self._post_process(mean_df)
+
+        return mean_df, None
+
+
+def create_gaussian_model(
+    model_config: Dict, n_inputs: int, n_outputs: int
+) -> keras.Model:
+    """Creates a model that estimates the mean & standard deviation
+    for the given target variables
+
+    Parameters
+    ----------
+    model_config: dictionary
+    n_inputs: int
+        Number of inputs/features
+    n_outputs: int
+        Number of target variables, the number of
+        actual model outputs will be 2 * n_outputs, since
+        the model will estimate a mean & std for each
+        target variable
+
+    Returns
+    -------
+    keras.Model
+    """
+    hidden_layer_func = model_config["hidden_layer_func"]
+    hidden_layer_config = model_config["hidden_layer_config"]
+    units = model_config["units"]
+
+    input = keras.Input(n_inputs)
+
+    x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    for unit in units[1:]:
+        x = hidden_layer_func(x, unit, **hidden_layer_config)
+
+    mean_output = keras.layers.Dense(units=n_outputs, activation=None, name="means")(x)
+    std_output = keras.layers.Dense(units=n_outputs, activation=nnelu, name="stds")(x)
+
+    output = keras.layers.Concatenate(name="output")([mean_output, std_output])
+    return keras.Model(inputs=input, outputs=output)
+
+
+def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
+    """Creates a functional keras model from the model config,
+    with a linear output layer
+
+    Parameters
+    ----------
+    model_config: dictionary
+        Model config,
+    n_inputs
+    n_outputs
+
+    Returns
+    -------
+    keras.Model
+    """
+    hidden_layer_func = model_config["hidden_layer_func"]
+    hidden_layer_config = model_config["hidden_layer_config"]
+    units = model_config["units"]
+
+    input = keras.Input(n_inputs)
+
+    x = hidden_layer_func(input, units[0], **hidden_layer_config)
+    for unit in units[1:]:
+        x = hidden_layer_func(x, unit, **hidden_layer_config)
+
+    outputs = keras.layers.Dense(units=n_outputs, activation=None)(x)
+
+    return keras.Model(inputs=input, outputs=outputs)
+
+
+def create_reg_multi_output_model(
+    hyper_params: Dict, n_inputs: int, output_names: List[str]
+):
+    """Creates a functional keras model from the model config,
+    with multiple linear outputs and possible sub-nets per output
+
+    Parameters
+    ----------
+    hyper_params: dictionary
+        Model config,
+    n_inputs
+    n_outputs
+
+    Returns
+    -------
+    keras.Model
+    """
+    hidden_layer_func = mlt.tf_utils.get_hidden_layer_fn(
+        hyper_params["hidden_layer_func"]
+    )
+
+    hidden_layer_config = dict(
+        l2=hyper_params.get("l2"), dropout=hyper_params.get("dropout")
+    )
+
+    if "units" in hyper_params:
+        units = hyper_params["units"]
+        output_units = hyper_params["output_units"]
+    elif "n_units" in hyper_params:
+        units = [hyper_params["n_units"] for ix in range(hyper_params["n_layers"])]
+        output_units = [
+            hyper_params["n_out_units"] for ix in range(hyper_params["n_out_layers"])
+        ]
+    else:
+        raise ValueError("Invalid model unit & layer hyperparameters")
+
+    inputs = keras.Input(n_inputs, name="inputs")
+
+    x = hidden_layer_func(inputs, units[0], **hidden_layer_config)
+    for unit in units[1:]:
+        x = hidden_layer_func(x, unit, **hidden_layer_config)
+
+    outputs = []
+    for cur_output_name in output_names:
+        cur_x = x
+        if output_units is not None and len(output_units) > 0:
+            for cur_out_units in output_units:
+                cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
+
+        outputs.append(
+            keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
+        )
+
+    return keras.Model(inputs=inputs, outputs=outputs)
+
+
+def nnelu(input):
+    """Non-negative elu function, i.e. ELU(z) + 1"""
+    return tf.add(tf.constant(1.0, dtype=tf.float32), tf.nn.elu(input))
+
+
+# class MargNLLLoss(keras.losses.Loss):
+#     def __init__(self, n_outputs: int, **kwargs):
+#         super().__init__(**kwargs)
+#         self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
+#
+#     def call(self, y_true, parameters):
+#         means = parameters[:, : self.n_outputs]
+#         stds = parameters[:, self.n_outputs :]
+#
+#         gaussians = tfp.distributions.Normal(loc=means, scale=stds)
+#         log_likelihood = gaussians.log_prob(y_true)
+#
+#         return -tf.reduce_mean(log_likelihood, axis=-1)
+#
+#     def get_config(self):
+#         base_config = super().get_config()
+#         return {**base_config, "n_outputs": int(self.n_outputs)}
 
 
 # class XGBoostGMM(GMM):
@@ -208,311 +561,3 @@ class GMM:
 #         input_config = ml_tools.utils.load_json(model_dir / "input_config.json")
 #
 #         return cls(model, input_config)
-
-
-class NeuralNetworkGMM(GMM):
-    def __init__(self, model: keras.Model, input_config: Dict):
-        super().__init__(input_config)
-        self.model = model
-
-    def predict(
-        self,
-        X: pd.DataFrame,
-        pre_process: bool = True,
-        result_df_index: np.ndarray = None,
-    ) -> Tuple[pd.DataFrame, Union[pd.DataFrame, None]]:
-        if pre_process:
-            X = X.copy()
-
-            # Hack
-            if "rrup_ln" not in X.columns and "rrup_ln" in self.features:
-                X["rrup_ln"] = X["rrup"].values.copy()
-
-            X = self._pre_process(X)
-
-        # Ensure that all the required features exist
-        if not np.all(np.isin(self.features, X.columns.values.astype(str))):
-            raise ValueError("Not all required features exist in the given dataframe")
-
-        # Run estimation
-        y_est = self.model(X.loc[:, self.features].values.astype(float))
-        # y_est = self.model.predict(X.loc[:, self.features].values.astype(float), batch_size=1024)
-
-        # Multi-output model
-        if isinstance(y_est, list):
-            y_est = np.stack(y_est, axis=1).reshape(-1, self.outputs.size)
-        else:
-            y_est = y_est.numpy()
-
-        # Convert to dataframes
-        result_df_index = (
-            result_df_index if result_df_index is not None else X.index.values
-        )
-        mean_df = pd.DataFrame(
-            data=y_est[:, : self.outputs.size],
-            columns=self.outputs,
-            index=result_df_index,
-        )
-
-        # Apply inverse pre-processing for outputs if required
-        mean_df = self._post_process(mean_df)
-
-        if y_est.shape[1] == 2 * self.outputs.size:
-            std_df = pd.DataFrame(
-                data=y_est[:, self.outputs.size :],
-                columns=self.outputs,
-                index=result_df_index,
-            )
-            assert (
-                self.im_config.items()[0] == None
-            ), "No post-processing currently supported when using NLL"
-            return mean_df, std_df
-
-        return mean_df, None
-
-    def predict_dirs(
-        self,
-        data_dirs: List[Path],
-        batch_size: int = 1_000_000,
-        ims: List[str] = None,
-        features: List[str] = None,
-        metadata: List[str] = None,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, Union[pd.DataFrame, None]]:
-        """See GMM base class for the full docstring"""
-        features = [] if features is None else features
-        metadata = [] if metadata is None else metadata
-
-        # Get feature details, have to be same across all directories anyways
-        with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
-            feature_details = pickle.load(f)
-
-        ds = data.load_dataset(
-            data_dirs, feature_details, batch_size=batch_size, shuffle_buffer=None
-        ).prefetch(tf.data.AUTOTUNE)
-
-
-        ims = ims if ims is not None else list(self.outputs)
-        sim_dfs, mean_dfs, std_dfs = [], [], []
-        data_columns = np.concatenate((self.features, ims, ["id"], metadata))
-        for ix, cur_data in enumerate(ds.as_numpy_iterator()):
-            console.print(f"Processing batch - {ix + 1}")
-            cur_df = pd.DataFrame.from_dict(
-                {
-                    cur_key: cur_value
-                    for cur_key, cur_value in cur_data.items()
-                    if cur_key in data_columns
-                }
-            )
-            cur_df.set_index(cur_df.id.str.decode("UTF-8"), inplace=True)
-
-            # Hack
-            if "rrup_ln" not in cur_df.columns and "rrup_ln" in self.features:
-                cur_df["rrup_ln"] = cur_df["rrup"].values.copy()
-
-            cur_mean_df, cur_std_df = self.predict(cur_df, pre_process=True)
-
-            # Only keep some IMs (to reduce size of resulting data)
-            cur_mean_df = cur_mean_df[ims]
-            cur_std_df = cur_std_df[ims] if cur_std_df is not None else None
-
-            sim_dfs.append(cur_df[np.unique(ims + features + metadata)])
-
-            mean_dfs.append(cur_mean_df)
-            del cur_df
-
-            if cur_std_df is not None:
-                std_dfs.append(cur_std_df)
-
-        mean_df = pd.concat(mean_dfs)
-        std_df = pd.concat(std_dfs) if len(std_dfs) > 0 else None
-        return pd.concat(sim_dfs), mean_df, std_df
-
-    @classmethod
-    def load(cls, model_dir: Union[str, Path]):
-        model_dir = model_dir if isinstance(model_dir, Path) else Path(model_dir)
-        model_dir = model_dir / "best_model"
-
-        model = keras.models.load_model(str(model_dir))
-
-        with open(model_dir / "input_config.json", "r") as f:
-            input_config = json.load(f)
-
-        return cls(model, input_config)
-
-
-def create_gaussian_model(
-    model_config: Dict, n_inputs: int, n_outputs: int
-) -> keras.Model:
-    """Creates a model that estimates the mean & standard deviation
-    for the given target variables
-
-    Parameters
-    ----------
-    model_config: dictionary
-    n_inputs: int
-        Number of inputs/features
-    n_outputs: int
-        Number of target variables, the number of
-        actual model outputs will be 2 * n_outputs, since
-        the model will estimate a mean & std for each
-        target variable
-
-    Returns
-    -------
-    keras.Model
-    """
-    hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config["hidden_layer_config"]
-    units = model_config["units"]
-
-    input = keras.Input(n_inputs)
-
-    x = hidden_layer_func(input, units[0], **hidden_layer_config)
-    for unit in units[1:]:
-        x = hidden_layer_func(x, unit, **hidden_layer_config)
-
-    mean_output = keras.layers.Dense(units=n_outputs, activation=None, name="means")(x)
-    std_output = keras.layers.Dense(units=n_outputs, activation=nnelu, name="stds")(x)
-
-    output = keras.layers.Concatenate(name="output")([mean_output, std_output])
-    return keras.Model(inputs=input, outputs=output)
-
-
-def create_reg_model(model_config: Dict, n_inputs: int, n_outputs: int) -> keras.Model:
-    """Creates a functional keras model from the model config,
-    with a linear output layer
-
-    Parameters
-    ----------
-    model_config: dictionary
-        Model config,
-    n_inputs
-    n_outputs
-
-    Returns
-    -------
-    keras.Model
-    """
-    hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config["hidden_layer_config"]
-    units = model_config["units"]
-
-    input = keras.Input(n_inputs)
-
-    x = hidden_layer_func(input, units[0], **hidden_layer_config)
-    for unit in units[1:]:
-        x = hidden_layer_func(x, unit, **hidden_layer_config)
-
-    outputs = keras.layers.Dense(units=n_outputs, activation=None)(x)
-
-    return keras.Model(inputs=input, outputs=outputs)
-
-
-def create_reg_multi_output_model(
-    hyper_params: Dict, n_inputs: int, output_names: List[str]
-):
-    """Creates a functional keras model from the model config,
-    with multiple linear outputs and possible sub-nets per output
-
-    Parameters
-    ----------
-    hyper_params: dictionary
-        Model config,
-    n_inputs
-    n_outputs
-
-    Returns
-    -------
-    keras.Model
-    """
-    hidden_layer_func = mlt.tf_utils.get_hidden_layer_fn(hyper_params["hidden_layer_func"])
-
-    hidden_layer_config = dict(l2=hyper_params.get("l2"), dropout=hyper_params.get("dropout"))
-
-    if "units" in hyper_params:
-        units = hyper_params["units"]
-        output_units = hyper_params["output_units"]
-    elif "n_units" in hyper_params:
-        units = [hyper_params["n_units"] for ix in range(hyper_params["n_layers"])]
-        output_units = [hyper_params["n_out_units"] for ix in range(hyper_params["n_out_layers"])]
-    else:
-        raise ValueError("Invalid model unit & layer hyperparameters")
-
-    inputs = keras.Input(n_inputs, name="inputs")
-
-    x = hidden_layer_func(inputs, units[0], **hidden_layer_config)
-    for unit in units[1:]:
-        x = hidden_layer_func(x, unit, **hidden_layer_config)
-
-    outputs = []
-    for cur_output_name in output_names:
-        cur_x = x
-        if output_units is not None and len(output_units) > 0:
-            for cur_out_units in output_units:
-                cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
-
-        outputs.append(
-            keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
-        )
-
-    return keras.Model(inputs=inputs, outputs=outputs)
-
-
-def add_multi_output_head(
-    core_model: keras.Model,
-    core_model_input_name: str,
-    model_config: Dict,
-    output_names: List[str],
-    hydra_input_t: Tuple[str, int] = None,
-):
-    hidden_layer_func = model_config["hidden_layer_func"]
-    hidden_layer_config = model_config["hidden_layer_config"]
-    output_units = model_config.get("output_units")
-
-    core_input = keras.Input(core_model.input.shape[1:], name=core_model_input_name)
-    x = core_model(core_input, training=False)
-
-    if hydra_input_t is not None:
-        hydra_input = keras.Input(hydra_input_t[1], name=hydra_input_t[0])
-        x = keras.layers.concatenate([x, hydra_input])
-
-        inputs = [core_input, hydra_input]
-    else:
-        inputs = core_input
-
-    outputs = []
-    for cur_output_name in output_names:
-        if output_units is not None:
-            cur_x = hidden_layer_func(x, output_units[0], **hidden_layer_config)
-            for cur_out_units in output_units[1:]:
-                cur_x = hidden_layer_func(cur_x, cur_out_units, **hidden_layer_config)
-
-            outputs.append(
-                keras.layers.Dense(1, activation=None, name=cur_output_name)(cur_x)
-            )
-
-    return keras.Model(inputs=inputs, outputs=outputs)
-
-
-def nnelu(input):
-    """Non-negative elu function, i.e. ELU(z) + 1"""
-    return tf.add(tf.constant(1.0, dtype=tf.float32), tf.nn.elu(input))
-
-
-# class MargNLLLoss(keras.losses.Loss):
-#     def __init__(self, n_outputs: int, **kwargs):
-#         super().__init__(**kwargs)
-#         self.n_outputs = tf.constant(n_outputs, dtype=tf.int32)
-#
-#     def call(self, y_true, parameters):
-#         means = parameters[:, : self.n_outputs]
-#         stds = parameters[:, self.n_outputs :]
-#
-#         gaussians = tfp.distributions.Normal(loc=means, scale=stds)
-#         log_likelihood = gaussians.log_prob(y_true)
-#
-#         return -tf.reduce_mean(log_likelihood, axis=-1)
-#
-#     def get_config(self):
-#         base_config = super().get_config()
-#         return {**base_config, "n_outputs": int(self.n_outputs)}

@@ -1,4 +1,12 @@
-rrup: 25
-rjb: 25
-rx: 25
-ry: 25
+rrup:
+  value: 25
+  constraints: [15, 35]
+rjb:
+  value: 25
+  constraints: [15, 35]
+rx:
+  value: 25
+  constraints: [15, 35]
+ry:
+  value: 25
+  constraints: [15, 35]

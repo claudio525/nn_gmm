@@ -364,8 +364,8 @@ def im_plots(
 
     # Generate the plot/s
     for im in ims:
-        cur_out_dir = output_dir / (im).replace(".", "p")
-        cur_out_dir.mkdir(exist_ok=True)
+        cur_out_dir = output_dir / fault / (im).replace(".", "p")
+        cur_out_dir.mkdir(exist_ok=True, parents=True)
 
         # Single realisation
         if rel_name is not None:
@@ -375,8 +375,8 @@ def im_plots(
                 rel_name,
                 tuple(data_df.loc[data_df.rel == rel_name, ["hlon", "hlat"]].iloc[0]),
                 fault_trace,
-                None,
-                cur_out_dir / f"{utils.get_im_name(im)}_{cur_rel}.png",
+                None if cb_limits_dict is None else cb_limits_dict[im],
+                cur_out_dir / f"{im.replace('.', 'p')}_{rel_name}.png",
                 nz_map_data=nz_map_data,
             )
         # Multiple realisations
@@ -385,7 +385,7 @@ def im_plots(
             if cb_limits_dict is None:
                 cb_limits = (
                     np.round(np.quantile(np.exp(data_df[im].values), 0.02), 3),
-                    np.round(np.quantile(np.exp(data_df[im].values), 0.98), 3)
+                    np.round(np.quantile(np.exp(data_df[im].values), 0.98), 3),
                 )
             else:
                 cb_limits = cb_limits_dict[im]

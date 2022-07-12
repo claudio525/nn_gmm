@@ -224,7 +224,7 @@ def gen_location_dependence_plot(
 
 
 @app.command("sim-im-map")
-def gen_im_map(
+def gen_sim_im_map(
     data_dir: Path = typer.Argument(
         ..., help="The tfrecord data directory that contains the fault file to plot"
     ),
@@ -406,6 +406,50 @@ def gen_station_density_plot(station_ffp: Path, output_ffp: Path, grid_size: int
     fig = nn_gmm.gen_region_fig("Station density")
     nn_gmm.plot_grid(
         fig, grid, "hot", (0, 50, 50 / 10), ("white", "black"), reverse_cmap=True
+    )
+    fig.savefig(output_ffp, dpi=1200)
+
+
+@app.command("site-params")
+def gen_site_params_plot(
+    site_params_ffp: Path,
+    parameter: str,
+    output_ffp: Path,
+    qcore_data_dir: Path = None,
+    cb_limits: List[float] = None,
+    ratio: bool = False,
+    reverse_cmap: bool = True,
+    base_grid_only: bool = False
+):
+    """Generates IM plots using the given data"""
+    nz_map_data = (
+        None if qcore_data_dir is None else nn_gmm.NZMapData.load(qcore_data_dir)
+    )
+
+    site_params_df = pd.read_csv(site_params_ffp, index_col=0)
+    assert parameter in site_params_df.columns
+
+    if base_grid_only:
+        site_params_df = site_params_df.loc[np.char.startswith(site_params_df.index.values.astype(str), "0")]
+
+    grid = nn_gmm.create_grid(site_params_df, parameter)
+
+    if len(cb_limits) == 2:
+        cb_min, cb_max = cb_limits[0], cb_limits[1]
+    else:
+        cb_min = ml_tools.utils.round_sig(np.quantile(site_params_df[parameter].values, 0.05), sig=3)
+        cb_max = ml_tools.utils.round_sig(np.quantile(site_params_df[parameter].values, 0.95), sig=3)
+
+    # Generate the plot
+    fig = nn_gmm.gen_region_fig(parameter, map_data=nz_map_data)
+    nn_gmm.plot_grid(
+        fig,
+        grid,
+        "hot" if not ratio else "polar",
+        (cb_min, cb_max, np.round(np.abs(cb_max - cb_min) / 12, 5)),
+        ("white", "black") if not ratio else ("darkred", "darkblue"),
+        reverse_cmap=reverse_cmap,
+        transparency=35,
     )
     fig.savefig(output_ffp, dpi=1200)
 

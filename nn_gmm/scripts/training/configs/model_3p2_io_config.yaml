@@ -8,10 +8,7 @@ feature_config:
         rrup: standard
         rrup_ln: ln
         rjb: standard
-        U: standard
-        T: standard
-        S_bayless: standard
-        D_bayless: standard
+        rx: standard
 
         vs30: standard
         z1p0: standard

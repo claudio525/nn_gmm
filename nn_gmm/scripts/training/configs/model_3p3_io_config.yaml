@@ -16,7 +16,6 @@ feature_config:
         vs30: standard
         z1p0: standard
         z2p5: standard
-        vs500: standard
 
         X: standard
         Y: standard
