@@ -11,6 +11,7 @@ from .eval_plots import (
     gen_basin_metric_comp_matrix,
     gen_basin_comp_mag_rrup_plots,
     loss_comp,
+    gen_spatial_bias_plot,
 )
 from .spatial_plotting import (
     plot_grid,

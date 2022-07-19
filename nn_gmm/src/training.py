@@ -3,7 +3,7 @@ import pickle
 import json
 import os
 import datetime
-from typing import List, Dict, Tuple, Callable, Union, Sequence
+from typing import List, Dict, Tuple, Callable, Union, Sequence, Any
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +38,7 @@ class TrainingResult:
         training_config: Dict,
         output_dir: Path,
         best_model_dir: Path,
-        loss_df: pd.DataFrame
+        loss_df: pd.DataFrame,
     ):
 
         self.input_config = input_config
@@ -133,7 +133,7 @@ def _save_model_data(
     return loss_df
 
 
-def train_nn(
+def train_ds_nn(
     config: Dict,
     hyperparams: Dict,
     model: keras.Model = None,
@@ -145,7 +145,6 @@ def train_nn(
 ) -> TrainingResult:
     """
     Runs the training based on the specified configs
-    Note: Only supports training of a "single" output node model
 
     Parameters
     ----------
@@ -184,9 +183,6 @@ def train_nn(
     assert (model_fn is None) or (
         model_fn is not None and model_config is not None
     ), "If a model creation function is used, then a model config has to be specified"
-
-    # Load hyperparamters
-    batch_size, n_epochs = hyperparams["batch_size"], hyperparams["n_epochs"]
 
     # Create the output directory
     output_dir = create_output_dir(config) if output_dir is None else output_dir
@@ -255,11 +251,27 @@ def train_nn(
     train_ds = train_ds.prefetch(tf.data.experimental.AUTOTUNE)
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
+    train_result = run_training(
+        model, train_ds, val_ds, config, hyperparams, output_dir, verbose=verbose
+    )
+
+    return train_result
+
+
+def run_training(
+    model: keras.Model,
+    train_data: Any,
+    val_data: Any,
+    config: Dict,
+    hyperparams: Dict,
+    output_dir: Path,
+    verbose: int = 2,
+):
+    """Runs the model training"""
+
     # Compile the model
     model.compile(
-        optimizer=hyperparams["optimizer"],
-        loss=hyperparams["loss"],
-        run_eagerly=True,
+        optimizer=hyperparams["optimizer"], loss=hyperparams["loss"], run_eagerly=True,
     )
 
     # Model architecture summary
@@ -288,13 +300,26 @@ def train_nn(
 
     # Train
     console.print(f"Training...")
-    history = model.fit(
-        train_ds,
-        epochs=n_epochs,
-        validation_data=val_ds,
-        callbacks=callbacks,
-        verbose=verbose,
-    )
+    if isinstance(train_data, tuple):
+        history = model.fit(
+            train_data[0],
+            train_data[1],
+            sample_weight=train_data[2],
+            batch_size=hyperparams["batch_size"],
+            epochs=hyperparams["n_epochs"],
+            shuffle=False,
+            validation_data=val_data,
+            callbacks=callbacks,
+            verbose=verbose,
+        )
+    else:
+        history = model.fit(
+            train_data,
+            epochs=hyperparams["n_epochs"],
+            validation_data=val_data,
+            callbacks=callbacks,
+            verbose=verbose,
+        )
 
     if not hyperparams.get("save_best_val"):
         print("Saving the model")
@@ -305,7 +330,7 @@ def train_nn(
 
     # Create loss plot
     history = history.history
-    ims = list(im_config.keys())
+    ims = list(config["im_config"].keys())
 
     # Hypocentre sometimes fails to create plots
     try:
@@ -317,7 +342,7 @@ def train_nn(
                 ax=ax_1,
                 y_label="Training Loss",
                 multi_keys=ims if len(ims) > 1 else None,
-                plot_val=False
+                plot_val=False,
             )
 
             ax_2 = fig.add_subplot(1, 2, 2)
@@ -330,14 +355,14 @@ def train_nn(
             )
         else:
             fig = ml_tools.plotting.plot_loss(
-                history,
-                y_label="Loss",
-                multi_keys=ims if len(ims) > 1 else None,
+                history, y_label="Loss", multi_keys=ims if len(ims) > 1 else None,
             )
         fig.tight_layout()
         fig.savefig(os.path.join(output_dir, "loss.png"))
     except RuntimeError as ex:
-        console.print(f"Failed loss plot creation due to the following exception:\n{ex}")
+        console.print(
+            f"Failed loss plot creation due to the following exception:\n{ex}"
+        )
 
     return TrainingResult(config, hyperparams, output_dir, model_dir, loss_df)
 

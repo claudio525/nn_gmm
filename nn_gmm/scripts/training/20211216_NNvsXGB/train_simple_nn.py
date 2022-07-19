@@ -108,7 +108,7 @@ def main(use_wandb: bool = False, eval: bool = True, n_epochs: int = None):
         else:
             train_config["callbacks"] = [WandbCallback()]
 
-    train_result = nn_gmm.train_nn(
+    train_result = nn_gmm.train_ds_nn(
         io_config, train_config, model=model, verbose=1
     )
     output_dir = train_result.output_dir

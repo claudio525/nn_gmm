@@ -173,7 +173,7 @@ def run(
     hyperparams["loss"] = nn_gmm.get_loss_function(hyperparams)
 
     # Run training
-    train_result = nn_gmm.train_nn(
+    train_result = nn_gmm.train_ds_nn(
         config, hyperparams, model=model, as_dict=True, verbose=2,
     )
     output_dir = train_result.output_dir

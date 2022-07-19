@@ -11,7 +11,8 @@ from .training import (
     TrainingResult,
     load_datasets,
     create_output_dir,
-    train_nn,
+    train_ds_nn,
+    run_training,
 )
 
 from .model import TECT_TYPE_ONE_HOT_DICT, NeuralNetworkGMM, GMM, create_reg_multi_output_model
@@ -62,6 +63,7 @@ from .eval import (
     load_spatial_metrics
 )
 from .plotting import *
+from .clustering import compute_clusters
 
 from .utils import (
     pandas_isin,

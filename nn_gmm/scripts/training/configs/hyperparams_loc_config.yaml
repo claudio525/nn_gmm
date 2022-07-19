@@ -21,6 +21,6 @@ learning_rate: 0.001
 learning_rate_patience: null
 learning_rate_factor: null
 
-loss_key: mse
+loss_key: huber
 delta: 1.0
 cache: True

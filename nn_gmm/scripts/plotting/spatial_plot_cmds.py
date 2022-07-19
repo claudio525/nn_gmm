@@ -10,6 +10,7 @@ import typer
 import tensorflow as tf
 from scipy import spatial
 from qcore import geo, nhm
+import pygmt
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -29,6 +30,83 @@ from nn_gmm import console
 import ml_tools
 
 app = typer.Typer()
+
+
+@app.command("bias-cluster-plot")
+def gen_cluster_bias_plot(
+    model_dir: Path,
+    output_dir: Path = None,
+    ims: List[str] = None,
+    eps: float = 0.1,
+    min_samples: int = 4,
+    bias_threshold: float = 0.1,
+    spatial_radius: float = 12_000,
+    val_bias: bool = typer.Option(
+        default=False,
+        help="If specified, then the validation bias is plotted. "
+        "Clustering is still performend on the training bias though!",
+    ),
+):
+    """
+    Generates a bias-cluster plot (using training
+    data results) for the specified model
+    """
+    ims = nn_gmm.GMM.load(model_dir).ims if len(ims) == 0 else ims
+
+    output_dir = (
+        output_dir if output_dir is not None else model_dir / "plots" / "cluster_plots"
+    )
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    train_spatial_metrics, val_spatial_metrics = nn_gmm.load_spatial_metrics(model_dir)
+
+    # Load the metrics and compute the clusters
+    clustering_results = nn_gmm.compute_clusters(
+        model_dir,
+        ["pSA_3.0", "pSA_5.0", "pSA_10.0"],
+        eps=eps,
+        min_samples=min_samples,
+        bias_threshold=bias_threshold,
+        spatial_radius=spatial_radius,
+    )
+
+    prefix = "train" if not val_bias else "val"
+    for cur_im in ims:
+        console.print(f"Generating plot for {cur_im}")
+        cur_clustering = clustering_results[cur_im]
+
+        fig = nn_gmm.gen_spatial_bias_plot(train_spatial_metrics["bias"] if not val_bias else val_spatial_metrics["bias"], cur_im, transparency=25)
+
+        # Plot the clustered stations
+        pygmt.makecpt(
+            cmap="categorical", series=(0, cur_clustering.cluster.max() + 1, 1)
+        )
+        fig.plot(
+            x=cur_clustering.lon.values[cur_clustering.cluster >= 0],
+            y=cur_clustering.lat.values[cur_clustering.cluster >= 0],
+            style="c0.05c",
+            color=cur_clustering.cluster.values[cur_clustering.cluster >= 0],
+            cmap=True,
+        )
+
+        fig.plot(
+            x=cur_clustering.lon.values[cur_clustering.cluster < 0],
+            y=cur_clustering.lat.values[cur_clustering.cluster < 0],
+            style="c0.05c",
+            color="black",
+        )
+
+        fig.plot(
+            x=cur_clustering.lon.values[np.isnan(cur_clustering.cluster)],
+            y=cur_clustering.lat.values[np.isnan(cur_clustering.cluster)],
+            style="c0.01c",
+            color="black",
+            pen="black",
+        )
+
+        fig.savefig(
+            output_dir / f"{prefix}_{cur_im}.png", dpi=900, anti_alias=True,
+        )
 
 
 @app.command("faults-plot")
@@ -419,7 +497,7 @@ def gen_site_params_plot(
     cb_limits: List[float] = None,
     ratio: bool = False,
     reverse_cmap: bool = True,
-    base_grid_only: bool = False
+    base_grid_only: bool = False,
 ):
     """Generates IM plots using the given data"""
     nz_map_data = (
@@ -430,15 +508,21 @@ def gen_site_params_plot(
     assert parameter in site_params_df.columns
 
     if base_grid_only:
-        site_params_df = site_params_df.loc[np.char.startswith(site_params_df.index.values.astype(str), "0")]
+        site_params_df = site_params_df.loc[
+            np.char.startswith(site_params_df.index.values.astype(str), "0")
+        ]
 
     grid = nn_gmm.create_grid(site_params_df, parameter)
 
     if len(cb_limits) == 2:
         cb_min, cb_max = cb_limits[0], cb_limits[1]
     else:
-        cb_min = ml_tools.utils.round_sig(np.quantile(site_params_df[parameter].values, 0.05), sig=3)
-        cb_max = ml_tools.utils.round_sig(np.quantile(site_params_df[parameter].values, 0.95), sig=3)
+        cb_min = ml_tools.utils.round_sig(
+            np.quantile(site_params_df[parameter].values, 0.05), sig=3
+        )
+        cb_max = ml_tools.utils.round_sig(
+            np.quantile(site_params_df[parameter].values, 0.95), sig=3
+        )
 
     # Generate the plot
     fig = nn_gmm.gen_region_fig(parameter, map_data=nz_map_data)

@@ -751,6 +751,26 @@ def gen_spatial_metric_plots(
             cur_result.wait()
 
 
+def gen_spatial_bias_plot(spatial_metrics: pd.DataFrame, cur_im: str, transparency: int =1.0):
+
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+
+    fig = spatial_plotting.gen_region_fig(
+        f"{plotting_utils.get_im_name(cur_im)} - Bias"
+    )
+    spatial_plotting.plot_grid(
+        fig,
+        cur_grid,
+        "polar",
+        (-0.4, 0.4, 0.8 / 16),
+        ("darkred", "darkblue"),
+        reverse_cmap=True,
+        transparency=transparency,
+    )
+
+    return fig
+
+
 def _gen_spatial_bias_plot(
     spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
 ):
@@ -761,20 +781,16 @@ def _gen_spatial_bias_plot(
     reload(pygmt)
 
     console.print(f"Generating {prefix} bias plot for {cur_im}")
-    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+    fig = gen_spatial_bias_plot(spatial_metrics, cur_im)
 
-    fig = spatial_plotting.gen_region_fig(
-        plotting_utils.get_im_name(cur_im)
-        + r" - Bias,  <math>\mathbb{E}_{i \in Rup}[\Delta_i]</math>"
-    )
-    spatial_plotting.plot_grid(
-        fig,
-        cur_grid,
-        "polar",
-        (-0.4, 0.4, 0.8 / 16),
-        ("darkred", "darkblue"),
-        reverse_cmap=True,
-    )
+    # Plot the stations
+    # fig.plot(
+    #     x=spatial_metrics.lon.values,
+    #     y=spatial_metrics.lat.values,
+    #     style="c0.01c",
+    #     color="black",
+    #     pen="black",
+    # )
 
     console.print(f"Saving {prefix} bias plot for {cur_im}")
     fig.savefig(
