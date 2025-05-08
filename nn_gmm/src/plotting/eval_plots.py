@@ -137,15 +137,17 @@ def gen_basin_comp_mag_rrup_plots(
     showing the metrics trend (wrt. Magnitude and Rrup)
     for the region"""
     console.print(
-        f"[orange]This function assumes that all models were trained/validated on the same data. "
+        f"[orange]This function assumes that all models were "
+        f"trained/validated on the same data. "
         f"Otherwise this plot is not valid.[/]"
     )
 
-    YAXIS_LIMITS = dict(bias=(-1.0, 1.0), sigma=(0.0, 0.8))
-    MAG_MIN, MAG_MAX = 3.5, 8.1
-    RRUP_MIN, RRUP_MAX = 0, 390
+    model_names = (
+        [cur_dir.stem for cur_dir in model_dirs]
+        if len(model_names) == 0
+        else model_names
+    )
 
-    # Compute the bins
     # As max/min values are the same for all models, just use the first one
     cur_model_dir = model_dirs[0]
     data_df = ResultDB.get_data_static(
@@ -155,7 +157,10 @@ def gen_basin_comp_mag_rrup_plots(
         ["mag", "rrup", "site", "fault", "rupture"],
     )
 
-    # Create the magnitude and rrup bin sizes
+    MAG_MIN, MAG_MAX = 3.5, 8.1
+    RRUP_MIN, RRUP_MAX = 0, 390
+
+    # Create the magnitude and rrup bins
     mag_step = 0.5
     mag_bins = np.arange(
         MAG_MIN - (mag_step / 2.0), MAG_MAX + (mag_step / 2.0), mag_step,
@@ -190,9 +195,6 @@ def gen_basin_comp_mag_rrup_plots(
     # Get the basin stations
     basin_dict = data.load_basin_stations(basin_dir)
 
-    model_colors = sns.color_palette("hls", len(model_dirs))
-    linewidth = 0.5
-
     prefix = "val" if val else "train"
     for cur_region in regions:
         # Get the current basin/region stations
@@ -216,106 +218,232 @@ def gen_basin_comp_mag_rrup_plots(
         cur_rup_group = data_df.loc[cur_sites_mask].groupby("rupture").first()
 
         for cur_metric in metrics:
-            cur_mag_metric_keys = [
-                f"{cur_metric}_mag_{cur_mag}_{cur_mag + mag_step}"
-                for cur_mag in mag_bins
-            ]
-            cur_rrup_metric_keys = [
-                f"{cur_metric}_rrup_{cur_rrup}_{cur_rrup + rrup_step}"
-                for cur_rrup in rrup_bins
-            ]
-
-            # Create the figure
-            fig = plt.figure(figsize=(16, 10))
-
-            ax_dict = fig.subplot_mosaic(
-                """
-                AB
-                CD
-                CD
-                CD
-                """
+            _mag_rrup_metrics_plot(
+                output_dir,
+                cur_metric,
+                cur_region,
+                im,
+                metric_results,
+                model_names,
+                data_df.loc[cur_sites_mask].rrup.values,
+                cur_rup_group.mag.values,
+                rrup_bins,
+                mag_bins,
+                prefix,
             )
 
-            # Histogram of data in current basin
-            ax_dict["A"].hist(cur_rup_group.mag.values, bins=mag_bins, log=True)
-            ax_dict["A"].set_ylabel("Number of Ruptures")
 
-            ax_dict["B"].hist(
-                data_df.loc[cur_sites_mask].rrup.values, bins=rrup_bins, log=True
+def gen_site_comp_mag_rrup_plots(
+    model_dirs: Sequence[Path],
+    im: str,
+    metrics: Sequence[str],
+    sites: Sequence[str],
+    output_dir: Path,
+    model_names: Sequence[str] = None,
+    site_names: Sequence[str] = None,
+    val: bool = False,
+):
+    """Creates a figure for each metric-site pair,
+    showing the metrics trend (wrt. Magnitude and Rrup)
+    for the sites"""
+    console.print(
+        f"[orange]This function assumes that all models were "
+        f"trained/validated on the same data. "
+        f"Otherwise this plot is not valid.[/]"
+    )
+
+    model_names = (
+        [cur_dir.stem for cur_dir in model_dirs] if model_names is None else model_names
+    )
+
+    site_names = sites if site_names is None else site_names
+
+    # Get metadata (same for all models)
+    cur_model_dir = model_dirs[0]
+    data_df = ResultDB.get_data_static(
+        cur_model_dir / "val_predictions.hdf5"
+        if val
+        else cur_model_dir / "train_predictions.hdf5",
+        ["mag", "rrup", "site", "fault", "rupture"],
+    )
+
+    MAG_MIN, MAG_MAX = 3.5, 8.1
+    RRUP_MIN, RRUP_MAX = 0, 390
+
+    # Create the magnitude and rrup bins
+    mag_step = 0.5
+    mag_bins = np.arange(
+        MAG_MIN - (mag_step / 2.0), MAG_MAX + (mag_step / 2.0), mag_step,
+    )
+
+    rrup_step = 20
+    rrup_bins = np.arange(RRUP_MIN, RRUP_MAX + rrup_step + (rrup_step / 2.0), rrup_step)
+
+    # Compute the data for each model
+    metric_results = {}
+
+    columns = [im, f"{im}_est", "lat", "lon", "site", "mag", "rrup", "fault", "rupture"]
+    for cur_model_dir, cur_model_name in zip(model_dirs, model_names):
+        console.print(f"Processing model {cur_model_dir.stem}")
+
+        cur_data_df = (
+            ResultDB.get_data_static(cur_model_dir / "val_predictions.hdf5", columns)
+            if val
+            else ResultDB.get_data_static(
+                cur_model_dir / "train_predictions.hdf5", columns
             )
-            ax_dict["B"].set_ylabel("Number of Datapoints")
+        )
 
-            # Plot the models
-            for cur_model_dir, cur_model_name, cur_color in zip(
-                model_dirs, model_names, model_colors
-            ):
-                cur_mag_data = pd.Series(
-                    index=mag_bins + (mag_step / 2),
-                    data=[
-                        metric_results[cur_model_name][cur_region][im].get(
-                            cur_key, np.nan
-                        )
-                        for cur_key in cur_mag_metric_keys
-                    ],
-                    name=cur_metric,
-                )
-                cur_rrup_data = pd.Series(
-                    index=rrup_bins + (rrup_step / 2),
-                    data=[
-                        metric_results[cur_model_name][cur_region][im].get(
-                            cur_key, np.nan
-                        )
-                        for cur_key in cur_rrup_metric_keys
-                    ],
-                    name=cur_metric,
-                )
-
-                ax_dict["C"].plot(
-                    cur_mag_data.index.values,
-                    cur_mag_data.values,
-                    marker=".",
-                    c=cur_color,
-                    linewidth=linewidth,
-                    label=cur_model_name,
-                )
-                ax_dict["D"].plot(
-                    cur_rrup_data.index.values,
-                    cur_rrup_data.values,
-                    marker=".",
-                    c=cur_color,
-                    linewidth=linewidth,
-                    label=cur_model_name,
-                )
-
-            # Magnitude plot settings
-            ax_dict["C"].set_xlabel(f"Magnitude")
-            ax_dict["C"].set_ylabel(eval.FANCY_METRICS[cur_metric])
-            ax_dict["C"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
-            ax_dict["C"].set_ylim(YAXIS_LIMITS.get(cur_metric, (None, None)))
-            ax_dict["D"].legend()
-
-            ax_dict["A"].get_shared_x_axes().join(ax_dict["A"], ax_dict["C"])
-            ax_dict["A"].set_xticklabels([])
-
-            # Rrup plot settings
-            ax_dict["D"].set_xlabel("$R_{Rup}$")
-            ax_dict["D"].set_ylabel(eval.FANCY_METRICS[cur_metric])
-            ax_dict["D"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
-            ax_dict["D"].set_ylim(YAXIS_LIMITS.get(cur_metric, (None, None)))
-
-            ax_dict["B"].get_shared_x_axes().join(ax_dict["B"], ax_dict["D"])
-            ax_dict["B"].set_xticklabels([])
-
-            fig.suptitle(cur_region)
-            fig.tight_layout()
-            fig.subplots_adjust(hspace=0)
-            fig.savefig(
-                output_dir
-                / f"{prefix}_{cur_metric}_{cur_region}_{im.replace('.', 'p')}.png"
+        cur_metrics = {}
+        for cur_site in sites:
+            cur_metrics[cur_site] = eval.compute_metrics(
+                cur_data_df.loc[cur_data_df.site == cur_site],
+                [im],
+                mag_bins=mag_bins,
+                rrup_bins=rrup_bins,
+                metrics=metrics,
             )
 
-            plt.close(fig)
+        metric_results[cur_model_name] = cur_metrics
+
+    prefix = "val" if val else "train"
+    for cur_site, cur_site_name in zip(sites, site_names):
+        cur_site_mask = data_df.site == cur_site
+        cur_rup_group = data_df.loc[cur_site_mask].groupby("rupture").first()
+
+        for cur_metric in metrics:
+            _mag_rrup_metrics_plot(
+                output_dir,
+                cur_metric,
+                cur_site,
+                im,
+                metric_results,
+                model_names,
+                data_df.loc[cur_site_mask].rrup.values,
+                cur_rup_group.mag.values,
+                rrup_bins,
+                mag_bins,
+                prefix,
+                loc_name=cur_site_name
+            )
+
+
+def _mag_rrup_metrics_plot(
+    output_dir: Path,
+    metric: str,
+    loc: str,
+    im: str,
+    metric_results: Dict,
+    model_names: Sequence[str],
+    rrup_values: np.ndarray,
+    mag_values: np.ndarray,
+    rrup_bins: np.ndarray,
+    mag_bins: np.ndarray,
+    prefix: str,
+    loc_name: str = None
+):
+    loc_name = loc if loc_name is None else loc_name
+
+    YAXIS_LIMITS = dict(bias=(-1.0, 1.0), sigma=(0.0, 0.8))
+
+    mag_step = mag_bins[1] - mag_bins[0]
+    cur_mag_metric_keys = [
+        f"{metric}_mag_{cur_mag}_{cur_mag + mag_step}" for cur_mag in mag_bins
+    ]
+    rrup_step = rrup_bins[1] - rrup_bins[0]
+    cur_rrup_metric_keys = [
+        f"{metric}_rrup_{cur_rrup}_{cur_rrup + rrup_step}" for cur_rrup in rrup_bins
+    ]
+
+    model_colors = sns.color_palette("hls", len(model_names))
+    linewidth = 0.5
+
+    # Create the figure
+    fig = plt.figure(figsize=(16, 10))
+
+    ax_dict = fig.subplot_mosaic(
+        """
+        AB
+        CD
+        CD
+        CD
+        """
+    )
+
+    # Histogram of data in current basin
+    ax_dict["A"].hist(mag_values, bins=mag_bins, log=True)
+    ax_dict["A"].set_ylabel("Number of Ruptures")
+
+    ax_dict["B"].hist(rrup_values, bins=rrup_bins, log=True)
+    ax_dict["B"].set_ylabel("Number of Datapoints")
+
+    # Plot the models
+    for cur_model_name, cur_color in zip(model_names, model_colors):
+        cur_mag_data = pd.Series(
+            index=mag_bins + (mag_step / 2),
+            data=[
+                metric_results[cur_model_name][loc][im].get(cur_key, np.nan)
+                for cur_key in cur_mag_metric_keys
+            ],
+            name=metric,
+        )
+        cur_rrup_data = pd.Series(
+            index=rrup_bins + (rrup_step / 2),
+            data=[
+                metric_results[cur_model_name][loc][im].get(cur_key, np.nan)
+                for cur_key in cur_rrup_metric_keys
+            ],
+            name=metric,
+        )
+
+        ax_dict["C"].plot(
+            cur_mag_data.index.values,
+            cur_mag_data.values,
+            marker=".",
+            c=cur_color,
+            linewidth=linewidth,
+            label=cur_model_name,
+        )
+        ax_dict["D"].plot(
+            cur_rrup_data.index.values,
+            cur_rrup_data.values,
+            marker=".",
+            c=cur_color,
+            linewidth=linewidth,
+            label=cur_model_name,
+        )
+
+    # Magnitude plot settings
+    ax_dict["C"].set_xlabel(f"Magnitude")
+    ax_dict["C"].set_ylabel(eval.FANCY_METRICS[metric])
+    ax_dict["C"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax_dict["C"].set_ylim(YAXIS_LIMITS.get(metric, (None, None)))
+
+    ax_dict["A"].get_shared_x_axes().join(ax_dict["A"], ax_dict["C"])
+    ax_dict["A"].set_xticklabels([])
+
+    ax_dict["A"].set_xlim(3.4, 8.1)
+    ax_dict["C"].set_xlim(3.4, 8.1)
+
+    # Rrup plot settings
+    ax_dict["D"].set_xlabel("$R_{Rup}$")
+    ax_dict["D"].set_ylabel(eval.FANCY_METRICS[metric])
+    ax_dict["D"].grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax_dict["D"].set_ylim(YAXIS_LIMITS.get(metric, (None, None)))
+    ax_dict["D"].legend()
+
+    ax_dict["B"].set_xlim(0, 250)
+    ax_dict["D"].set_xlim(0, 250)
+
+    ax_dict["B"].get_shared_x_axes().join(ax_dict["B"], ax_dict["D"])
+    ax_dict["B"].set_xticklabels([])
+
+    fig.suptitle(loc_name)
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0)
+    fig.savefig(output_dir / f"{prefix}_{metric}_{loc}_{im.replace('.', 'p')}.png")
+
+    plt.close(fig)
 
 
 def gen_basin_metric_comp_matrix(
@@ -560,7 +688,7 @@ def gen_trend_plots(
     ims = list(ims)
 
     if feature == "rrup":
-        rrup_values = np.arange(5, 205, 5)
+        rrup_values = np.arange(5, 155, 5)
         dependent_feature_values = {
             cur_key: rrup_values for cur_key in ["rx", "ry", "rjb"]
         }
@@ -574,11 +702,11 @@ def gen_trend_plots(
             model_dirs,
             model_names,
             data_constraints=data_constraints if len(data_constraints) > 0 else None,
-            plt_kwargs=dict(linewidth=2.0),
+            plt_kwargs=dict(linewidth=1.0),
             add_Br13=True,
         )
     elif feature == "mag":
-        mag_values = np.arange(3, 8.6, 0.1)
+        mag_values = np.arange(3, 8.1, 0.1)
         trend_plots.gen_trend_plot(
             "mag",
             mag_values,
@@ -643,7 +771,13 @@ def gen_spatial_metric_plots(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the spatial metrics data
-    train_spatial_metrics, val_spatial_metrics = eval.load_spatial_metrics(model_dir)
+    train_metrics, train_weighted_metrics, val_metrics = eval.load_spatial_metrics(
+        model_dir
+    )
+
+    data_metrics_list = [(train_metrics, "train"),(val_metrics, "val")]
+    if train_weighted_metrics is not None:
+        data_metrics_list.append((train_weighted_metrics, "train_weighted"))
 
     async_results = []
     with mp.Pool(n_procs) as pool:
@@ -662,10 +796,7 @@ def gen_spatial_metric_plots(
                                 out_dir,
                                 cur_prefix,
                             )
-                            for cur_data, cur_prefix in [
-                                (train_spatial_metrics, "train"),
-                                (val_spatial_metrics, "val"),
-                            ]
+                            for cur_data, cur_prefix in data_metrics_list
                         ],
                     )
                 )
@@ -681,10 +812,7 @@ def gen_spatial_metric_plots(
                                 out_dir,
                                 cur_prefix,
                             )
-                            for cur_data, cur_prefix in [
-                                (train_spatial_metrics, "train"),
-                                (val_spatial_metrics, "val"),
-                            ]
+                            for cur_data, cur_prefix in data_metrics_list
                         ],
                     )
                 )
@@ -700,10 +828,7 @@ def gen_spatial_metric_plots(
                                 out_dir,
                                 cur_prefix,
                             )
-                            for cur_data, cur_prefix in [
-                                (train_spatial_metrics, "train"),
-                                (val_spatial_metrics, "val"),
-                            ]
+                            for cur_data, cur_prefix in data_metrics_list
                         ],
                     )
                 )
@@ -719,39 +844,34 @@ def gen_spatial_metric_plots(
                                 out_dir,
                                 cur_prefix,
                             )
-                            for cur_data, cur_prefix in [
-                                (train_spatial_metrics, "train"),
-                                (val_spatial_metrics, "val"),
-                            ]
+                            for cur_data, cur_prefix in data_metrics_list
                         ],
                     )
                 )
 
-            if "count" in metrics:
-                async_results.append(
-                    pool.starmap_async(
-                        _gen_count_plot,
-                        [
-                            (
-                                cur_data["count"].loc[:, data_columns],
-                                cur_im,
-                                out_dir,
-                                cur_prefix,
-                            )
-                            for cur_data, cur_prefix in [
-                                (train_spatial_metrics, "train"),
-                                (val_spatial_metrics, "val"),
-                            ]
-                        ],
-                    )
+        if "count" in metrics:
+            async_results.append(
+                pool.starmap_async(
+                    _gen_count_plot,
+                    [
+                        (
+                            cur_data["count"].loc[:, ["lat", "lon", "count"]],
+                            out_dir,
+                            cur_prefix,
+                        )
+                        for cur_data, cur_prefix in data_metrics_list
+                    ],
                 )
+            )
 
         # Wait for all processes to finish
         for cur_result in async_results:
             cur_result.wait()
 
 
-def gen_spatial_bias_plot(spatial_metrics: pd.DataFrame, cur_im: str, transparency: int =1.0):
+def gen_spatial_bias_plot(
+    spatial_metrics: pd.DataFrame, cur_im: str, transparency: int = 0.0
+):
 
     cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
 
@@ -794,8 +914,8 @@ def _gen_spatial_bias_plot(
 
     console.print(f"Saving {prefix} bias plot for {cur_im}")
     fig.savefig(
-        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_bias.png",
-        dpi=900,
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_bias.pdf",
+        dpi=400,
         anti_alias=True,
     )
 
@@ -814,7 +934,7 @@ def _gen_spatial_sigma_plot(
 
     fig = spatial_plotting.gen_region_fig(
         plotting_utils.get_im_name(cur_im)
-        + r" - Standard deviation of Residual, <math>\sigma_{\Delta}</math>"
+        + r" - Residual Standard deviation"
     )
     spatial_plotting.plot_grid(
         fig,
@@ -826,8 +946,8 @@ def _gen_spatial_sigma_plot(
     )
 
     fig.savefig(
-        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_sigma.png",
-        dpi=900,
+        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_sigma.pdf",
+        dpi=400,
         anti_alias=True,
     )
 
@@ -929,17 +1049,15 @@ def _gen_sum_squared_residual_plot(
     )
 
 
-def _gen_count_plot(
-    spatial_metrics: pd.DataFrame, cur_im: str, output_dir: Path, prefix: str
-):
+def _gen_count_plot(spatial_metrics: pd.DataFrame, output_dir: Path, prefix: str):
     # Have to do this so it works with MP
     # https://github.com/GenericMappingTools/pygmt/issues/217
     import pygmt
 
     reload(pygmt)
 
-    console.print(f"Generating {prefix} count plot for {cur_im}")
-    cur_grid = spatial_plotting.create_grid(spatial_metrics, cur_im)
+    console.print(f"Generating {prefix} count plot")
+    cur_grid = spatial_plotting.create_grid(spatial_metrics, "count")
 
     cb_max = float(np.round(np.nanquantile(cur_grid.values, 0.98), -1))
 
@@ -956,7 +1074,5 @@ def _gen_count_plot(
     )
 
     fig.savefig(
-        output_dir / f"{prefix}_{cur_im.replace('.', 'p')}_count.png",
-        dpi=900,
-        anti_alias=True,
+        output_dir / f"{prefix}_count.png", dpi=900, anti_alias=True,
     )

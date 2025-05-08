@@ -36,6 +36,7 @@ from .data import (
     load_feature_details,
     load_basin_stations,
     sel_rand_locations,
+    load_dataset_as_df,
 )
 from .directivity import (
     get_hypo_seg_ix,
@@ -60,7 +61,8 @@ from .eval import (
     tf_mse,
     compute_spatial_metrics,
     comp_train_val_spatial_metrics,
-    load_spatial_metrics
+    load_spatial_metrics,
+    run_model_mera,
 )
 from .plotting import *
 from .clustering import compute_clusters

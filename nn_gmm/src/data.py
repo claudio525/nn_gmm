@@ -1,6 +1,6 @@
 import pickle
 import time
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -94,6 +94,27 @@ def load_dataset(
     return ds
 
 
+def load_dataset_as_df(
+    data_dir: Path, columns: Sequence[str], feature_details: Dict = None
+):
+    """Loads the specified columns from the dataset as dataframe"""
+    if feature_details is None:
+        with (data_dir / "feature_details.pickle").open("rb") as f:
+            feature_details = pickle.load(f)
+
+    ds = load_dataset([data_dir], feature_details, 1_000_000, shuffle_buffer=None)
+
+    data = []
+    for cur_batch in ds.as_numpy_iterator():
+        cur_data = []
+        for cur_col in columns:
+            cur_data.append(cur_batch[cur_col][:, np.newaxis])
+
+        data.append(np.concatenate(cur_data, axis=1))
+
+    return pd.DataFrame(data=np.concatenate(data, axis=0), columns=columns)
+
+
 def load_tfrecord(record_ffp: str, data_details: Dict, batch_size: int = 10_000):
     """
     Loads a single tfrecord file as a dataframe
@@ -135,7 +156,10 @@ def load_tfrecord(record_ffp: str, data_details: Dict, batch_size: int = 10_000)
 
 
 def sel_rand_locations(
-    data_dirs: List[Path], feature_details: Dict, n_locs: int, shuffle_buffer: int = 5_000_000
+    data_dirs: List[Path],
+    feature_details: Dict,
+    n_locs: int,
+    shuffle_buffer: int = 5_000_000,
 ):
     """Selects a set of random locations specified data
 
@@ -162,7 +186,7 @@ def sel_rand_locations(
 def load_basin_stations(basin_dir: Path):
     basin_dict = {}
     for cur_ffp in basin_dir.glob("*.txt"):
-         basin_dict[cur_ffp.stem] = np.loadtxt(cur_ffp, dtype=str)
+        basin_dict[cur_ffp.stem] = np.loadtxt(cur_ffp, dtype=str)
 
     return basin_dict
 

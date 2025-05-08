@@ -5,6 +5,12 @@ metric:
   goal: minimize
 
 parameters:
+  hidden_layer_func:
+    values:
+      - relu
+      - selu
+      - elu
+      - tanh
   batch_size:
     values:
       - 4096
@@ -23,10 +29,6 @@ parameters:
       - 0.125
       - 0.15
       - 0.2
-  learning_rate:
-    values:
-      - 0.001
-      - 0.0001
   n_pre_units:
     values:
       - 8
@@ -34,6 +36,7 @@ parameters:
       - 32
       - 64
       - 128
+      - 256
   n_pre_layers:
     min: 1
     max: 4
@@ -44,6 +47,7 @@ parameters:
       - 32
       - 64
       - 128
+      - 256
   n_core_layers:
     min: 1
     max: 4
@@ -52,6 +56,7 @@ parameters:
       - 8
       - 16
       - 32
+      - 64
   n_out_layers:
     min: 0
     max: 3
@@ -60,12 +65,12 @@ command:
   - ${env}
   - ${interpreter}
   - ${program}
-  - "/home/cbs51/dev/work/data/nn_gmm/results/base_models/0708_084236_model-1_comp-delta-z1p0_hypocentre"
+  - "/home/cbs51/dev/work/data/nn_gmm/results/test/0819_100615_model_1"
   - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/tuning_configs/hyperparams_loc_config.yaml"
   - "--use-wandb"
   - "--use-sample-weights"
   - "--tags"
-  - "model-3-stage-2"
+  - "loc-residual"
   - "--delete"
   - "--no-eval"
   - ${args}

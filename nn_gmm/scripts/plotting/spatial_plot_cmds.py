@@ -75,7 +75,13 @@ def gen_cluster_bias_plot(
         console.print(f"Generating plot for {cur_im}")
         cur_clustering = clustering_results[cur_im]
 
-        fig = nn_gmm.gen_spatial_bias_plot(train_spatial_metrics["bias"] if not val_bias else val_spatial_metrics["bias"], cur_im, transparency=25)
+        fig = nn_gmm.gen_spatial_bias_plot(
+            train_spatial_metrics["bias"]
+            if not val_bias
+            else val_spatial_metrics["bias"],
+            cur_im,
+            transparency=25,
+        )
 
         # Plot the clustered stations
         pygmt.makecpt(
@@ -106,6 +112,91 @@ def gen_cluster_bias_plot(
 
         fig.savefig(
             output_dir / f"{prefix}_{cur_im}.png", dpi=900, anti_alias=True,
+        )
+
+
+@app.command("ds-plot")
+def gen_ds_plot(
+    ds_ffp: Path,
+    output_dir: Path,
+    map_data_ffp: Path = None,
+    incl_rec_prob: bool = False,
+):
+    ds_df = pd.read_csv(ds_ffp)
+
+    split_ids = np.stack(
+        np.char.split(ds_df.rupture_name.values.astype(str), "_", 2), axis=1
+    ).T
+    ds_df["lat"] = split_ids[:, 0]
+    ds_df["lon"] = split_ids[:, 1]
+
+    # Plotting data
+    map_data = nn_gmm.NZMapData.load(map_data_ffp) if map_data_ffp is not None else None
+
+    if incl_rec_prob:
+        sum_df = (
+            ds_df.groupby(["lat", "lon"])
+            .sum()
+            .reset_index()
+            .loc[:, ["lat", "lon", "annual_rec_prob"]]
+        )
+        sum_df = sum_df.rename(columns={"annual_rec_prob": "sum"})
+
+        cb_label = "Summed Reccurance Probability"
+        cmap_limits = (0, 0.005, 0.005 / 10)
+    else:
+        sum_df = (
+            ds_df.groupby(["lat", "lon"])
+            .count()
+            .reset_index()
+            .loc[:, ["lat", "lon", "mw"]]
+        )
+        sum_df = sum_df.rename(columns={"mw": "sum"})
+
+        cb_label = "Number of ruptures"
+        cmap_limits = (0, 120, 120 / 10)
+
+    fig = nn_gmm.gen_region_fig(
+        "Distributed Seismicity Sources",
+        "NZ",
+        map_data=map_data,
+        plot_topo=True,
+        plot_roads=False,
+        plot_highways=True,
+        plot_kwargs={"highway_pen_width": 0.1, "coastline_pen_width": 0.01},
+    )
+
+    pygmt.makecpt(
+        cmap="hot",
+        series=[cmap_limits[0], cmap_limits[1], cmap_limits[2]],
+        reverse=True,
+        log=False,
+    )
+    fig.plot(
+        x=sum_df.lon.values.astype(float),
+        y=sum_df.lat.values.astype(float),
+        style="c0.07c",
+        color=sum_df["sum"].values,
+        cmap=True,
+        transparency=10,
+        pen="0.1p,black",
+    )
+
+    phase = f"+{cmap_limits[0]}" if cmap_limits[0] > 0 else f"+{cmap_limits[1]}"
+    cb_frame = [f"a+{cmap_limits[2] * 2}{phase}f+{cmap_limits[2]}"]
+    if cb_label is not None:
+        cb_frame.append(f'x+l"{cb_label}"')
+    fig.colorbar(
+        cmap=True, frame=cb_frame,
+    )
+
+    if incl_rec_prob:
+        fig.savefig(
+            output_dir / f"ds_sources_sum.png", dpi=900, anti_alias=True,
+        )
+    else:
+        fig.savefig(
+            output_dir / f"ds_sources_count.png", dpi=900, anti_alias=True,
         )
 
 
@@ -205,6 +296,119 @@ def gen_spatial_metric_plots(
 
     nn_gmm.gen_spatial_metric_plots(model_dir, ims, metrics=metrics, n_procs=n_procs)
 
+
+@app.command("weight-maps")
+def gen_weight_maps(
+    output_dir: Path,
+    data_dir: Path,
+    weight_names: List[str],
+    nz_map_data_dir: Path = None,
+):
+    # Load the data
+    columns = list(weight_names) + ["site"]
+    data_df = nn_gmm.load_dataset_as_df(data_dir, columns + ["lon", "lat"])
+    data_df["site"] = data_df.site.str.decode("ascii")
+
+    # Group by site
+    sum_df = data_df.loc[:, columns].groupby("site").sum()
+    sum_df[["lon", "lat"]] = (
+        data_df.loc[:, ["lon", "lat", "site"]].groupby("site").first()
+    )
+
+    mean_df = data_df.loc[:, columns].groupby("site").mean()
+    mean_df[["lon", "lat"]] = (
+        data_df.loc[:, ["lon", "lat", "site"]].groupby("site").first()
+    )
+
+    nz_map_data = None
+
+    for cur_weight_name in weight_names:
+        console.print(f"Processing plot for {cur_weight_name}")
+
+        use_mean = cur_weight_name == "fault_density_weight"
+
+        cur_df, cur_prefix = sum_df, "Sum "
+        if use_mean:
+            cur_df, cur_prefix = mean_df, "Mean "
+
+        fig = nn_gmm.gen_region_fig(
+            title=f"{cur_prefix} {cur_weight_name}",
+            map_data=nz_map_data,
+            plot_roads=False,
+            plot_topo=False,
+        )
+
+        grid = nn_gmm.create_grid(cur_df, cur_weight_name)
+        cb_min, cb_max = (
+            0.0,
+            np.round(np.quantile(cur_df[cur_weight_name], 0.95), 4 if use_mean else 0),
+        )
+        nn_gmm.plot_grid(
+            fig,
+            grid,
+            "hot",
+            (
+                cb_min,
+                cb_max,
+                np.round(np.abs(cb_max - cb_min) / 15, 4 if use_mean else 0),
+            ),
+            ("white", "black"),
+            reverse_cmap=True,
+        )
+
+        console.print("Saving")
+        fig.savefig(
+            output_dir / f"{cur_weight_name}.png", dpi=900, anti_alias=True,
+        )
+
+
+@app.command("site-term")
+def gen_spatial_site_term_plot(
+    model_dir: Path,
+    site_params_ffp: Path,
+    map_data_ffp: Path = None,
+    ims: List[str] = None,
+    n_procs: int = 12,
+):
+    def _gen_fig(df: pd.DataFrame, im: str, prefix: str):
+        console.print(f"Processing {im}")
+        fig = nn_gmm.gen_region_fig("Site-Term", map_data=map_data)
+
+        grid = nn_gmm.create_grid(df, im)
+        nn_gmm.plot_grid(
+            fig,
+            grid,
+            "polar",
+            (-0.4, 0.4, 0.8 / 16),
+            ("darkred", "darkblue"),
+            reverse_cmap=True,
+            transparency=35 if map_data is not None else None,
+        )
+
+        fig.savefig(
+            output_dir / f"{prefix}_{im}.png", dpi=900, anti_alias=True,
+        )
+
+    ims = nn_gmm.GMM.load(model_dir).ims if len(ims) == 0 else list(ims)
+    output_dir = model_dir / "plots" / "spatial"
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Load the data
+    train_df = pd.read_csv(model_dir / "mera" / "train_site_res.csv", index_col=0)
+    val_df = pd.read_csv(model_dir / "mera" / "val_site_res.csv", index_col=0)
+    site_df = pd.read_csv(site_params_ffp, index_col=0)
+
+    train_df[["lat", "lon"]] = site_df.loc[train_df.index, ["lat", "lon"]]
+    val_df[["lat", "lon"]] = site_df.loc[val_df.index, ["lat", "lon"]]
+
+    # Load the map data if specified
+    map_data = nn_gmm.NZMapData.load(map_data_ffp) if map_data_ffp is not None else None
+
+    tasks = [
+        (train_df.loc[:, ["lat", "lon", cur_im]], cur_im, "train") for cur_im in ims
+    ] + [(val_df.loc[:, ["lat", "lon", cur_im]], cur_im, "val") for cur_im in ims]
+    with mp.Pool(n_procs) as p:
+        p.starmap(_gen_fig, tasks)
 
 @app.command("location-dependence")
 def gen_location_dependence_plot(

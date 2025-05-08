@@ -1,9 +1,12 @@
 import time
 from pathlib import Path
+
+import ml_tools.utils
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import matplotlib
 import pygmt
 import typer
 
@@ -27,6 +30,48 @@ MAG_SAMPLE_WEIGHT_THRESHOLD = 20.0
 
 RRUP_N_BINS = 20
 RRUP_SAMPLE_WEIGHT_THRESHOLD = 15.0
+
+RRUP_MAG_SAMPLE_WEIGHT_THRESHOLD = 200.0
+
+def mag_hist(mag_values: np.ndarray, weights: np.ndarray, output_ffp: Path):
+    fig = plt.figure(figsize=(20, 12))
+
+    ax_1 = fig.add_subplot(2, 1, 1)
+    ax_1.hist(mag_values, bins=25)
+    ax_1.set_title("Original")
+
+    ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
+    ax_3.hist(mag_values, weights=weights, bins=25)
+    ax_3.set_title("Weighted")
+
+    ax_3.set_xlabel(f"Magnitude")
+    ax_3.set_ylabel(f"Count")
+    ax_3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.subplots_adjust(hspace=0.0)
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close(fig)
+
+def rrup_hist(rrup_values: np.ndarray, weights: np.ndarray, output_ffp: Path):
+    fig = plt.figure(figsize=(20, 12))
+
+    ax_1 = fig.add_subplot(2, 1, 1)
+    ax_1.hist(rrup_values, bins=25)
+    ax_1.set_title("Original")
+
+    ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
+    ax_3.hist(rrup_values, weights=weights, bins=25)
+    ax_3.set_title("Weighted")
+
+    ax_3.set_xlabel(f"Rrup")
+    ax_3.set_ylabel(f"Count")
+    ax_3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.subplots_adjust(hspace=0.0)
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close(fig)
 
 
 def main(
@@ -98,6 +143,51 @@ def main(
     )
     sample_df.set_index("id", inplace=True)
 
+    print("Computing combined magnitude-rrup weighting")
+    sample_df["rrup_mag_weights"] = np.nan
+    mag_bins = np.linspace(sample_df.mag.min(), sample_df.mag.max(), MAG_N_BINS + 1)
+    rrup_bins = np.linspace(0.0, sample_df.rrup.max(), RRUP_N_BINS + 1)
+
+    prev_mag_edge, prev_rrup_edge = mag_bins[0], rrup_bins[0]
+    for cur_mag_edge in mag_bins[1:]:
+        for cur_rrup_edge in rrup_bins[1:]:
+            cur_mask = (sample_df.mag.values >= prev_mag_edge) & (sample_df.mag.values <= cur_mag_edge) & \
+                       (sample_df.rrup.values >= prev_rrup_edge) & (sample_df.rrup.values <= cur_rrup_edge)
+
+            if np.any(cur_mask):
+                sample_df.loc[cur_mask, "rrup_mag_weights"] = 1.0 / np.count_nonzero(cur_mask)
+
+            prev_rrup_edge = cur_rrup_edge
+
+        prev_rrup_edge = rrup_bins.min()
+        prev_mag_edge = cur_mag_edge
+
+    # Normalise
+    sample_df.rrup_mag_weights = sample_df.rrup_mag_weights * (sample_df.shape[0] / sample_df.rrup_mag_weights.sum())
+    sample_df.loc[sample_df.rrup_mag_weights > RRUP_MAG_SAMPLE_WEIGHT_THRESHOLD, "rrup_mag_weights"] = RRUP_MAG_SAMPLE_WEIGHT_THRESHOLD
+
+    # 2D Hist - Orig vs Weighted
+    fig = plt.figure(figsize=(16, 10))
+
+    ax = fig.add_subplot(2, 1, 1)
+    _, _, __, cb_map = ax.hist2d(sample_df.mag, sample_df.rrup, bins=(MAG_N_BINS, RRUP_N_BINS), norm=matplotlib.colors.LogNorm())
+    plt.colorbar(cb_map, ax=ax)
+    ax.set_ylabel(f"Rrup")
+
+    ax = fig.add_subplot(2, 1, 2, sharex=ax)
+    _, _, __, cb_map = ax.hist2d(sample_df.mag, sample_df.rrup, weights=sample_df.rrup_mag_weights, bins=(MAG_N_BINS, RRUP_N_BINS), norm=matplotlib.colors.LogNorm())
+    plt.colorbar(cb_map, ax=ax)
+
+    ax.set_xlabel(f"Magnitude")
+    ax.set_ylabel(f"Rrup")
+
+    fig.tight_layout()
+    fig.savefig(output_dir / "mag_rrup_2d_hist.png")
+
+    # Rrup and Magnitude histogram
+    mag_hist(sample_df.mag.values, sample_df.rrup_mag_weights.values, output_dir / f"rrup_mag_weights_mag_hist.png")
+    rrup_hist(sample_df.rrup.values, sample_df.rrup_mag_weights.values, output_dir / f"rrup_mag_weights_rrup_hist.png")
+
     # Compute magnitude sample bins
     print("Computing magnitude weighting")
     mag_count, mag_bins = np.histogram(sample_df.mag, bins=MAG_N_BINS)
@@ -129,24 +219,7 @@ def main(
     sample_df["mag_weights"] = mag_sample_weights
 
     # Create weighted magnitude histogram
-    fig = plt.figure(figsize=(20, 12))
-
-    ax_1 = fig.add_subplot(2, 1, 1)
-    ax_1.hist(sample_df.mag.values, bins=25)
-    ax_1.set_title("Original")
-
-    ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
-    ax_3.hist(sample_df.mag.values, weights=mag_sample_weights, bins=25)
-    ax_3.set_title("Weighted")
-
-    ax_3.set_xlabel(f"Magnitude")
-    ax_3.set_ylabel(f"Count")
-    ax_3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-    fig.subplots_adjust(hspace=0.0)
-    fig.tight_layout()
-    fig.savefig(output_dir / "mag_hist.png")
-    plt.close(fig)
+    mag_hist(sample_df.mag.values, sample_df.mag_weights.values, output_dir / "mag_weights_hist.png")
 
     # Compute rrup sample bins
     print("Computing Rrup sample weighting")
@@ -178,25 +251,8 @@ def main(
 
     sample_df["rrup_weights"] = rrup_sample_weights
 
-    # Create weighted rrup histogram
-    fig = plt.figure(figsize=(20, 12))
-
-    ax_1 = fig.add_subplot(2, 1, 1)
-    ax_1.hist(sample_df.rrup.values, bins=25)
-    ax_1.set_title("Original")
-
-    ax_3 = fig.add_subplot(2, 1, 2, sharex=ax_1)
-    ax_3.hist(sample_df.rrup.values, weights=rrup_sample_weights, bins=25)
-    ax_3.set_title("Weighted")
-
-    ax_3.set_xlabel(f"Magnitude")
-    ax_3.set_ylabel(f"Count")
-    ax_3.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-    fig.subplots_adjust(hspace=0.0)
-    fig.tight_layout()
-    fig.savefig(output_dir / "rrup_hist.png")
-    plt.close(fig)
+    # Rrup hist
+    rrup_hist(sample_df.rrup.values, sample_df.rrup_weights.values, output_dir / "rrup_weights_hist.png")
 
     print(f"Writing the results")
     sources = np.unique(sample_df.source.values.astype(str))
@@ -204,9 +260,16 @@ def main(
         for ix, cur_source in enumerate(sources):
             print(f"Processing {ix + 1}/{sources.size}")
             db[cur_source] = sample_df.loc[
-                sample_df.source == cur_source, ["mag_weights", "rrup_weights"]
+                sample_df.source == cur_source, ["mag_weights", "rrup_weights", "rrup_mag_weights"]
             ]
 
+    ml_tools.utils.write_to_yaml({
+        "MAG_N_BINS": MAG_N_BINS,
+        "MAG_SAMPLE_WEIGHT_THRESHOLD": MAG_SAMPLE_WEIGHT_THRESHOLD,
+        "RRUP_N_BINS": RRUP_N_BINS,
+        "RRUP_SAMPLE_WEIGHT_THRESHOLD": RRUP_SAMPLE_WEIGHT_THRESHOLD,
+        "RRUP_MAG_SAMPLE_WEIGHT_THRESHOLD": RRUP_MAG_SAMPLE_WEIGHT_THRESHOLD,
+    }, output_dir / "details.yaml")
 
 if __name__ == "__main__":
     typer.run(main)

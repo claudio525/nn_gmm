@@ -16,6 +16,14 @@ parameters:
       - 0.125
       - 0.15
       - 0.2
+  dropout:
+    values:
+      - 0.0
+      - 0.1
+      - 0.2
+      - 0.3
+      - 0.4
+      - 0.5
   n_units:
     values:
       - 8
@@ -23,9 +31,10 @@ parameters:
       - 32
       - 64
       - 128
+      - 256
   n_layers:
     min: 1
-    max: 4
+    max: 5
   n_out_units:
     values:
       - 8
@@ -35,19 +44,31 @@ parameters:
   n_out_layers:
     min: 0
     max: 3
+  batch_size:
+    values:
+      - 1024
+      - 4096
+      - 8192
+      - 16384
+  hidden_layer_func:
+    values:
+      - relu
+      - selu
+      - elu
+      - tanh
 
 command:
   - ${env}
   - ${interpreter}
   - ${program}
   - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/machine_config.yaml"
-  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/model_1_io_config.yaml"
-  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/tuning_configs/hyperparms_config.yaml"
-  - "fsmrwn"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/configs/model_1_comb_delta_z1p0_io_config.yaml"
+  - "/home/cbs51/dev/work/code/nn_gmm/nn_gmm/scripts/training/tuning_configs/hyperparams_config.yaml"
+  - "base_crmwn_2"
   - "--use-wandb"
   - "--use-sample-weights"
   - "--tags"
-  - "wither"
+  - "model_1"
   - "--delete"
   - "--no-eval"
   - ${args}

@@ -59,7 +59,9 @@ from qcore import constants
 #     return fig_dim
 #
 # fig_dim = set_size(345)
-fig_dim = (16, 10)
+# fig_dim = (16, 10)
+
+fig_dim = (8, 6)
 
 # Data config
 source_params_dir = Path("/home/claudy/dev/work/data/nn_gmm/input_data/source_rel_params")
@@ -68,7 +70,8 @@ site_params_dir = Path("/home/claudy/dev/work/data/nn_gmm/input_data/site_params
 distance_dir = Path("/home/claudy/dev/work/data/nn_gmm/input_data/distance_data")
 
 
-paper_plots_dir = Path("/home/claudy/dev/work/data/nn_gmm/results/keep/paper_plots")
+# paper_plots_dir = Path("/home/claudy/dev/work/data/nn_gmm/results/keep/paper_plots")
+paper_plots_dir = Path("/home/claudy/dev/work/tmp/paper_plots")
 
 # Load source params
 rel_df = nn_gmm.load_dfs(
@@ -94,7 +97,7 @@ print("")
 # ---------------------------------------------------
 
 # Source params plot
-fig = plt.figure(figsize=fig_dim, dpi=120)
+fig = plt.figure(figsize=fig_dim)
 
 # Magnitude
 ax = fig.add_subplot(1, 2, 1)
@@ -142,6 +145,7 @@ ax.set_xlim(-180, 180)
 
 fig.tight_layout()
 fig.savefig(paper_plots_dir / "mag_rake_dist.png", format="png", bbox_inches='tight')
+fig.savefig(paper_plots_dir / "mag_rake_dist.pdf", bbox_inches='tight')
 
 # ---------------------------------------------------
 
@@ -156,6 +160,7 @@ ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
 fig.tight_layout()
 fig.savefig(paper_plots_dir / "rrup.png", format="png", bbox_inches='tight')
+fig.savefig(paper_plots_dir / "rrup.pdf", bbox_inches='tight')
 
 # Log x-scale?
 # logbins = np.logspace(np.log10(10), np.log10(500), 25)
@@ -177,7 +182,7 @@ fig.savefig(paper_plots_dir / "rrup.png", format="png", bbox_inches='tight')
 
 
 # Site
-fig = plt.figure(figsize=(16, 10))
+fig = plt.figure(figsize=fig_dim)
 
 ax = fig.add_subplot(1, 2, 1)
 ax.hist(site_df.vs30, bins=25)
@@ -193,3 +198,4 @@ ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
 
 fig.tight_layout()
 fig.savefig(paper_plots_dir / "vs30_z1p0.png", format="png", bbox_inches='tight')
+fig.savefig(paper_plots_dir / "vs30_z1p0.pdf", bbox_inches='tight')

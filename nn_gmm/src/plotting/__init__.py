@@ -1,3 +1,4 @@
+
 from .TrendPlotGen import TrendPlotGen
 from .ResPlotGen import ResPlotGen
 from . import plotting_utils
@@ -12,6 +13,7 @@ from .eval_plots import (
     gen_basin_comp_mag_rrup_plots,
     loss_comp,
     gen_spatial_bias_plot,
+    gen_site_comp_mag_rrup_plots,
 )
 from .spatial_plotting import (
     plot_grid,
@@ -22,3 +24,6 @@ from .spatial_plotting import (
     faults_plot,
     im_plots,
 )
+
+
+

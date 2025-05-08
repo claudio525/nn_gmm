@@ -1,16 +1,17 @@
-hidden_layer_func: relu
-l2: 0.05
+hidden_layer_func: elu
+#hidden_layer_func: relu
+l2: 0.125
 #l2: null
 dropout: null
 
-n_pre_layers: 3
-n_pre_units: 8
+n_pre_layers: 4
+n_pre_units: 128
 
-n_core_layers: 2
-n_core_units: 16
+n_core_layers: 4
+n_core_units: 128
 
+n_out_layers: 2
 n_out_units: 16
-n_out_layers: 1
 
 batch_size: 4096
 shuffle_buffer_size: 5000000

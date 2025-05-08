@@ -33,38 +33,27 @@ from nn_gmm import console
 
 
 DATA_DIRS_LOOKUP = {
-    "base": {
-        "train_data_dirs": ["base_grid/train"],
-        "val_data_dirs": ["base_grid/val"],
-        "stats_df": "base_grid/train/stats.csv",
-    },
-    "base_fw": {
-        "train_data_dirs": ["base-grid_fault-weighted/train"],
-        "val_data_dirs": ["base-grid_fault-weighted/val"],
-        "stats_df": "base-grid_fault-weighted/train/stats.csv",
-    },
+    # Base, independent mag, rrup, fault density weighting (normalised)
     "base_mrfwn": {
         "train_data_dirs": ["base-grid-mag-rrup-fault-weighted_norm/train"],
         "val_data_dirs": ["base-grid-mag-rrup-fault-weighted_norm/val"],
         "stats_df": "base-grid-mag-rrup-fault-weighted_norm/train/stats.csv",
     },
-    # Fault station weighted normalised (with theta & s)
-    "fswn_old": {
-        "train_data_dirs": ["_fault_station_weighted_norm/train"],
-        "val_data_dirs": ["_fault_station_weighted_norm/val"],
-        "stats_df": "_fault_station_weighted_norm/train/stats.csv",
+    # Base, combined rrup-mag weighting (normalised)
+    "base_crmwn": {
+        "train_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm/train"],
+        "val_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm/val"],
+        "stats_df": "base_grid_comb_rrup_mag_weighted_norm/train/stats.csv",
     },
-    # Fault station weighted normalised
-    "fswn": {
-        "train_data_dirs": ["fault_station_weighted_norm/train"],
-        "val_data_dirs": ["fault_station_weighted_norm/val"],
-        "stats_df": "fault_station_weighted_norm/train/stats.csv",
+    "base_crmwn_2": {
+        "train_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm_2/train"],
+        "val_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm_2/val"],
+        "stats_df": "base_grid_comb_rrup_mag_weighted_norm_2/train/stats.csv",
     },
-    # Fault & Station & Magnitude & Rrup weighted normalised data
-    "fsmrwn": {
-        "train_data_dirs": ["fault_station_mag_rrup_weighted_norm/train"],
-        "val_data_dirs": ["fault_station_mag_rrup_weighted_norm/val"],
-        "stats_df": "fault_station_mag_rrup_weighted_norm/train/stats.csv",
+    "base_crmwn_3": {
+        "train_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm_3/train"],
+        "val_data_dirs": ["base_grid_comb_rrup_mag_weighted_norm_3/val"],
+        "stats_df": "base_grid_comb_rrup_mag_weighted_norm_3/train/stats.csv",
     },
 }
 
@@ -117,9 +106,6 @@ def run(
         config["feature_config"], stats_df
     )
     config["im_config"] = nn_gmm.convert_pre_config(config["im_config"], stats_df)
-
-    # if n_epochs is not None:
-    #     hyperparams["n_epochs"] = n_epochs
 
     if early_stopping:
         hyperparams["callbacks"] = [
@@ -177,8 +163,20 @@ def run(
     )
     output_dir = train_result.output_dir
 
+    best_epoch = np.argmin(train_result.loss_df.val_loss)
+    if use_wandb:
+        wandb.summary["best_epoch_loss"] = train_result.loss_df.iloc[best_epoch].loss
+        wandb.summary["best_epoch_val_loss"] = train_result.loss_df.iloc[
+            best_epoch
+        ].val_loss
+        wandb.summary["best_epoch_loss_diff"] = (
+            train_result.loss_df.iloc[best_epoch].val_loss
+            - train_result.loss_df.iloc[best_epoch].loss
+        )
+
     # Write predictions
     if eval:
+
         ims = list(io_config["im_config"].keys())
 
         start_time = time.time()
@@ -186,25 +184,26 @@ def run(
             Path(config["train_data_dirs"][0]).parent,
             output_dir,
             verbose=False,
-            batch_size=1_000_000,
+            batch_size=500_000,
         )
         console.print(f"Took {time.time() - start_time}s to get predictions")
 
-        # Print and compute general metrics
-        console.print("Computing general metrics")
-        train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(
-            output_dir, save=True, print_metrics=False
-        )
+        with tf.device("/cpu:0"):
+            # Print and compute general metrics
+            console.print("Computing general metrics")
+            train_metrics, val_metrics = nn_gmm.comp_train_val_metrics(
+                output_dir, save=True, print_metrics=False
+            )
 
-        # Print and compute basin metrics
-        console.print("Computing basin metrics")
-        train_basin_metrics, val_basin_metrics = nn_gmm.comp_train_val_basin_metrics(
-            output_dir, Path(config["basin_dir"]), save=True, print_metrics=False
-        )
+            # Print and compute basin metrics
+            console.print("Computing basin metrics")
+            train_basin_metrics, val_basin_metrics = nn_gmm.comp_train_val_basin_metrics(
+                output_dir, Path(config["basin_dir"]), save=True, print_metrics=False
+            )
 
-        # Compute spatial metrics
-        console.print("Computing spatial metrics")
-        nn_gmm.comp_train_val_spatial_metrics(output_dir, save=True)
+            # Compute spatial metrics
+            console.print("Computing spatial metrics")
+            nn_gmm.comp_train_val_spatial_metrics(output_dir, save=True)
 
         # Write metrics to wandb
         if use_wandb:
@@ -246,7 +245,10 @@ if __name__ == "__main__":
     hyper_parser = argparse.ArgumentParser()
     hyper_parser.add_argument("--n_epochs", type=int, default=-1)
     hyper_parser.add_argument(
-        "--hidden_layer_func", type=str, choices=["relu", "selu"], default="-1"
+        "--hidden_layer_func",
+        type=str,
+        choices=["relu", "selu", "elu", "tanh"],
+        default="-1",
     )
     hyper_parser.add_argument("--l2", type=float, default=-1)
     hyper_parser.add_argument("--batch_size", type=int, default=-1)
@@ -255,6 +257,7 @@ if __name__ == "__main__":
     hyper_parser.add_argument("--n_layers", type=int, default=-1)
     hyper_parser.add_argument("--n_out_units", type=int, default=-1)
     hyper_parser.add_argument("--n_out_layers", type=int, default=-1)
+    hyper_parser.add_argument("--dropout", type=float, default=-1)
 
     args, unknown_args = parser.parse_known_args()
 

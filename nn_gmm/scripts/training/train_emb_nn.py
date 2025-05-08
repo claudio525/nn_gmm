@@ -34,14 +34,14 @@ from nn_gmm import console
 
 
 def run(
-    base_model_dir: Path,
-    hyper_config_ffp: Path,
-    use_wandb: bool = False,
-    eval: bool = True,
-    tags: List[str] = None,
-    use_sample_weights: bool = False,
-    delete: bool = False,
-    args_hyperparams: Dict = None,
+        base_model_dir: Path,
+        hyper_config_ffp: Path,
+        use_wandb: bool = False,
+        eval: bool = True,
+        tags: List[str] = None,
+        use_sample_weights: bool = False,
+        delete: bool = False,
+        args_hyperparams: Dict = None,
 ):
     tags = list(tags) if tags is not None else []
 
@@ -67,10 +67,15 @@ def run(
 
     # Update config to be multi-input
     config["feature_config"] = {"inputs": config["feature_config"]}
-    config["feature_config"]["loc_inputs"] = nn_gmm.convert_pre_config(
-        {"X": "standard", "Y": "standard", "Z": "standard", "mag": "standard"},
+    config["feature_config"]["site_inputs"] = nn_gmm.convert_pre_config(
+        {"site": None},
         pd.read_csv(config["stats_df"], index_col="feature"),
     )
+    config["feature_config"]["meta_inputs"] = nn_gmm.convert_pre_config(
+        {"mag": "standard"},
+        pd.read_csv(config["stats_df"], index_col="feature"),
+    )
+
     config["multi_input"] = True
 
     if use_wandb:
@@ -78,8 +83,8 @@ def run(
         tags = tags + list(config["im_config"].keys()) + ["NN"]
 
         if (
-            "lat" in config["feature_config"].keys()
-            or "X" in config["feature_config"].keys()
+                "lat" in config["feature_config"].keys()
+                or "X" in config["feature_config"].keys()
         ):
             tags.append("location")
 
@@ -94,9 +99,20 @@ def run(
         wandb.config.config = config
 
         if "callbacks" in hyperparams.keys():
-            hyperparams["callbacks"].append(WandbCallback())
+            hyperparams["callbacks"].append(WandbCallback(save_model=False))
         else:
-            hyperparams["callbacks"] = [WandbCallback()]
+            hyperparams["callbacks"] = [WandbCallback(save_model=False)]
+
+    # Create site lookup
+    data_df = nn_gmm.load_dataset_as_df(Path(config["train_data_dirs"][0]), ["site"])
+
+    unique_sites = np.unique(data_df.site.values)
+    site_table = tf.lookup.StaticHashTable(
+        tf.lookup.KeyValueTensorInitializer(
+            unique_sites, tf.range(unique_sites.size, dtype=tf.int64)
+        ),
+        default_value=-1,
+    )
 
     # Create the model
     n_pre_layers = hyperparams["n_pre_layers"]
@@ -126,18 +142,22 @@ def run(
             cur_layer._name = f"{cur_layer.name}_base"
 
     # Add the pre location layers
-    x_loc = loc_input = keras.layers.Input(
-        len(config["feature_config"]["loc_inputs"]), name="loc_inputs"
+    x_sites = site_input = keras.layers.Input(
+        len(config["feature_config"]["site_inputs"]), name="site_inputs", dtype=tf.string
     )
-    for ix in range(n_pre_layers):
-        x_loc = mlt.hidden_layers.relu(x_loc, n_pre_units, name=f"loc_pre_dense_{ix}")
+    x_site_ind = keras.layers.Lambda(lambda sites: site_table.lookup(sites))(x_sites)
+    x_emb = keras.layers.Embedding(input_dim=unique_sites.size, output_dim=4)(x_site_ind)
+    x_emb = keras.layers.Flatten()(x_emb)
+
+    # for ix in range(n_pre_layers):
+    #     x_emb = mlt.hidden_layers.relu(x_emb, n_pre_units, name=f"loc_pre_dense_{ix}")
 
     # No core layers
     if n_core_layers == 0:
         outputs = []
         for cur_base_out in base_model.outputs:
             # Hydra layers
-            cur_x = keras.layers.Concatenate()([cur_base_out, x_loc])
+            cur_x = keras.layers.Concatenate()([cur_base_out, x_emb])
             if n_out_layers > 0:
                 for ix in range(n_out_layers):
                     cur_x = mlt.hidden_layers.relu(
@@ -155,7 +175,7 @@ def run(
         x_base_output = keras.layers.Concatenate()(base_model.outputs)
 
         # Concatenate
-        x = keras.layers.Concatenate()([x_loc, x_base_output])
+        x = keras.layers.Concatenate()([x_emb, x_base_output])
 
         # Core layers
         for ix in range(n_core_layers):
@@ -175,7 +195,7 @@ def run(
                 keras.layers.Dense(1, activation=None, name=f"{cur_im}")(cur_x)
             )
 
-    model = keras.Model(inputs=[loc_input, base_model.input], outputs=outputs)
+    model = keras.Model(inputs=[site_input, base_model.input], outputs=outputs)
 
     # Get the loss function
     hyperparams["loss"] = nn_gmm.get_loss_function(hyperparams)
@@ -191,20 +211,8 @@ def run(
     )
     output_dir = train_result.output_dir
 
-    best_epoch = np.argmin(train_result.loss_df.val_loss)
-    if use_wandb:
-        wandb.summary["best_epoch_loss"] = train_result.loss_df.iloc[best_epoch].loss
-        wandb.summary["best_epoch_val_loss"] = train_result.loss_df.iloc[
-            best_epoch
-        ].val_loss
-        wandb.summary["best_epoch_loss_diff"] = (
-            train_result.loss_df.iloc[best_epoch].val_loss
-            - train_result.loss_df.iloc[best_epoch].loss
-        )
-
     # Write predictions
     if eval:
-
         ims = list(config["im_config"].keys())
 
         start_time = time.time()
@@ -212,7 +220,7 @@ def run(
             Path(config["train_data_dirs"][0]).parent,
             output_dir,
             verbose=False,
-            batch_size=500_000,
+            batch_size=1_000_000,
         )
         console.print(f"Took {time.time() - start_time}s to get predictions")
 
@@ -265,10 +273,7 @@ if __name__ == "__main__":
     hyper_parser = argparse.ArgumentParser()
     hyper_parser.add_argument("--n_epochs", type=int, default=-1)
     hyper_parser.add_argument(
-        "--hidden_layer_func",
-        type=str,
-        choices=["relu", "selu", "tanh", "elu"],
-        default="-1",
+        "--hidden_layer_func", type=str, choices=["relu", "selu"], default="-1"
     )
     hyper_parser.add_argument("--l2", type=float, default=-1)
     hyper_parser.add_argument("--batch_size", type=int, default=-1)
@@ -287,7 +292,7 @@ if __name__ == "__main__":
         cur_key: cur_item
         for cur_key, cur_item in vars(hyper_args).items()
         if (isinstance(cur_item, str) and cur_item != "-1")
-        or (isinstance(cur_item, (int, float)) and int(cur_item) != -1)
+           or (isinstance(cur_item, (int, float)) and int(cur_item) != -1)
     }
 
     run(

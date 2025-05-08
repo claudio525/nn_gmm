@@ -13,58 +13,43 @@ from empirical.util import openquake_wrapper_vectorized as oqw
 
 app = typer.Typer()
 
-# PERIODS = [
-#     0.01,
-#     0.02,
-#     0.03,
-#     0.04,
-#     0.05,
-#     0.075,
-#     0.1,
-#     0.12,
-#     0.15,
-#     0.17,
-#     0.2,
-#     0.25,
-#     0.3,
-#     0.4,
-#     0.5,
-#     0.6,
-#     0.7,
-#     0.75,
-#     0.8,
-#     0.9,
-#     1.0,
-#     1.25,
-#     1.5,
-#     2.0,
-#     2.5,
-#     3.0,
-#     4.0,
-#     5.0,
-#     6.0,
-#     7.5,
-#     10.0,
-# ]
-
 PERIODS = [
-    1.0, 3.0, 5.0, 10.0
+    0.01,
+    0.02,
+    0.03,
+    0.04,
+    0.05,
+    0.075,
+    0.1,
+    0.12,
+    0.15,
+    0.17,
+    0.2,
+    0.25,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.75,
+    0.8,
+    0.9,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    7.5,
+    10.0,
 ]
 
-
-# def _get_source_max_dist(db_ffp: Path, distance_df: pandas.DataFrame, source: str):
-#     with pd.HDFStore(str(db_ffp), "r") as db:
-#         source_key = f"/{source}"
-#         im_data = db[source_key]
-#         im_data["site"] = np.stack(
-#             np.char.rsplit(im_data.index.values.astype(str), "_", maxsplit=1), axis=0
-#         )[:, -1]
-#
-#         cur_max_dist = distance_df.loc[
-#             nn_gmm.pandas_isin(distance_df.site, im_data.site)
-#         ].rjb.max()
-#
-#         return source, cur_max_dist
+# PERIODS = [
+#     1.0, 3.0, 5.0, 10.0
+# ]
 
 
 def _get_source_sites(db_ffp: Path, source: str, valid_sites: np.ndarray):
@@ -79,6 +64,7 @@ def _get_source_sites(db_ffp: Path, source: str, valid_sites: np.ndarray):
         sites = sites[nn_gmm.pandas_isin(sites, valid_sites)]
 
         return sites
+
 
 
 @app.command("br13-predictions")
@@ -153,7 +139,7 @@ def gen_br13_predictions(
 
     console.print("Computing results")
     results = []
-    for ix, cur_site in enumerate(site_df.index.values[:2]):
+    for ix, cur_site in enumerate(site_df.index.values):
         console.print(f"Processing site {cur_site}, {ix}/{site_df.shape[0]}")
 
         # Create dataframe for current site
@@ -232,25 +218,30 @@ def gen_br13_predictions(
         results.append(cur_result_df)
 
     results_df = pd.concat(results, axis=0)
-
     ims = [f"pSA_{cur_period}" for cur_period in PERIODS] + ["PGA", "PGV"]
-    train_db_path = Path(
-        "/home/claudy/dev/work/data/nn_gmm/results/br13_results/_train_predictions.hdf5"
-    )
-    val_db_path = Path(
-        "/home/claudy/dev/work/data/nn_gmm/results/br13_results/_val_predictions.hdf5"
-    )
-    val_df = nn_gmm.ResultDB.get_data_static(
-        val_db_path, columns=[f"{im}_est" for im in ims] + ["site", "fault", "rupture", "lat", "lon"]
-    )
-    train_df = nn_gmm.ResultDB.get_data_static(
-        train_db_path, columns=[f"{im}_est" for im in ims] + ["site", "fault", "rupture", "lat", "lon"]
-    )
-    results_df = pd.concat([train_df, val_df], axis=0)
-    del val_df, train_df
-    print(results_df.dtypes)
 
-    print("wtf")
+    # Get the simulation IM values
+    # train_db_path = Path(
+    #     "/home/claudy/dev/work/data/nn_gmm/results/keep_runs/20220830_model_1_tuning/0830_100143_base/train_predictions.hdf5"
+    # )
+    # val_db_path = Path(
+    #     "/home/claudy/dev/work/data/nn_gmm/results/keep_runs/20220830_model_1_tuning/0830_100143_base/val_predictions.hdf5"
+    # )
+    # val_df = nn_gmm.ResultDB.get_data_static(
+    #     val_db_path, columns=ims
+    # )
+    # train_df = nn_gmm.ResultDB.get_data_static(
+    #     train_db_path, columns=ims
+    # )
+    #
+    # val_df = val_df.merge(results_df, how="left", left_index=True, right_index=True)
+    # train_df = train_df.merge(results_df, how="left", left_index=True, right_index=True)
+
+    # print("wtf")
+    # results_df = pd.concat([train_df, val_df], axis=0)
+    # del val_df, train_df
+    # print(results_df.dtypes)
+
     feature_details = nn_gmm.load_feature_details(train_data_dir / "train")
     for ix, cur_source in enumerate(site_source_lookup.index.values):
         print(f"{ix}/{site_source_lookup.shape[0]}")

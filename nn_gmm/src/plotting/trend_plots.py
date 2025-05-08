@@ -137,7 +137,7 @@ def gen_trend_plot(
 
     # Generate the plots
     for im in ims:
-        fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
+        fig, ax = plt.subplots(figsize=plt_utils.FIGSIZE)
 
         _plot_models(
             ax,
@@ -156,6 +156,7 @@ def gen_trend_plot(
             alpha=0.3,
             marker="o",
             c="gray",
+            s=10.0
         )
         ax.scatter(
             val_data.loc[val_data_mask, feature].values,
@@ -163,6 +164,7 @@ def gen_trend_plot(
             alpha=0.3,
             marker="x",
             c="c",
+            s=10.0
         )
 
         # Add constraint text
@@ -208,13 +210,13 @@ def gen_trend_plot(
 
         ax.set_xlabel(plt_utils.get_feature_name(feature))
         ax.set_ylabel(plt_utils.get_im_name(im))
-        ax.legend()
+        # ax.legend()
         ax.grid(linestyle="--", linewidth=0.5, alpha=0.5, which="both")
 
         ax.set_xlim(feature_values.min(), feature_values.max())
 
         fig.tight_layout()
-        fig.savefig(output_dir / f"{im.replace('.', 'p')}_{feature}_trend.png")
+        fig.savefig(output_dir / f"{im.replace('.', 'p')}_{feature}_trend.pdf")
 
         plt.close(fig)
     del train_data, val_data

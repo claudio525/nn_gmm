@@ -1,3 +1,4 @@
+import os
 from typing import Tuple, Iterable, Callable, Dict, List, Any, Union
 from pathlib import Path
 
@@ -7,9 +8,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from nn_gmm.src.model import NeuralNetworkGMM
-from nn_gmm.src import utils
-from nn_gmm.src import data
+
+FIGSIZE = (16, 10)
+if (env_figsize := os.environ.get("figsize")) is not None:
+    FIGSIZE = [float(x) for x in env_figsize.split(",")]
+
 
 FEATUER_NAME_LOOKUP = {
     "rrup": r"$R_{Rup}$",

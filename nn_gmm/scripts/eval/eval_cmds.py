@@ -1,4 +1,7 @@
+import os
 import gc
+import time
+
 import psutil
 from typing import Sequence, List, Optional
 from pathlib import Path
@@ -10,6 +13,8 @@ import typer
 import tensorflow as tf
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+from mera.mera_pymer4 import run_mera
 
 # Grow the GPU memory usage as needed
 gpus = tf.config.experimental.list_physical_devices("GPU")
@@ -52,9 +57,19 @@ def train_val_basin_metrics(
 
 
 @app.command("spatial-metrics")
-def train_val_spatial_metrics(model_dir: Path, ims: List[str] = None, save: bool = True):
+def train_val_spatial_metrics(
+    model_dir: Path,
+    ims: List[str] = None,
+    save: bool = True,
+    use_sample_weights: bool = False,
+):
     """Computes training & validation metrics"""
-    nn_gmm.comp_train_val_spatial_metrics(model_dir, ims=None if len(ims) == 0 else ims, save=save)
+    nn_gmm.comp_train_val_spatial_metrics(
+        model_dir,
+        ims=None if len(ims) == 0 else ims,
+        save=save,
+        use_sample_weights=use_sample_weights,
+    )
 
 
 @app.command("rrup-bin")
@@ -174,14 +189,31 @@ def trend_plot_rrup_multi_combo(
 
 
 @app.command("residuals")
-def residual_plots(model_dir: Path, ims: List[str] = None):
-    """Generates spectral residual plots"""
-    nn_gmm.gen_residual_plots(model_dir, None if len(ims) == 0 else list(ims))
+def residual_plots(
+    model_dir: Path,
+    ims: List[str] = None,
+    sites: List[str] = None,
+    site_names: List[str] = None,
+):
+    """Generates residual plots"""
+    if len(sites) > 0:
+        if len(site_names) > 0:
+            sites = {
+                cur_name: cur_site for cur_site, cur_name in zip(sites, site_names)
+            }
+        else:
+            sites = {cur_site: cur_site for cur_site in sites}
+    else:
+        sites = None
+
+    nn_gmm.gen_residual_plots(
+        model_dir, None if len(ims) == 0 else list(ims), sites=sites,
+    )
 
 
 @app.command("spec-comp-bias-std")
 def compare_spec_bias_std(
-    output_ffp: Path, model_dirs: List[Path], val_only: bool = False
+    output_dir: Path, model_dirs: List[Path], val_only: bool = False
 ):
     """Generates a spectral bias/std plot for all given models"""
     db_ffps = [cur_model_dir / "val_predictions.hdf5" for cur_model_dir in model_dirs]
@@ -190,10 +222,227 @@ def compare_spec_bias_std(
             cur_model_dir / "train_predictions.hdf5" for cur_model_dir in model_dirs
         ]
 
-    ims = [im for im in nn_gmm.GMM.load(model_dirs[0]).ims if im.startswith("pSA") or im == "PGA"]
+    ims = [
+        im
+        for im in nn_gmm.GMM.load(model_dirs[0]).ims
+        if im.startswith("pSA") or im == "PGA"
+    ]
 
     res_plot_gen = nn_gmm.ResPlotGen()
-    res_plot_gen.gen_spectral_bias_std_plot(db_ffps, ims, output_ffp)
+    res_plot_gen.gen_spectral_bias_std_plot(
+        db_ffps, ims, output_dir / f"spec_bias_std.pdf"
+    )
+    # res_plot_gen.gen_binned_spectral_bias_std_plot(db_ffps, ims, output_dir)
+
+
+@app.command("mixed-effects-analysis")
+def comp_mera_data(model_dir: Path, source_rel_params_dir: Path, ims: List[str] = None):
+    """
+    Run mixed effects regression analysis for
+    the given model for both training and validation dataset.
+
+    Note: For training, only a subset of ruptures is used, due to
+    data size limitations of the lmer algorithm
+    """
+    out_dir = Path(model_dir / "mera")
+    out_dir.mkdir(exist_ok=True)
+
+    ims = nn_gmm.GMM.load(model_dir).ims if len(ims) == 0 else list(ims)
+    im_est = list(np.char.add(ims, "_est"))
+    columns = ims + im_est + ["site", "rupture"]
+
+    # Training data
+    train_data_df = nn_gmm.ResultDB.get_data_static(
+        model_dir / "train_predictions.hdf5", columns + ["fault"],
+    )
+
+    # For CS sources, only use 3 realisations (min, median, max magnitude)
+    # as lmer can't handle a large number of records
+    cs_ruptures = pd.read_csv(
+        source_rel_params_dir / "cybershake_v20p4_200.csv", index_col=0
+    )
+    cs_ruptures["fault"] = np.stack(
+        np.char.rsplit(cs_ruptures.index.values.astype(str), "_", maxsplit=1), axis=0
+    )[:, 0]
+
+    sel_ruptures = []
+
+    for cur_fault in np.unique(cs_ruptures.fault):
+        cur_mask = cs_ruptures.fault == cur_fault
+
+        cur_mags = np.sort(np.unique(cs_ruptures.loc[cur_mask].mag))
+        sel_mag = cur_mags[int(np.ceil(cur_mags.size / 2))]
+
+        sel_ruptures.append((cs_ruptures.loc[cur_mask].mag == sel_mag).idxmax())
+        sel_ruptures.append((cs_ruptures.loc[cur_mask].mag == cur_mags.min()).idxmax())
+        sel_ruptures.append((cs_ruptures.loc[cur_mask].mag == cur_mags.max()).idxmax())
+
+    cs_ruptures_mask = nn_gmm.pandas_isin(train_data_df.rupture, sel_ruptures)
+    hist_ruptures_mask = ~nn_gmm.pandas_isin(
+        train_data_df.rupture, cs_ruptures.index.values.astype(str)
+    )
+
+    train_data_df = train_data_df.loc[cs_ruptures_mask | hist_ruptures_mask]
+
+    train_res_df = pd.DataFrame(
+        columns=ims,
+        data=train_data_df.loc[:, ims].values - train_data_df.loc[:, im_est].values,
+        index=train_data_df.index.values,
+    )
+    train_res_df[["site", "rupture"]] = train_data_df[["site", "rupture"]]
+
+    (
+        train_event_res_df,
+        train_site_res_df,
+        train_rem_res_df,
+        train_bias_std_df,
+    ) = run_mera(train_res_df, ims, "rupture", "site")
+
+    # Save
+    train_event_res_df.to_csv(out_dir / "train_event_res.csv")
+    train_site_res_df.to_csv(out_dir / "train_site_res.csv")
+    train_rem_res_df.to_csv(out_dir / "train_rem_res.csv")
+    train_bias_std_df.to_csv(out_dir / "train_bias_std.csv")
+
+    # Validation data
+    val_data_df = nn_gmm.ResultDB.get_data_static(
+        model_dir / "val_predictions.hdf5", columns + ["fault"],
+    )
+
+    val_res_df = pd.DataFrame(
+        columns=ims,
+        data=val_data_df.loc[:, ims].values - val_data_df.loc[:, im_est].values,
+        index=val_data_df.index.values,
+    )
+    val_res_df[["site", "rupture"]] = val_data_df[["site", "rupture"]]
+
+    val_event_res_df, val_site_res_df, val_rem_res_df, val_bias_std_df = run_mera(
+        val_res_df, ims, "rupture", "site"
+    )
+
+    # Save
+    val_event_res_df.to_csv(out_dir / "val_event_res.csv")
+    val_site_res_df.to_csv(out_dir / "val_site_res.csv")
+    val_rem_res_df.to_csv(out_dir / "val_rem_res.csv")
+    val_bias_std_df.to_csv(out_dir / "val_bias_std.csv")
+
+
+@app.command("between-event-residual-dist")
+def event_residual_dist(model_dir: Path, output_dir: Path, ims: List[str] = None):
+    ims = nn_gmm.GMM.load(model_dir).ims if len(ims) == 0 else list(ims)
+
+    # Load the data
+    cur_train_df = pd.read_csv(model_dir / "mera" / f"train_event_res.csv", index_col=0)
+    cur_val_df = pd.read_csv(model_dir / "mera" / f"val_event_res.csv", index_col=0)
+
+    for cur_im in ims:
+        fig = plt.figure(figsize=(16, 10))
+
+        ax = fig.add_subplot(1, 2, 1)
+        ax.hist(cur_train_df[cur_im], bins=25)
+        ax.set_title("Training")
+        ax.set_ylabel("Count")
+        ax.set_xlabel(r"Between-event residual, $\delta B$")
+        ax.set_xlim(-1.0, 1.0)
+        ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+
+        ax = fig.add_subplot(1, 2, 2, sharey=ax)
+        ax.hist(cur_val_df[cur_im], bins=25)
+        ax.set_title("Validation")
+        ax.set_ylabel("Count")
+        ax.set_xlabel(r"Between-event residual, $\delta B$")
+        ax.set_xlim(-1.0, 1.0)
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        fig.tight_layout()
+        fig.suptitle(cur_im)
+
+        fig.savefig(output_dir / f"{cur_im.replace('.', 'p')}_event_residual_dist.png")
+
+
+@app.command("comp-between-event-std")
+def comp_event_std(output_ffp: Path, model_dirs: List[Path]):
+    fig = plt.figure(figsize=(16, 10))
+    ax = fig.add_subplot()
+
+    # Setup run colours
+    run_ids = np.unique([cur_model_dir.stem for cur_model_dir in model_dirs])
+    run_colours = [cur_color for cur_color in sns.color_palette("tab10", n_colors=len(run_ids))]
+
+    # Populate plot
+    for cur_model_dir, cur_c in zip(model_dirs, run_colours):
+        # Load the data
+        cur_train_df = pd.read_csv(cur_model_dir / "mera" / f"train_event_res.csv", index_col=0)
+        cur_val_df = pd.read_csv(cur_model_dir / "mera" / f"val_event_res.csv", index_col=0)
+
+        cur_cols = np.asarray([cur_col for cur_col in cur_train_df.columns if cur_col.startswith("pSA")])
+        cur_periods = np.asarray([float(cur_col.split("_")[-1].replace("p", ".")) for cur_col in cur_cols])
+
+        # Sort by period
+        sort_ind = np.argsort(cur_periods)
+        cur_cols = cur_cols[sort_ind]
+        cur_periods = cur_periods[sort_ind]
+
+        # Compute and plot
+        cur_train_std = cur_train_df.std()
+        cur_val_df = cur_val_df.std()
+
+        ax.plot(cur_periods, cur_train_std.loc[cur_cols], c=cur_c, linestyle="-", linewidth=0.75, label=cur_model_dir.stem)
+        ax.plot(cur_periods, cur_val_df.loc[cur_cols], c=cur_c, linestyle="--", linewidth=0.75)
+
+    ax.semilogx()
+    ax.legend()
+    ax.set_xlabel(f"Period, T (s)")
+    ax.set_ylabel(r"Between-event residual, $\delta B$")
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_ylim(0.0, 0.4)
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+
+@app.command("comp-between-event-residual")
+def comp_event_residual(output_ffp: Path, model_dirs: List[Path], val: bool = False):
+    prefix = "val" if val else "train"
+
+    fig = plt.figure(figsize=(16, 10))
+    ax = fig.add_subplot()
+
+    # Setup run colours
+    run_ids = np.unique([cur_model_dir.stem for cur_model_dir in model_dirs])
+    run_colours = [cur_color for cur_color in sns.color_palette("tab10", n_colors=len(run_ids))]
+
+    # Populate plot
+    for cur_model_dir, cur_c in zip(model_dirs, run_colours):
+        # Load the data
+        cur_df = pd.read_csv(cur_model_dir / "mera" / f"{prefix}_event_res.csv", index_col=0)
+
+        cur_cols = np.asarray([cur_col for cur_col in cur_df.columns if cur_col.startswith("pSA")])
+        cur_periods = np.asarray([float(cur_col.split("_")[-1].replace("p", ".")) for cur_col in cur_cols])
+
+        # Sort by period
+        sort_ind = np.argsort(cur_periods)
+        cur_cols = cur_cols[sort_ind]
+        cur_periods = cur_periods[sort_ind]
+
+        # Compute & Plot
+        cur_mean_values = cur_df.mean().loc[cur_cols]
+
+        cur_std_values = cur_df.std().loc[cur_cols]
+        cur_above = cur_mean_values + cur_std_values
+        cur_below = cur_mean_values - cur_std_values
+
+        ax.plot(cur_periods, cur_mean_values, c=cur_c, linestyle="-", label=cur_model_dir.stem, linewidth=0.75)
+        ax.plot(cur_periods, cur_above, c=cur_c, linestyle="--", linewidth=0.75)
+        ax.plot(cur_periods, cur_below, c=cur_c, linestyle="--" , linewidth=0.75)
+
+    ax.semilogx()
+    ax.legend()
+    ax.set_xlabel(f"Period")
+    ax.set_ylabel(r"Between-event residual, $\delta B$")
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
 
 
 @app.command("spec-comp-basin-bias-std")
@@ -244,12 +493,12 @@ def compare_basin_metrics_mag_rrup(
         ..., help="Directories of the models to compare"
     ),
     im: str = typer.Argument(...),
-    metrics: List[str] = typer.Option(..., help="Metrics to compare"),
-    regions: List[str] = typer.Option(..., help="Region/Basins to compare"),
+    output_dir: Path = typer.Argument(...),
     basin_dir: Path = typer.Argument(
         ..., help="Directorie that contains the basin definitions"
     ),
-    output_dir: Path = typer.Argument(...),
+    metrics: List[str] = typer.Option(..., help="Metrics to compare"),
+    regions: List[str] = typer.Option(..., help="Region/Basins to compare"),
     model_names: List[str] = typer.Option(
         None,
         help="Name of the models to use on the plot\n"
@@ -268,6 +517,40 @@ def compare_basin_metrics_mag_rrup(
         basin_dir,
         output_dir,
         model_names=model_names,
+        val=val,
+    )
+
+
+@app.command("comp-site-metrics-rrup-mag")
+def compare_site_metrics_mag_rrup(
+    model_dirs: List[Path] = typer.Argument(
+        ..., help="Directories of the models to compare"
+    ),
+    im: str = typer.Argument(...),
+    output_dir: Path = typer.Argument(...),
+    metrics: List[str] = typer.Option(..., help="Metrics to compare"),
+    sites: List[str] = typer.Option(..., help="Sites to compare"),
+    model_names: List[str] = typer.Option(
+        None,
+        help="Name of the models to use on the plot\n"
+        "Has to be in the same order as model_dirs",
+    ),
+    val: bool = typer.Option(False, help="Generate for validation data"),
+    site_names: List[str] = typer.Option(
+        None, help="Name of the sites\n " "Has to be in the same order as sites"
+    ),
+):
+    """Creates a figure for each metric-site pair,
+    showing the metrics trend (wrt. Magnitude and Rrup)
+    for the sites"""
+    nn_gmm.gen_site_comp_mag_rrup_plots(
+        model_dirs,
+        im,
+        metrics,
+        sites,
+        output_dir,
+        model_names=model_names if len(model_names) > 0 else None,
+        site_names=site_names if len(site_names) > 0 else None,
         val=val,
     )
 

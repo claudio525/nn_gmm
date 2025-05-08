@@ -9,7 +9,7 @@ feature_config:
         rjb: standard
         rx: standard
         vs30: standard
-        delta_z1p0: standard
+        z1p0: standard
         z2p5: standard
 
         active_shallow: null

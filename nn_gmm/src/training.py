@@ -142,6 +142,7 @@ def train_ds_nn(
     verbose: int = 2,
     as_dict: bool = False,
     output_dir: Path = None,
+    loss_weights: Dict = None,
 ) -> TrainingResult:
     """
     Runs the training based on the specified configs
@@ -252,7 +253,7 @@ def train_ds_nn(
     val_ds = val_ds.prefetch(tf.data.experimental.AUTOTUNE)
 
     train_result = run_training(
-        model, train_ds, val_ds, config, hyperparams, output_dir, verbose=verbose
+        model, train_ds, val_ds, config, hyperparams, output_dir, verbose=verbose, loss_weights=loss_weights
     )
 
     return train_result
@@ -266,12 +267,13 @@ def run_training(
     hyperparams: Dict,
     output_dir: Path,
     verbose: int = 2,
+    loss_weights: Dict = None,
 ):
     """Runs the model training"""
 
     # Compile the model
     model.compile(
-        optimizer=hyperparams["optimizer"], loss=hyperparams["loss"], run_eagerly=True,
+        optimizer=hyperparams["optimizer"], loss=hyperparams["loss"], run_eagerly=False, loss_weights=loss_weights
     )
 
     # Model architecture summary

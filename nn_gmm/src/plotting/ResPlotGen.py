@@ -16,7 +16,7 @@ from nn_gmm.src.model import GMM
 from nn_gmm.src.ResultDB import ResultDB
 from . import plotting_funcs as plt_funcs
 from . import plotting_utils as plt_utils
-from nn_gmm.src.console import console
+
 
 
 class ResPlotGen:
@@ -178,6 +178,153 @@ class ResPlotGen:
         fig.tight_layout()
         fig.savefig(output_ffp)
 
+    def gen_binned_spectral_bias_std_plot(self, db_ffps: Sequence[Path], ims: Sequence[str], output_dir: Path):
+        """Creates a figure with two plots:
+        - pSA period vs Bias
+        - pSA period vs Std
+
+        for each rrup/mag bin
+        """
+        assert all([cur_im.startswith("pSA") or cur_im == "PGA" for cur_im in ims])
+
+        mag_edges = [3, 4, 5, 6, 7, 8, 9]
+        rrup_edges = np.linspace(0, 200, 11)
+
+        # Create the figures and axes
+        mag_fig_axes = []
+        for cur_ix in range(len(mag_edges) - 1):
+            cur_fig = plt.figure(figsize=plt_utils.FIGSIZE)
+            cur_bias_ax = cur_fig.add_subplot(1, 2, 1)
+            cur_std_ax = cur_fig.add_subplot(1, 2, 2)
+
+            mag_fig_axes.append((cur_fig, cur_bias_ax, cur_std_ax))
+
+        rrup_fig_axes = []
+        for cur_ix in range(len(rrup_edges) - 1):
+            cur_fig = plt.figure(figsize=plt_utils.FIGSIZE)
+            cur_bias_ax = cur_fig.add_subplot(1, 2, 1)
+            cur_std_ax = cur_fig.add_subplot(1, 2, 2)
+
+            rrup_fig_axes.append((cur_fig, cur_bias_ax, cur_std_ax))
+
+        # Setup run colours
+        run_ids = np.unique([cur_db_ffp.parent.stem for cur_db_ffp in db_ffps])
+        run_colours = {
+            cur_run_id: cur_color
+            for cur_run_id, cur_color in zip(
+                np.sort(run_ids), sns.color_palette("tab10", n_colors=len(run_ids))
+            )
+        }
+
+        # Plot
+        mag_bias_max_values = []
+        rrup_bias_max_values = []
+        for ix, cur_db_ffp in enumerate(db_ffps):
+            # Get the data
+            columns = ims + [f"{im}_est" for im in ims] + ["mag", "rrup"]
+            data_df = ResultDB.get_data_static(cur_db_ffp, columns)
+
+            cur_suffix = cur_db_ffp.stem.split("_")[0]
+            cur_run_id = cur_db_ffp.parent.stem
+
+            # Mag plotting
+            for mag_ix, cur_mag_edge in enumerate(mag_edges[:-1]):
+                _, cur_bias_ax, cur_std_ax = mag_fig_axes[mag_ix]
+
+                # Compute residual statistics
+                cur_mask = (data_df.mag.values >= cur_mag_edge) & (data_df.mag.values < mag_edges[mag_ix + 1])
+                cur_res_stats_df = self.__compute_residual_stats(data_df.loc[cur_mask], ims, )
+
+                cur_bias_ax.plot(
+                    cur_res_stats_df.period,
+                    cur_res_stats_df.bias.values,
+                    marker=".",
+                    linewidth=0.75,
+                    label=f"{cur_run_id} - Validation" if cur_suffix == "val" else None,
+                    linestyle="--" if cur_suffix == "val" else None,
+                    color=run_colours[cur_run_id],
+                )
+                cur_std_ax.plot(
+                    cur_res_stats_df.period,
+                    cur_res_stats_df["std"].values,
+                    marker=".",
+                    linewidth=0.75,
+                    linestyle="--" if cur_suffix == "val" else None,
+                    color=run_colours[cur_run_id],
+                )
+
+                mag_bias_max_values.append(np.max(np.abs(cur_res_stats_df.bias.values)))
+
+            # Rrup plotting
+            for rrup_ix, cur_rrup_edge in enumerate(rrup_edges[:-1]):
+                _, cur_bias_ax, cur_std_ax = rrup_fig_axes[rrup_ix]
+
+                # Compute residual statistics
+                cur_mask = (data_df.rrup.values >= cur_rrup_edge) & (data_df.rrup.values < rrup_edges[rrup_ix + 1])
+                cur_res_stats_df = self.__compute_residual_stats(data_df.loc[cur_mask], ims, )
+
+                cur_bias_ax.plot(
+                    cur_res_stats_df.period,
+                    cur_res_stats_df.bias.values,
+                    marker=".",
+                    linewidth=0.75,
+                    label=f"{cur_run_id} - Validation" if cur_suffix == "val" else None,
+                    linestyle="--" if cur_suffix == "val" else None,
+                    color=run_colours[cur_run_id],
+                )
+                cur_std_ax.plot(
+                    cur_res_stats_df.period,
+                    cur_res_stats_df["std"].values,
+                    marker=".",
+                    linewidth=0.75,
+                    linestyle="--" if cur_suffix == "val" else None,
+                    color=run_colours[cur_run_id],
+                )
+
+                rrup_bias_max_values.append(np.max(np.abs(cur_res_stats_df.bias.values)))
+
+            # Finalise & Save the plots
+            # Mag
+            for ix, (cur_mag_fig, cur_mag_bias_ax, cur_mag_std_ax) in enumerate(mag_fig_axes):
+                cur_bias_max_value = np.max(mag_bias_max_values) + 0.025
+                cur_mag_bias_ax.set_ylim(-0.4, +0.4)
+                cur_mag_bias_ax.set_ylabel(r"Bias, $\mathbb{E}[\Delta]$")
+                cur_mag_bias_ax.set_xlabel("Period, T")
+                cur_mag_bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+                cur_mag_bias_ax.semilogx()
+                cur_mag_bias_ax.legend()
+
+                cur_mag_std_ax.set_ylabel(r"Residual Standard Deviation, $\sigma_{\mathbf{\Delta}}$")
+                cur_mag_std_ax.set_xlabel("Period, T")
+                cur_mag_std_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+                cur_mag_std_ax.semilogx()
+
+                cur_mag_fig.suptitle(f"Mag - {int(mag_edges[ix])}_{int(mag_edges[ix + 1])}")
+                cur_mag_fig.tight_layout()
+
+                cur_mag_fig.savefig(output_dir / f"spec_bias_std_mag_{int(mag_edges[ix])}_{int(mag_edges[ix + 1])}.png")
+
+            # Rrup
+            for ix, (cur_rrup_fig, cur_rrup_bias_ax, cur_rrup_std_ax) in enumerate(rrup_fig_axes):
+                cur_bias_max_value = np.max(rrup_bias_max_values) + 0.025
+                cur_rrup_bias_ax.set_ylim(-0.4, +0.4)
+                cur_rrup_bias_ax.set_ylabel(r"Bias, $\mathbb{E}[\Delta]$")
+                cur_rrup_bias_ax.set_xlabel("Period, T")
+                cur_rrup_bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+                cur_rrup_bias_ax.semilogx()
+                cur_rrup_bias_ax.legend()
+
+                cur_rrup_std_ax.set_ylabel(r"Residual Standard Deviation, $\sigma_{\mathbf{\Delta}}$")
+                cur_rrup_std_ax.set_xlabel("Period, T")
+                cur_rrup_std_ax.grid(which="both", linewidth=0.5, alpha=0.5)
+                cur_rrup_std_ax.semilogx()
+                cur_rrup_fig.suptitle(f"Rrup - {int(rrup_edges[ix])}_{int(rrup_edges[ix + 1])}")
+
+                cur_rrup_fig.tight_layout()
+
+                cur_rrup_fig.savefig(output_dir / f"spec_bias_std_rrup_{int(rrup_edges[ix])}_{int(rrup_edges[ix + 1])}.png")
+
+
     def gen_spectral_bias_std_plot(
         self, db_ffps: Sequence[Path], ims: Sequence[str], output_ffp: Path
     ):
@@ -188,7 +335,7 @@ class ResPlotGen:
         assert all([cur_im.startswith("pSA") or cur_im == "PGA" for cur_im in ims])
 
         # Create plot
-        fig = plt.figure(figsize=(16, 10), dpi=200)
+        fig = plt.figure(figsize=plt_utils.FIGSIZE)
         bias_ax = fig.add_subplot(1, 2, 1)
         std_ax = fig.add_subplot(1, 2, 2)
 
@@ -216,7 +363,7 @@ class ResPlotGen:
             bias_ax.plot(
                 res_stats_df.period,
                 res_stats_df.bias.values,
-                marker=".",
+                # marker=".",
                 linewidth=0.75,
                 label=f"{cur_run_id} - Validation" if cur_suffix == "val" else None,
                 linestyle="--" if cur_suffix == "val" else None,
@@ -225,9 +372,8 @@ class ResPlotGen:
             std_ax.plot(
                 res_stats_df.period,
                 res_stats_df["std"].values,
-                marker=".",
+                # marker=".",
                 linewidth=0.75,
-                # label=f"{cur_run_id}_{cur_suffix}",
                 linestyle="--" if cur_suffix == "val" else None,
                 color=run_colours[cur_run_id],
             )
@@ -235,14 +381,18 @@ class ResPlotGen:
             # Get current y-limit
             bias_max_values.append(np.max(np.abs(res_stats_df.bias.values)))
 
+        print(res_stats_df.period)
+
         bias_max_value = np.max(bias_max_values) + 0.025
-        bias_ax.set_ylim(-bias_max_value, +bias_max_value)
-        bias_ax.set_ylabel(r"Bias, $\mathbb{E}[\Delta]$")
+        bias_ax.set_ylim(-0.4, +0.4)
+        bias_ax.set_xlim(0.01, 10.0)
+        bias_ax.set_ylabel(r"Bias")
         bias_ax.set_xlabel("Period, T")
         bias_ax.grid(which="both", linewidth=0.5, alpha=0.5)
         bias_ax.semilogx()
-        bias_ax.legend()
+        # bias_ax.legend()
 
+        std_ax.set_xlim(0.01, 10.0)
         std_ax.set_ylabel(r"Residual Standard Deviation, $\sigma_{\mathbf{\Delta}}$")
         std_ax.set_xlabel("Period, T")
         std_ax.grid(which="both", linewidth=0.5, alpha=0.5)
@@ -279,6 +429,7 @@ class ResPlotGen:
         output_dir: Path,
         prefix: str = None,
         site_names: Sequence[str] = None,
+        n_bins: int = 30
     ):
         """Creates residual distribution plots for the specified sites"""
         output_dir.mkdir(exist_ok=True, parents=True)
@@ -290,15 +441,18 @@ class ResPlotGen:
             cur_site_label = cur_site_id if site_names is None else site_names[ix]
             cur_mask = data_df.site == cur_site_id
 
+            cur_out_dir = output_dir / cur_site_label
+            cur_out_dir.mkdir(exist_ok=True)
+
             fig, ax = plt.subplots(figsize=(16, 10), dpi=200)
-            self.add_res_hist(ax, data_df.loc[cur_mask], im)
+            self.add_res_hist(ax, data_df.loc[cur_mask], im, n_bins=n_bins)
             ax.set_title(cur_site_label)
             ax.legend()
 
             fig.tight_layout()
             fig.savefig(
-                output_dir
-                / f"{prefix}{im.replace('.', 'p')}_{cur_site_label}_residual_distribution.png"
+                cur_out_dir
+                / f"{prefix}{im.replace('.', 'p')}_residual_distribution.png"
             )
             plt.close()
 
@@ -345,13 +499,14 @@ class ResPlotGen:
         )
         plt.close(fig)
 
-    def add_res_hist(self, ax: plt.Axes, data_df: pd.DataFrame, im: str):
+    def add_res_hist(self, ax: plt.Axes, data_df: pd.DataFrame, im: str, n_bins: int = None):
         """Computes the residual and plots the histogram"""
         # Compute the residuals
         residuals, mean, std = self.__compute_residuals(data_df, im)
+        n_bins = self.n_bins if n_bins is None else n_bins
 
         # Ploting
-        ax.hist(residuals, bins=self.n_bins, density=True)
+        ax.hist(residuals, bins=n_bins, density=True)
         ax.axvline(
             mean, label=f"$\mu$: {mean:.2f}", linestyle="-", linewidth=0.75, c="k"
         )

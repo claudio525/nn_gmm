@@ -1,12 +1,13 @@
 import multiprocessing as mp
 from pathlib import Path
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Sequence, Tuple, List
 
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 
 import ml_tools
+
 from . import data
 from .model import GMM
 from .ResultDB import ResultDB
@@ -32,14 +33,16 @@ FANCY_METRICS = dict(
     mse="MSE",
 )
 
-FANCY_SPATIAL_METRICS = dict(bias=r"Bias, $\frac{1}{N} [\Sigma^N (lnIM - ln\hat{IM})]$",
-                             sigma=r"$\sigma_{\Delta}$",
-                             mean_abs_residual="MAE",
-                             count="Count, N",
-                             sum_squared_residual="Sum of Squared Error")
+FANCY_SPATIAL_METRICS = dict(
+    bias=r"Bias, $\frac{1}{N} [\Sigma^N (lnIM - ln\hat{IM})]$",
+    sigma=r"$\sigma_{\Delta}$",
+    mean_abs_residual="MAE",
+    count="Count, N",
+    sum_squared_residual="Sum of Squared Error",
+)
 
 DEFAULT_EVAL_SITES = dict(
-    chch_site="02007fb",
+    chch_site="02007f9",
     nelson_site="02008b5",
     wellington_site="0200ab4",
     blenheim_site="020099b",
@@ -65,7 +68,6 @@ DEFAULT_CONST_FEATURES = dict(
     X=-0.8890043834110928,
     Y=0.14077926825788484,
     Z=0.4357205571288063,
-
     # Delete
     theta=45,
     s=30,
@@ -117,15 +119,15 @@ def write_predictions(
 
 
 def write_train_val_predictions(
-    data_dir: Path, model_dir: Path, verbose: bool = True, batch_size: int = 1_000_000
+    data_dir: Path, model_dir: Path, verbose: bool = True, batch_size: int = 500_000
 ):
     """Writes the estimated value (along with "true" values and features)
-     for the specified training data directory
+    for the specified training data directory
 
-     Note: The data directory is expected to have
-     two subdirectories "train" and "val" which each contain
-     their respective tfrecord files
-     """
+    Note: The data directory is expected to have
+    two subdirectories "train" and "val" which each contain
+    their respective tfrecord files
+    """
     train_data_dir = data_dir / "train"
     val_data_dir = data_dir / "val"
     if not train_data_dir.exists() or not val_data_dir.exists():
@@ -154,6 +156,7 @@ def write_train_val_predictions(
 def mae(y: np.ndarray, y_est: np.ndarray):
     """Compute Mean Absolute Error"""
     return np.mean(np.abs(y - y_est))
+
 
 def mse(y: np.ndarray, y_est: np.ndarray):
     """Computes MSE"""
@@ -190,39 +193,69 @@ def compute_spatial_metrics(
     data_df: pd.DataFrame,
     ims: Sequence[str],
     metrics: Sequence[str] = ALL_SPATIAL_METRICS,
+    use_sample_weights: bool = False,
 ):
     """Computes the specified metrics for each site"""
     metric_results = {}
 
     obs_keys, est_keys = ims, [f"{cur_im}_est" for cur_im in ims]
-    residuals_df = data_df.loc[:, obs_keys] - data_df.loc[:, est_keys].values
-    residuals_df["site"] = data_df["site"]
-    residuals_df["lon"] = data_df["lon"]
-    residuals_df["lat"] = data_df["lat"]
+    orig_residuals_df = data_df.loc[:, obs_keys] - data_df.loc[:, est_keys].values
+    orig_residuals_df["site"] = data_df["site"]
+    orig_residuals_df["lon"] = data_df["lon"]
+    orig_residuals_df["lat"] = data_df["lat"]
+
+    residuals_df = orig_residuals_df.copy()
+
+    if use_sample_weights:
+        residuals_df.loc[:, ims] = (
+            residuals_df.loc[:, ims].values
+            * data_df.sample_weight.values[:, np.newaxis]
+        )
+        residuals_df["sample_weight"] = data_df["sample_weight"]
 
     residuals_grouped = residuals_df.groupby(["lon", "lat"])
     if "bias" in metrics:
         metric_results["bias"] = residuals_grouped.mean()
     if "sum_squared_residual" in metrics:
-        squared_residuals_df = residuals_df.copy()
+        squared_residuals_df = orig_residuals_df.copy()
         squared_residuals_df[obs_keys] = squared_residuals_df[obs_keys] ** 2
+
+        if use_sample_weights:
+            squared_residuals_df.loc[:, ims] = (
+                squared_residuals_df.loc[:, ims].values
+                * data_df.sample_weight.values[:, np.newaxis]
+            )
+
         squared_residuals_grouped = squared_residuals_df.groupby(["lon", "lat"])
 
         metric_results["sum_squared_residual"] = squared_residuals_grouped.sum()
     if "mean_abs_residual" in metrics:
-        metric_results["mean_abs_residual"] = (
-            pd.concat(
-                (residuals_df.loc[:, ims].abs(), residuals_df.loc[:, ["lat", "lon"]]),
-                axis=1,
-            )
-            .groupby(["lon", "lat"])
-            .mean()
+        abs_residual_df = pd.concat(
+            (residuals_df.loc[:, ims].abs(), residuals_df.loc[:, ["lat", "lon"]]),
+            axis=1,
         )
+
+        if use_sample_weights:
+            abs_residual_df.loc[:, ims] = (
+                abs_residual_df.loc[:, ims].values
+                * data_df.sample_weight.values[:, np.newaxis]
+            )
+
+        metric_results["mean_abs_residual"] = abs_residual_df.groupby(
+            ["lon", "lat"]
+        ).mean()
     if "sigma" in metrics:
         metric_results["sigma"] = residuals_grouped.std()
     # Number of data points at each location
     if "count" in metrics:
-        metric_results["count"] = residuals_grouped.count()
+        if use_sample_weights:
+            cur_result = residuals_grouped.sum()["sample_weight"].to_frame()
+            metric_results["count"] = cur_result.rename(
+                columns={"sample_weight": "count"}
+            )
+        else:
+            cur_result = residuals_grouped.count()["site"].to_frame()
+            metric_results["count"] = cur_result.rename(columns={"site": "count"})
 
     for cur_key in metric_results.keys():
         metric_results[cur_key]["site"] = residuals_grouped.first()["site"]
@@ -345,9 +378,7 @@ def compute_metrics(
     for ix, cur_im in enumerate(ims):
         y, y_est = data_df[cur_im], data_df[f"{cur_im}_est"]
 
-        cur_metrics, counts = _compute_metrics(
-            metrics, "", y, y_est, n_samples, True
-        )
+        cur_metrics, counts = _compute_metrics(metrics, "", y, y_est, n_samples, True)
 
         # Compute metric per magnitude bin
         mag_bin_ind = np.digitize(data_df.mag, bins=mag_bins)
@@ -388,7 +419,10 @@ def compute_metrics(
 
 
 def comp_train_val_metrics(
-    model_dir: Path, save: bool = False, metrics: Sequence[str] = DEFAULT_METRICS, print_metrics: bool = True,
+    model_dir: Path,
+    save: bool = False,
+    metrics: Sequence[str] = DEFAULT_METRICS,
+    print_metrics: bool = True,
 ):
     """Computes training & validation metrics"""
     ims = GMM.load(model_dir).ims
@@ -415,12 +449,20 @@ def comp_train_val_metrics(
 
 
 def comp_train_val_spatial_metrics(
-    model_dir: Path, ims: Sequence[str] = None, save: bool = False, metrics: Sequence[str] = ALL_SPATIAL_METRICS
+    model_dir: Path,
+    ims: Sequence[str] = None,
+    save: bool = False,
+    metrics: Sequence[str] = ALL_SPATIAL_METRICS,
+    use_sample_weights: bool = False,
 ):
     """Computes the specified metrics for each site,
     for both training and validation data"""
     ims = GMM.load(model_dir).ims if ims is None else ims
-    columns = [f"{im}_est" for im in ims] + list(ims) + ["site", "lat", "lon"]
+    columns = (
+        [f"{im}_est" for im in ims]
+        + list(ims)
+        + ["site", "lat", "lon", "sample_weight"]
+    )
 
     train_df = ResultDB.get_data_static(model_dir / "train_predictions.hdf5", columns)
     val_df = ResultDB.get_data_static(model_dir / "val_predictions.hdf5", columns)
@@ -428,17 +470,31 @@ def comp_train_val_spatial_metrics(
     train_spatial_metrics = compute_spatial_metrics(train_df, ims, metrics=metrics)
     val_spatial_metrics = compute_spatial_metrics(val_df, ims, metrics=metrics)
 
+    if use_sample_weights:
+        train_weighted_spatial_metrics = compute_spatial_metrics(
+            train_df, ims, metrics=metrics, use_sample_weights=True
+        )
+
     if save:
         train_out_dir = model_dir / "train_spatial_metrics"
         val_out_dir = model_dir / "val_spatial_metrics"
         train_out_dir.mkdir(exist_ok=True)
         val_out_dir.mkdir(exist_ok=True)
 
+        if use_sample_weights:
+            train_weighted_out_dir = model_dir / "train_weighted_spatial_metrics"
+            train_weighted_out_dir.mkdir(exist_ok=True)
+
         for cur_metric in train_spatial_metrics.keys():
             train_spatial_metrics[cur_metric].to_csv(
                 train_out_dir / f"{cur_metric}.csv"
             )
             val_spatial_metrics[cur_metric].to_csv(val_out_dir / f"{cur_metric}.csv")
+
+            if use_sample_weights:
+                train_weighted_spatial_metrics[cur_metric].to_csv(
+                    train_weighted_out_dir / f"{cur_metric}.csv"
+                )
 
     return train_spatial_metrics, val_spatial_metrics
 
@@ -473,10 +529,20 @@ def comp_train_val_basin_metrics(
 
     # Compute the basin metrics
     train_metrics = comp_basin_metrics(
-        train_data_df, basin_dict, ims, mag_bins=mag_bins, rrup_bins=rrup_bins, metrics=metrics
+        train_data_df,
+        basin_dict,
+        ims,
+        mag_bins=mag_bins,
+        rrup_bins=rrup_bins,
+        metrics=metrics,
     )
     val_metrics = comp_basin_metrics(
-        val_data_df, basin_dict, ims, mag_bins=mag_bins, rrup_bins=rrup_bins, metrics=metrics
+        val_data_df,
+        basin_dict,
+        ims,
+        mag_bins=mag_bins,
+        rrup_bins=rrup_bins,
+        metrics=metrics,
     )
 
     # Add metrics for base-grid stations
@@ -589,11 +655,21 @@ def load_spatial_metrics(model_dir: Path):
         for cur_ffp in (model_dir / "val_spatial_metrics").glob("*.csv")
     }
 
+    train_weighted_spatial_metrics = None
+    if (model_dir / "train_weighted_spatial_metrics").exists():
+        train_weighted_spatial_metrics = {
+            cur_ffp.stem: pd.read_csv(cur_ffp)
+            for cur_ffp in (model_dir / "train_weighted_spatial_metrics").glob("*.csv")
+        }
+
     # Drop NaN-values for Sigma
     if "sigma" in train_spatial_metrics.keys():
         console.print("Dropping NaN-values for spatial sigma")
         train_spatial_metrics["sigma"].dropna(inplace=True)
         val_spatial_metrics["sigma"].dropna(inplace=True)
+
+        if train_weighted_spatial_metrics is not None:
+            train_weighted_spatial_metrics["sigma"].dropna(inplace=True)
 
         console.print(
             f"\tGiving: \n"
@@ -601,4 +677,29 @@ def load_spatial_metrics(model_dir: Path):
             f"\t\tValidation - {val_spatial_metrics['sigma'].shape[0]} stations"
         )
 
-    return train_spatial_metrics, val_spatial_metrics
+    return train_spatial_metrics, train_weighted_spatial_metrics, val_spatial_metrics
+
+
+def run_model_mera(model_dir: Path, ims: List[str], val: bool = False, subset_size: int = None):
+    im_est = list(np.char.add(ims, "_est"))
+    columns = ims + im_est + ["site", "rupture"]
+
+    data_df = ResultDB.get_data_static(
+        model_dir / ("val_predictions.hdf5" if val else "train_predictions.hdf5"),
+        columns,
+    )
+
+    res_df = pd.DataFrame(
+        columns=ims,
+        data=data_df.loc[:, ims].values - data_df.loc[:, im_est].values,
+        index=data_df.index.values,
+    )
+    res_df[["site", "rupture"]] = data_df[["site", "rupture"]]
+
+    if subset_size is not None:
+        res_df = res_df.sample(subset_size, replace=False)
+
+    event_res_df, site_res_df, rem_res_df, bias_std_df = run_mera(
+        res_df, ims, "rupture", "site"
+    )
+    return event_res_df, site_res_df, rem_res_df, bias_std_df

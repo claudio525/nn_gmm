@@ -89,16 +89,17 @@ def _int64_feature(value):
 
 
 def _serialize(
-    ix_1, input_row, ix_2, im_df_row, ix_3, site_source_row, sample_weight: float
+    ix_1, input_row, ix_2, im_df_row, ix_3, site_source_row, ix_4, weights_row
 ):
-    assert ix_1 == ix_2 and ix_1 == ix_3
+    assert ix_1 == ix_2 and ix_1 == ix_3 and ix_1 == ix_4
 
     features = {
         **{key: _float_feature(value) for key, value in input_row.items()},
         **{key: _float_feature(value) for key, value in im_df_row.items()},
+        **{key: _float_feature(value) for key, value in weights_row.items()},
     }
     features["id"] = _bytes_feature(str.encode(ix_1))
-    features["sample_weight"] = _float_feature(sample_weight)
+    # features["sample_weight"] = _float_feature(sample_weight)
     features = {
         **features,
         **{
@@ -115,7 +116,7 @@ def serialize(
     input_df: pd.DataFrame,
     im_df: pd.DataFrame,
     site_source_ids: pd.DataFrame,
-    sample_weights: pd.Series,
+    weights_df: pd.DataFrame,
     n_procs: int = 8,
 ):
     """Serializes training data (features & labels) into the tf.train.Example format"""
@@ -126,7 +127,13 @@ def serialize(
             (ix_1, cur_input_row),
             (ix_2, cur_im_df_row),
             (ix_3, cur_site_source_row),
-        ) in zip(input_df.iterrows(), im_df.iterrows(), site_source_ids.iterrows()):
+            (ix_4, cur_weights_row),
+        ) in zip(
+            input_df.iterrows(),
+            im_df.iterrows(),
+            site_source_ids.iterrows(),
+            weights_df.iterrows(),
+        ):
             ser_examples.append(
                 _serialize(
                     ix_1,
@@ -135,7 +142,8 @@ def serialize(
                     cur_im_df_row,
                     ix_3,
                     cur_site_source_row,
-                    sample_weights[ix_1],
+                    ix_4,
+                    cur_weights_row,
                 )
             )
     else:
@@ -150,15 +158,17 @@ def serialize(
                         cur_im_df_row,
                         ix_3,
                         cur_site_source_row,
-                        sample_weights[ix_1],
+                        ix_4,
+                        cur_weights_row,
                     )
                     for (ix_1, cur_input_row), (ix_2, cur_im_df_row), (
                         ix_3,
                         cur_site_source_row,
-                    ) in zip(
+                    ), (ix_4, cur_weights_row) in zip(
                         input_df.iterrows(),
                         im_df.iterrows(),
                         site_source_ids.iterrows(),
+                        weights_df.iterrows(),
                     )
                 ],
             )
@@ -206,6 +216,7 @@ def gen_tf_records(
     mag_rrup_weights_db_ffp: Path = None,
     use_mag_bin_weights: bool = False,
     use_rrup_bin_weights: bool = False,
+    use_comb_mag_rrup_weights: bool = False,
 ):
     """Generates tfrecord files using the tf.train.Example protocol,
     one file is generated per event
@@ -296,34 +307,68 @@ def gen_tf_records(
         cur_im_df = nn_gmm.interpolate_pSA_periods(cur_im_df, IMs)
 
         # Compute the sample weights
-        sample_weights = pd.Series(
+        cur_weights_df = pd.DataFrame(
             index=cur_site_source_ids.index,
-            data=np.ones(cur_site_source_ids.shape[0], dtype=float),
+            data=np.ones((cur_site_source_ids.shape[0], 6), dtype=float),
+            columns=[
+                "sample_weight",
+                "mag_weights",
+                "rrup_weights",
+                "station_density_weights",
+                "fault_density_weight",
+                "rrup_mag_weights"
+            ],
         )
-        if fault_density_weights is not None:
-            sample_weights *= fault_density_weights.loc[
-                cur_site_source_ids.site.values
-            ].values
-        if station_density_weights is not None:
-            sample_weights *= station_density_weights.loc[
-                cur_site_source_ids.site.values
-            ].values
 
-        if use_rrup_bin_weights or use_mag_bin_weights:
+        # Required for loading record files
+        weights_details = {}
+
+        if fault_density_weights is not None:
+            cur_weights_df["fault_density_weight"] = fault_density_weights.loc[
+                cur_site_source_ids.site.values
+            ].values
+            cur_weights_df["sample_weight"] *= cur_weights_df["fault_density_weight"]
+            weights_details["fault_density_weight"] = tf.io.FixedLenFeature(
+                [], tf.float32
+            )
+
+        if station_density_weights is not None:
+            cur_weights_df["station_density_weights"] = station_density_weights.loc[
+                cur_site_source_ids.site.values
+            ].values
+            cur_weights_df["sample_weight"] *= cur_weights_df["station_density_weights"]
+            weights_details["station_density_weight"] = tf.io.FixedLenFeature(
+                [], tf.float32
+            )
+
+        if use_rrup_bin_weights or use_mag_bin_weights or use_comb_mag_rrup_weights:
             mag_rrup_weights_df = pd.read_hdf(mag_rrup_weights_db_ffp, f"/{cur_source}")
 
             if use_mag_bin_weights:
-                sample_weights *= mag_rrup_weights_df.loc[
+                cur_weights_df["mag_weights"] = mag_rrup_weights_df.loc[
                     cur_site_source_ids.index.values, "mag_weights"
                 ].values
+                cur_weights_df["sample_weight"] *= cur_weights_df["mag_weights"]
+                weights_details["mag_weights"] = tf.io.FixedLenFeature([], tf.float32)
 
             if use_rrup_bin_weights:
-                sample_weights *= mag_rrup_weights_df.loc[
+                cur_weights_df["rrup_weights"] = mag_rrup_weights_df.loc[
                     cur_site_source_ids.index.values, "rrup_weights"
                 ].values
+                cur_weights_df["sample_weight"] *= cur_weights_df["rrup_weights"]
+                weights_details["rrup_weights"] = tf.io.FixedLenFeature([], tf.float32)
+
+            if use_comb_mag_rrup_weights:
+                cur_weights_df["rrup_mag_weights"] = mag_rrup_weights_df.loc[
+                    cur_site_source_ids.index.values, "rrup_mag_weights"
+                ].values
+                cur_weights_df["sample_weight"] *= cur_weights_df["rrup_mag_weights"]
+                weights_details["rrup_mag_weights"] = tf.io.FixedLenFeature([], tf.float32)
 
         print(
-            f"Source: {cur_source}, Sample weight - Min: {sample_weights.min()}, Max: {sample_weights.max()}"
+            f"Source: {cur_source}, "
+            f"Sample weight - Min: {cur_weights_df.sample_weight.min()}, "
+            f"Max: {cur_weights_df.sample_weight.max()}"
         )
 
         # Serialize
@@ -334,7 +379,7 @@ def gen_tf_records(
             cur_input_df,
             cur_im_df[IMs],
             cur_site_source_ids,
-            sample_weights,
+            cur_weights_df,
             n_procs=n_procs,
         )
 
@@ -342,14 +387,22 @@ def gen_tf_records(
         if ix == 0 or not feature_details_ffp.exists():
             console.print(f"Writing feature details")
             feature_description = {
+                # Inputs
                 **{
                     col: tf.io.FixedLenFeature([], tf.float32)
                     for col in cur_input_df.columns.values.astype(str)
                 },
+                # IMs
                 **{
                     col: tf.io.FixedLenFeature([], tf.float32)
                     for col in cur_im_df.columns.values.astype(str)
                 },
+                # Weights
+                **{
+                    col: tf.io.FixedLenFeature([], tf.float32)
+                    for col in cur_weights_df.columns.values.astype(str)
+                },
+                # Metadata
                 **{
                     col: tf.io.FixedLenFeature([], tf.string)
                     for col in cur_site_source_ids.columns.values.astype(str)
@@ -357,10 +410,7 @@ def gen_tf_records(
             }
             feature_description = {
                 **feature_description,
-                **{
-                    "id": tf.io.FixedLenFeature([], tf.string),
-                    "sample_weight": tf.io.FixedLenFeature([], tf.float32),
-                },
+                **{"id": tf.io.FixedLenFeature([], tf.string),},
             }
             with open(str(feature_details_ffp), "wb") as f:
                 pickle.dump(feature_description, f)
@@ -385,6 +435,7 @@ def main(
     use_site_density_weights: bool = False,
     use_mag_bin_weights: bool = False,
     use_rrup_bin_weights: bool = False,
+    use_comb_mag_rrup_bin_weights: bool = False,
 ):
     assert (not use_mag_bin_weights and not use_rrup_bin_weights) or (
         mag_rrup_weights_db_ffp is not None
@@ -534,6 +585,7 @@ def main(
             mag_rrup_weights_db_ffp=mag_rrup_weights_db_ffp,
             use_mag_bin_weights=use_mag_bin_weights,
             use_rrup_bin_weights=use_rrup_bin_weights,
+            use_comb_mag_rrup_weights=use_comb_mag_rrup_bin_weights,
         )
 
         # Validation dataset
@@ -578,9 +630,7 @@ if __name__ == "__main__":
         "directivity_dir", type=str, help="The path to the directivity dir"
     )
     parser.add_argument(
-        "source_params_dir",
-        type=str,
-        help="The path to the source params dir",
+        "source_params_dir", type=str, help="The path to the source params dir",
     )
     parser.add_argument("im_db_dir", type=str, help="The path to the IM labels dbs dir")
     parser.add_argument("output_dir", type=str, help="Path of the output directory")
@@ -617,14 +667,15 @@ if __name__ == "__main__":
         default=None,
     )
     parser.add_argument(
-        "--mag_weights",
-        action="store_true",
-        help="Use magnitude sample weighting",
+        "--mag_weights", action="store_true", help="Use magnitude sample weighting",
     )
     parser.add_argument(
-        "--rrup_weights",
+        "--rrup_weights", action="store_true", help="Use rrup sample weighting",
+    )
+    parser.add_argument(
+        "--comb_mag_rrup_weights",
         action="store_true",
-        help="Use rrup sample weighting",
+        help="Use combined mag/rrup weighting (i.e. binned in 2D)",
     )
 
     args = parser.parse_args()
@@ -644,4 +695,5 @@ if __name__ == "__main__":
         mag_rrup_weights_db_ffp=args.mag_rrup_weights_db_ffp,
         use_mag_bin_weights=args.mag_weights,
         use_rrup_bin_weights=args.rrup_weights,
+        use_comb_mag_rrup_bin_weights=args.comb_mag_rrup_weights,
     )

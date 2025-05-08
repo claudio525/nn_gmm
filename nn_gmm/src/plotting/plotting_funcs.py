@@ -193,6 +193,9 @@ def plot_mag_vs30_bins(
                 alpha=alpha,
             )
             cur_ax.set_yscale("log")
+            cur_ax.set_xscale("log")
+
+            cur_ax.set_xlim(5, 200)
 
             cur_ax.text(
                 0.99,
@@ -204,7 +207,7 @@ def plot_mag_vs30_bins(
                 verticalalignment="top",
                 transform=cur_ax.transAxes,
             )
-            cur_ax.grid(linestyle="--", linewidth=0.25, alpha=0.75)
+            cur_ax.grid(linestyle="--", linewidth=0.5, alpha=0.5, which="both")
 
     fig.tight_layout()
     fig.savefig(output_ffp)

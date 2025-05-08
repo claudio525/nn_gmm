@@ -215,6 +215,7 @@ class NeuralNetworkGMM(GMM):
         """See GMM base class for the full docstring"""
         features = [] if features is None else features
         metadata = [] if metadata is None else metadata
+        metadata += ["sample_weight"]
 
         # Get feature details, have to be same across all directories
         with (data_dirs[0] / "feature_details.pickle").open("rb") as f:
@@ -228,7 +229,7 @@ class NeuralNetworkGMM(GMM):
         sim_dfs, mean_dfs, std_dfs = [], [], []
         if self._multi_input:
             data_columns = (
-                list(np.concatenate([cur_features for cur_features in self.features.values()]))
+                list(np.unique(np.concatenate([cur_features for cur_features in self.features.values()])))
                 + ims
                 + metadata
             )
@@ -398,7 +399,7 @@ def create_reg_multi_output_model(
     hyper_params: Dict, n_inputs: int, output_names: List[str]
 ):
     """Creates a functional keras model from the model config,
-    with multiple linear outputs and possible sub-nets per output
+    with multiple linear outputs and possible subnets per output
 
     Parameters
     ----------
