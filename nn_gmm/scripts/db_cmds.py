@@ -83,6 +83,9 @@ def create_db(
     site_df.loc[:, vs30_df.columns] = vs30_df.values
     site_df.loc[:, z_df.columns] = z_df.values
 
+    site_grid_level = nng.utils.get_site_grid_level(site_df.index.values.astype(str))
+    site_df["grid_level"] = site_grid_level
+
     # Add site data
     with nng.imdb.IMDB(db_ffp) as db:
         db.add_site_data(site_df)

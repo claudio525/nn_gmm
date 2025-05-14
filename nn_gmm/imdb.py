@@ -346,7 +346,8 @@ class IMDB:
             lon REAL,
             vs30 REAL,
             z1p0 REAL,
-            z2p5 REAL)"""
+            z2p5 REAL,
+            grid_level INTEGER)"""
         )
         # Create index for fast access using site_id
         self.cursor.execute(
