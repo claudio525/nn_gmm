@@ -20,6 +20,12 @@ class IMDB:
     def __enter__(self) -> "IMDB":
         self.conn = sqlite3.connect(self.db_ffp)
         self.cursor = self.conn.cursor()
+
+        # Performance optimizations
+        self.cursor.execute("PRAGMA journal_mode = MEMORY")
+        self.cursor.execute("PRAGMA synchronous = OFF")
+        self.cursor.execute("PRAGMA cache_size = -500000")  # ~100MB cache
+
         self._create_tables()
         return self
 
@@ -267,8 +273,8 @@ class IMDB:
         im_df["event_int_id"] = im_df.event_id.map(self.event_to_int_id_mapping)
         im_df["rel_int_id"] = im_df.rel_id.map(self.rel_to_int_id_mapping)
         im_df["site_int_id"] = im_df.site_id.map(self.site_to_int_id_mapping)
-        im_df["record_int_id"] = self.get_record_int_id(   
-            im_df.event_int_id, im_df.rel_int_id, im_df.site_int_id
+        im_df["record_int_id"] = self.get_record_int_id(
+            im_df.event_int_id.values, im_df.rel_int_id.values, im_df.site_int_id.values
         )
 
         # Insert the IM data into the database

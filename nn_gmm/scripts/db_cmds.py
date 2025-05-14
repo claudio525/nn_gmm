@@ -20,8 +20,11 @@ app = typer.Typer()
 @app.command("create-db")
 def create_db(
     db_ffp: Path = typer.Argument(..., help="Path to the database file"),
-    fault_data_dir: Path = typer.Argument(
-        ..., help="Path to the Cybershake fault data directory"
+    im_data_dir: Path = typer.Argument(
+        ..., help="Path to the Cybershake IM data directory"
+    ),
+    source_info_dir: Path = typer.Argument(
+        ..., help="Path to the Cybershake source info directory"
     ),
     ll_ffp: Path = typer.Argument(..., help="Path to the Cybershake site data file"),
     vs30_ffp: Path = typer.Argument(..., help="Path to the Cybershake vs30 data file"),
@@ -85,21 +88,26 @@ def create_db(
         db.add_site_data(site_df)
 
     # Add event, realisation and IM data
-    event_dirs = [cur_dir for cur_dir in fault_data_dir.iterdir() if cur_dir.is_dir()]
-    for cur_dir in tqdm(event_dirs, desc="Processing events"):
-        logging.debug(f"Processing event: {cur_dir.stem}")
-        event = cur_dir.stem
-        source_dir = cur_dir / "Source"
+    im_events = np.sort([cur_dir.stem for cur_dir in im_data_dir.iterdir() if cur_dir.is_dir()])
+    source_events = np.sort([
+        cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()
+    ])
+    assert np.all(im_events == source_events), "IM and source events do not match!"
+    events = im_events
+
+    for cur_event in tqdm(events, desc="Processing events"):
+        logging.debug(f"Processing event: {cur_event}")
+        source_dir = source_info_dir / cur_event / "Srf"
 
         # Read the median data
-        median_info = pd.read_csv(source_dir / f"{event}.csv").squeeze()
+        median_info = pd.read_csv(source_dir / f"{cur_event}.csv").squeeze()
         median_info = median_info.loc[SOURCE_INFO_FIELDS]
         median_info = median_info.rename(SOURCE_TO_DB_COLUMNS_MAPPING, axis=0)
 
         # Read the realisation data
         rel_infos = []
         for cur_rel_ffp in source_dir.glob("*REL*.csv"):
-            cur_rel_id = f"{event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+            cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
             cur_rel_df = pd.read_csv(cur_rel_ffp)
             cur_rel_df.index = [cur_rel_id]
 
@@ -108,16 +116,23 @@ def create_db(
         rel_df = pd.concat(rel_infos, axis=0).rename(
             columns=SOURCE_TO_DB_COLUMNS_MAPPING
         )
-        rel_df["event_id"] = event
+        rel_df["event_id"] = cur_event
 
         # Read the IM data
-        im_files = list((cur_dir / "IM").rglob("*REL*.csv"))
+        im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
         rel_im_dfs = []
         for cur_rel_ffp in im_files:
-            cur_rel_id = f"{event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+            cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+
+            if cur_rel_id not in rel_df.index:
+                logging.warning(
+                    f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
+                )
+                continue
+
             cur_im_df = pd.read_csv(cur_rel_ffp, index_col=0)[nng.constants.IMS]
             cur_im_df["site_id"] = cur_im_df.index
-            cur_im_df["event_id"] = event
+            cur_im_df["event_id"] = cur_event
             cur_im_df["rel_id"] = cur_rel_id
             cur_im_df.index = mlt.array_utils.numpy_str_join(
                 "_", cur_rel_id, cur_im_df.index.values.astype(str)
@@ -128,7 +143,7 @@ def create_db(
         im_df = pd.concat(rel_im_dfs, axis=0)
 
         with nng.imdb.IMDB(db_ffp) as db:
-            db.add_event_data(event, median_info)
+            db.add_event_data(cur_event, median_info)
             db.add_realisation_data(rel_df)
             db.add_record_im_data(im_df)
 
