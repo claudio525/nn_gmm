@@ -80,6 +80,19 @@ class IMDB:
         """
         self.cursor.execute("PRAGMA table_info(sites)")
         return [column_info[1] for column_info in self.cursor.fetchall()]
+    
+    @property
+    def site_event_table_columns(self) -> list:
+        """
+        Returns the column names of the site_to_event table.
+
+        Returns
+        -------
+        list
+            Column names of the site_to_event table.
+        """
+        self.cursor.execute("PRAGMA table_info(site_event)")
+        return [column_info[1] for column_info in self.cursor.fetchall()]
 
     @property
     def record_im_table_columns(self) -> list:
@@ -133,6 +146,44 @@ class IMDB:
         self.cursor.execute("SELECT site_id, site_int_id FROM sites")
         return {row[0]: row[1] for row in self.cursor.fetchall()}
 
+    def get_event_df(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all event data.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all event data.
+        """
+        self.cursor.execute("SELECT * FROM events")
+        event_df = pd.DataFrame(self.cursor.fetchall(), columns=self.event_table_columns)
+        event_df = event_df.set_index("event_id").drop(columns=["event_int_id"])
+        return event_df
+    
+    def get_site_df(self, max_grid_level: int = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all site data.
+
+        Parameters
+        ----------
+        max_grid_level : int, optional
+            Maximum grid level to filter the sites. 
+            If None, all sites are returned.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all site data.
+        """
+        self.cursor.execute("SELECT * FROM sites")
+        site_df = pd.DataFrame(self.cursor.fetchall(), columns=self.site_table_columns)
+        site_df = site_df.set_index("site_id").drop(columns=["site_int_id"])
+
+        if max_grid_level is not None:
+            site_df = site_df[site_df["grid_level"] <= max_grid_level]
+
+        return site_df
+    
     def get_record_int_id(
         self, event_int_id: np.ndarray, rel_int_id: np.ndarray, site_int_id: np.ndarray
     ) -> np.ndarray:
@@ -159,6 +210,30 @@ class IMDB:
 
         return (event_int_id * p1) ^ (rel_int_id * p2) ^ (site_int_id * p3) % 100000000
 
+    def get_site_event_int_id(
+        self, site_int_id: np.ndarray, event_int_id: np.ndarray
+    ) -> np.ndarray:
+        """
+        Generate unique integer IDs for each site-event pair
+        based on site and event IDs.
+
+        Parameters
+        ----------
+        site_int_id : np.ndarray
+            Array of site integer IDs.
+        event_int_id : np.ndarray
+            Array of event integer IDs.
+        
+        Returns
+        -------
+        np.ndarray
+            Array of unique integer IDs for each site-event pair.
+        """
+        # Prime multipliers for good distribution
+        p1, p2 = 73856093, 19349663
+
+        return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
+
     def add_event_data(self, event_id: str, median_info: pd.Series) -> None:
         """
         Add event data to the 'events' table.
@@ -179,12 +254,12 @@ class IMDB:
             return
 
         # Insert the event data into the database
-        query = """
+        columns = ", ".join(self.event_table_columns[1:])
+        placeholders = ", ".join(["?"] * len(self.event_table_columns[1:]))
+        query = f"""
         INSERT INTO events (
-            event_id, magnitude, sim_type, fault_type, tect_type, rake, dip, dtop, 
-            dbottom, length, plane_count, dip_dir, shypo, dhypo
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+            {columns}
+        ) VALUES ({placeholders})"""
         values = [event_id] + [median_info[col] for col in self.event_table_columns[2:]]
         self.cursor.execute(query, values)
         logger.debug(f"Inserted event data for event {event_id}.")
@@ -258,6 +333,36 @@ class IMDB:
         self.cursor.executemany(query, values)
         logger.debug(f"Inserted site data for {len(site_df)} sites.")
 
+    def add_site_event_data(self, site_event_df: pd.DataFrame) -> None:
+        """
+        Add site-event data to the 'site_event' table.
+
+        Parameters
+        ----------
+        site_event_df : pd.DataFrame
+            DataFrame containing the site-event data to add
+        """
+        assert np.all(np.isin(self.site_event_table_columns[3:], site_event_df.columns))
+
+        site_event_df["site_int_id"] = site_event_df.site_id.map(self.site_to_int_id_mapping).astype(int)
+        site_event_df["event_int_id"] = site_event_df.event_id.map(self.event_to_int_id_mapping).astype(int)
+        site_event_df["site_event_int_id"] = self.get_site_event_int_id(
+            site_event_df.site_int_id.values, site_event_df.event_int_id.values
+        )
+
+        # Insert the site-event data into the database
+        # Note: If the site-event pair already exists, it will be skipped
+        columns = ", ".join(self.site_event_table_columns)
+        placeholders = ", ".join(["?"] * len(self.site_event_table_columns))
+        query = f"""
+        INSERT OR IGNORE INTO site_event (
+            {columns}
+        ) VALUES ({placeholders})"""
+        values = list(site_event_df[self.site_event_table_columns].itertuples(index=False, name=None))
+        self.cursor.executemany(query, values)
+        logger.debug(f"Inserted site-event data for {len(site_event_df)} site-event pairs.")
+
+
     def add_record_im_data(self, im_df: pd.DataFrame) -> None:
         """
         Add IM data to the 'record_ims' table.
@@ -301,15 +406,12 @@ class IMDB:
             sim_type INTEGER,
             fault_type REAL,
             tect_type REAL,
-            rake REAL,
             dip REAL,
             dtop REAL,
             dbottom REAL,
             length REAL,
             plane_count INTEGER,
-            dip_dir REAL,
-            shypo REAL,
-            dhypo REAL)"""
+            dip_dir REAL)"""
         )
         # Create index for fast access using event_id
         self.cursor.execute(
@@ -353,6 +455,33 @@ class IMDB:
         self.cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_sites_site_id 
                ON sites (site_id)"""
+        )
+
+        # Site-Event table
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS site_event (
+            site_event_int_id INTEGER PRIMARY KEY,
+            site_int_id INTEGER,
+            event_int_id INTEGER,
+            rrup REAL,
+            rjb REAL,
+            rx REAL,
+            ry REAL,
+            FOREIGN KEY (site_int_id) REFERENCES sites (site_int_id),
+            FOREIGN KEY (event_int_id) REFERENCES events (event_int_id)
+            )
+        """
+        )
+        # Create index for fast access using site_int_id
+        self.cursor.execute(
+            """CREATE INDEX IF NOT EXISTS idx_site_event_site_id 
+                ON site_event (site_int_id)"""
+        )
+        # Create index for fast access using event_int_id
+        self.cursor.execute(
+            """CREATE INDEX IF NOT EXISTS idx_site_event_event_id 
+                ON site_event (event_int_id)"""
         )
 
         # Simulation records

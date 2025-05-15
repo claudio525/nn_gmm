@@ -8,6 +8,9 @@ from tqdm import tqdm
 
 import ml_tools as mlt
 import nn_gmm as nng
+import seismic_hazard_analysis as sha
+from qcore import coordinates as coords
+from qcore import nhm
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -26,6 +29,8 @@ def create_db(
     source_info_dir: Path = typer.Argument(
         ..., help="Path to the Cybershake source info directory"
     ),
+    nhm_flt_ffp: Path = typer.Argument(
+        ..., help="Path to the NHM 2010 fault data file"),
     ll_ffp: Path = typer.Argument(..., help="Path to the Cybershake site data file"),
     vs30_ffp: Path = typer.Argument(..., help="Path to the Cybershake vs30 data file"),
     z_ffp: Path = typer.Argument(..., help="Path to the Cybershake Z data file"),
@@ -86,11 +91,14 @@ def create_db(
     site_grid_level = nng.utils.get_site_grid_level(site_df.index.values.astype(str))
     site_df["grid_level"] = site_grid_level
 
+    nztm_coords = coords.wgs_depth_to_nztm(site_df[["lat", "lon"]].values)[:, ::-1]
+    site_df["nztm_x"], site_df["nztm_y"] = nztm_coords[:, 0], nztm_coords[:, 1]
+
     # Add site data
     with nng.imdb.IMDB(db_ffp) as db:
         db.add_site_data(site_df)
 
-    # Add event, realisation and IM data
+    # Get events (and sanity check)
     im_events = np.sort([cur_dir.stem for cur_dir in im_data_dir.iterdir() if cur_dir.is_dir()])
     source_events = np.sort([
         cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()
@@ -98,57 +106,76 @@ def create_db(
     assert np.all(im_events == source_events), "IM and source events do not match!"
     events = im_events
 
-    for cur_event in tqdm(events, desc="Processing events"):
-        logging.debug(f"Processing event: {cur_event}")
-        source_dir = source_info_dir / cur_event / "Srf"
+    # Compute the site to source distances
+    flt_definitions = nhm.load_nhm(nhm_flt_ffp)
+    faults = {
+            cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
+            for cur_name, cur_fault in flt_definitions.items()
+            if cur_name in events
+    }
+    site_event_df = nng.utils.run_site_to_source_calc(
+        faults,
+        site_df
+    )
 
-        # Read the median data
-        median_info = pd.read_csv(source_dir / f"{cur_event}.csv").squeeze()
-        median_info = median_info.loc[SOURCE_INFO_FIELDS]
-        median_info = median_info.rename(SOURCE_TO_DB_COLUMNS_MAPPING, axis=0)
+    with nng.imdb.IMDB(db_ffp) as db:
+        # Add event, realisation and IM data
+        for cur_event in tqdm(events, desc="Processing events"):
+            logging.debug(f"Processing event: {cur_event}")
+            source_dir = source_info_dir / cur_event / "Srf"
 
-        # Read the realisation data
-        rel_infos = []
-        for cur_rel_ffp in source_dir.glob("*REL*.csv"):
-            cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
-            cur_rel_df = pd.read_csv(cur_rel_ffp)
-            cur_rel_df.index = [cur_rel_id]
+            # Read the median data
+            median_info = pd.read_csv(source_dir / f"{cur_event}.csv").squeeze()
+            median_info = median_info.loc[SOURCE_INFO_FIELDS]
+            median_info = median_info.rename(SOURCE_TO_DB_COLUMNS_MAPPING, axis=0)
 
-            rel_infos.append(cur_rel_df)
+            # Read the realisation data
+            rel_infos = []
+            for cur_rel_ffp in source_dir.glob("*REL*.csv"):
+                cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                cur_rel_df = pd.read_csv(cur_rel_ffp)
+                cur_rel_df.index = [cur_rel_id]
 
-        rel_df = pd.concat(rel_infos, axis=0).rename(
-            columns=SOURCE_TO_DB_COLUMNS_MAPPING
-        )
-        rel_df["event_id"] = cur_event
+                rel_infos.append(cur_rel_df)
 
-        # Read the IM data
-        im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
-        rel_im_dfs = []
-        for cur_rel_ffp in im_files:
-            cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
-
-            if cur_rel_id not in rel_df.index:
-                logging.warning(
-                    f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
-                )
-                continue
-
-            cur_im_df = pd.read_csv(cur_rel_ffp, index_col=0)[nng.constants.IMS]
-            cur_im_df["site_id"] = cur_im_df.index
-            cur_im_df["event_id"] = cur_event
-            cur_im_df["rel_id"] = cur_rel_id
-            cur_im_df.index = mlt.array_utils.numpy_str_join(
-                "_", cur_rel_id, cur_im_df.index.values.astype(str)
+            rel_df = pd.concat(rel_infos, axis=0).rename(
+                columns=SOURCE_TO_DB_COLUMNS_MAPPING
             )
+            rel_df["event_id"] = cur_event
 
-            rel_im_dfs.append(cur_im_df)
+            # Read the IM data
+            im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
+            rel_im_dfs = []
+            for cur_rel_ffp in im_files:
+                cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
 
-        im_df = pd.concat(rel_im_dfs, axis=0)
+                if cur_rel_id not in rel_df.index:
+                    logging.warning(
+                        f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
+                    )
+                    continue
 
-        with nng.imdb.IMDB(db_ffp) as db:
+                cur_im_df = pd.read_csv(cur_rel_ffp, index_col=0)[nng.constants.IMS]
+                cur_im_df["site_id"] = cur_im_df.index
+                cur_im_df["event_id"] = cur_event
+                cur_im_df["rel_id"] = cur_rel_id
+                cur_im_df.index = mlt.array_utils.numpy_str_join(
+                    "_", cur_rel_id, cur_im_df.index.values.astype(str)
+                )
+
+                rel_im_dfs.append(cur_im_df)
+
+            im_df = pd.concat(rel_im_dfs, axis=0)
+
             db.add_event_data(cur_event, median_info)
             db.add_realisation_data(rel_df)
             db.add_record_im_data(im_df)
+        
+        # Add site to event data
+        # Has to be after adding the event data
+        # as it uses the event_id -> event_int_id mapping
+        db.add_site_event_data(site_event_df)
+        
 
     logging.info(f"Database {db_ffp} created successfully.")
 
