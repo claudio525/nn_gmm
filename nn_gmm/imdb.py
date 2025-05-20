@@ -1,6 +1,7 @@
 from pathlib import Path
 import logging
 
+import numpy.typing as npt
 import numpy as np
 import pandas as pd
 import sqlite3
@@ -80,7 +81,7 @@ class IMDB:
         """
         self.cursor.execute("PRAGMA table_info(sites)")
         return [column_info[1] for column_info in self.cursor.fetchall()]
-    
+
     @property
     def site_event_table_columns(self) -> list:
         """
@@ -108,7 +109,7 @@ class IMDB:
         return [column_info[1] for column_info in self.cursor.fetchall()]
 
     @property
-    def event_to_int_id_mapping(self) -> dict:
+    def event_to_int_id_mapping(self) -> pd.Series:
         """
         Returns a mapping of event_ids to event_int_ids.
 
@@ -118,6 +119,24 @@ class IMDB:
             Mapping of event_ids to event_int_ids.
         """
         self.cursor.execute("SELECT event_id, event_int_id FROM events")
+        mapping = pd.Series(
+            {row[0]: row[1] for row in self.cursor.fetchall()},
+            name="event_int_id",
+        )
+
+        return {row[0]: row[1] for row in self.cursor.fetchall()}
+
+    @property
+    def event_int_to_id_mapping(self) -> dict:
+        """
+        Returns a mapping of event_int_ids to event_ids.
+
+        Returns
+        -------
+        dict
+            Mapping of event_int_ids to event_ids.
+        """
+        self.cursor.execute("SELECT event_int_id, event_id FROM events")
         return {row[0]: row[1] for row in self.cursor.fetchall()}
 
     @property
@@ -156,10 +175,12 @@ class IMDB:
             DataFrame containing all event data.
         """
         self.cursor.execute("SELECT * FROM events")
-        event_df = pd.DataFrame(self.cursor.fetchall(), columns=self.event_table_columns)
-        event_df = event_df.set_index("event_id").drop(columns=["event_int_id"])
+        event_df = pd.DataFrame(
+            self.cursor.fetchall(), columns=self.event_table_columns
+        )
+        event_df = event_df.set_index("event_id")
         return event_df
-    
+
     def get_site_df(self, max_grid_level: int = None) -> pd.DataFrame:
         """
         Returns a DataFrame containing all site data.
@@ -167,7 +188,7 @@ class IMDB:
         Parameters
         ----------
         max_grid_level : int, optional
-            Maximum grid level to filter the sites. 
+            Maximum grid level to filter the sites.
             If None, all sites are returned.
 
         Returns
@@ -177,14 +198,43 @@ class IMDB:
         """
         self.cursor.execute("SELECT * FROM sites")
         site_df = pd.DataFrame(self.cursor.fetchall(), columns=self.site_table_columns)
-        site_df = site_df.set_index("site_id").drop(columns=["site_int_id"])
+        site_df = site_df.set_index("site_id")
 
         if max_grid_level is not None:
             site_df = site_df[site_df["grid_level"] <= max_grid_level]
 
         return site_df
-    
-    def get_record_int_id(
+
+    def get_rel_df(self, events: npt.ArrayLike | None = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all realisation data.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all realisation data.
+        """
+        a = self.event_to_int_id_mapping
+
+        if events is None:
+            self.cursor.execute("SELECT * FROM realisations")
+        else:
+            self.cursor.execute(
+                "SELECT * FROM realisations WHERE event_int_id IN (?)",
+                (",".join(map(str, events)),),
+            )
+
+        rel_df = pd.DataFrame(
+            self.cursor.fetchall(), columns=self.realisation_table_columns
+        )
+        rel_df = rel_df.set_index("rel_id").drop(columns=["rel_int_id"])
+
+        rel_df["event_id"] = rel_df.event_int_id.map(self.event_int_to_id_mapping)
+        rel_df = rel_df.drop(columns=["event_int_id"])
+
+        return rel_df
+
+    def _get_record_int_id(
         self, event_int_id: np.ndarray, rel_int_id: np.ndarray, site_int_id: np.ndarray
     ) -> np.ndarray:
         """
@@ -210,7 +260,7 @@ class IMDB:
 
         return (event_int_id * p1) ^ (rel_int_id * p2) ^ (site_int_id * p3) % 100000000
 
-    def get_site_event_int_id(
+    def _get_site_event_int_id(
         self, site_int_id: np.ndarray, event_int_id: np.ndarray
     ) -> np.ndarray:
         """
@@ -223,7 +273,7 @@ class IMDB:
             Array of site integer IDs.
         event_int_id : np.ndarray
             Array of event integer IDs.
-        
+
         Returns
         -------
         np.ndarray
@@ -233,6 +283,36 @@ class IMDB:
         p1, p2 = 73856093, 19349663
 
         return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
+
+    def get_record_info_df(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing 
+        the record_id, event_id, rel_id, and site_id.
+        """
+
+        print("wtf")
+
+        self.cursor.execute(
+            """
+            SELECT record_int_id, event_int_id, rel_int_id, site_int_id
+            FROM record_ims
+            """
+        )
+
+        record_df = pd.DataFrame(
+            self.cursor.fetchall(),
+            columns=["record_int_id", "event_int_id", "rel_int_id", "site_int_id"],
+        )
+
+        print("wtf")
+
+        # Map the integer IDs back to their original values
+        record_df["event_id"] = record_df.event_int_id.map(self.event_int_to_id_mapping)
+        record_df["rel_id"] = record_df.rel_int_id.map(self.rel_to_int_id_mapping)
+        record_df["site_id"] = record_df.site_int_id.map(self.site_to_int_id_mapping)
+
+        return record_df
+
 
     def add_event_data(self, event_id: str, median_info: pd.Series) -> None:
         """
@@ -344,9 +424,13 @@ class IMDB:
         """
         assert np.all(np.isin(self.site_event_table_columns[3:], site_event_df.columns))
 
-        site_event_df["site_int_id"] = site_event_df.site_id.map(self.site_to_int_id_mapping).astype(int)
-        site_event_df["event_int_id"] = site_event_df.event_id.map(self.event_to_int_id_mapping).astype(int)
-        site_event_df["site_event_int_id"] = self.get_site_event_int_id(
+        site_event_df["site_int_id"] = site_event_df.site_id.map(
+            self.site_to_int_id_mapping
+        ).astype(int)
+        site_event_df["event_int_id"] = site_event_df.event_id.map(
+            self.event_to_int_id_mapping
+        ).astype(int)
+        site_event_df["site_event_int_id"] = self._get_site_event_int_id(
             site_event_df.site_int_id.values, site_event_df.event_int_id.values
         )
 
@@ -358,10 +442,15 @@ class IMDB:
         INSERT OR IGNORE INTO site_event (
             {columns}
         ) VALUES ({placeholders})"""
-        values = list(site_event_df[self.site_event_table_columns].itertuples(index=False, name=None))
+        values = list(
+            site_event_df[self.site_event_table_columns].itertuples(
+                index=False, name=None
+            )
+        )
         self.cursor.executemany(query, values)
-        logger.debug(f"Inserted site-event data for {len(site_event_df)} site-event pairs.")
-
+        logger.debug(
+            f"Inserted site-event data for {len(site_event_df)} site-event pairs."
+        )
 
     def add_record_im_data(self, im_df: pd.DataFrame) -> None:
         """
@@ -378,7 +467,7 @@ class IMDB:
         im_df["event_int_id"] = im_df.event_id.map(self.event_to_int_id_mapping)
         im_df["rel_int_id"] = im_df.rel_id.map(self.rel_to_int_id_mapping)
         im_df["site_int_id"] = im_df.site_id.map(self.site_to_int_id_mapping)
-        im_df["record_int_id"] = self.get_record_int_id(
+        im_df["record_int_id"] = self._get_record_int_id(
             im_df.event_int_id.values, im_df.rel_int_id.values, im_df.site_int_id.values
         )
 
@@ -390,7 +479,9 @@ class IMDB:
         INSERT OR IGNORE INTO record_ims (
             {columns}
         ) VALUES ({placeholders})"""
-        values = list(im_df[self.record_im_table_columns].itertuples(index=False, name=None))
+        values = list(
+            im_df[self.record_im_table_columns].itertuples(index=False, name=None)
+        )
         self.cursor.executemany(query, values)
 
         logger.debug(f"Inserted IM data for {len(im_df)} records.")

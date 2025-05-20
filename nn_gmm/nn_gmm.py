@@ -1,8 +1,16 @@
 import os
+import logging
 from pathlib import Path
 from dataclasses import dataclass
 
+import numpy as np
+import pandas as pd
+
 import ml_tools as mlt  
+
+from . import imdb
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class RunConfig:
@@ -26,10 +34,6 @@ class RunConfig:
 
     source_to_site_inputs: list[str]
     """Model source to site inputs"""
-
-
-
-
 
     @property
     def imdb_ffp(self) -> Path:
@@ -82,3 +86,23 @@ class RunConfig:
     @classmethod
     def from_yaml(cls, ffp: Path):
         return cls.from_dict(mlt.utils.load_yaml(ffp))
+
+
+def run_model_training(
+    run_config: RunConfig,
+    event_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    train_events: list[str],
+    val_events: list[str],
+    train_sites: list[str],
+    val_sites: list[str],
+):
+    events = np.concatenate([train_events, val_events])
+    sites = np.concatenate([train_sites, val_sites])
+
+    with imdb.IMDB(run_config.imdb_ffp) as db:
+        rel_df = db.get_rel_df(events=events)
+        # record_info_df = db.get_record_info_df()
+
+
+    print("wtf")
