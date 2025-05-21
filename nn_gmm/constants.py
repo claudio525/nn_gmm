@@ -21,8 +21,18 @@ DB_PSA_KEYS = ["pSA_0p01", "pSA_0p02", "pSA_0p03", "pSA_0p04", "pSA_0p05", "pSA_
                 "pSA_2p5", "pSA_3p0", "pSA_4p0", "pSA_5p0", "pSA_6p0", "pSA_7p5",
                 "pSA_10p0"]
 PSA_KEYS_TO_DB = dict(zip(PSA_KEYS, DB_PSA_KEYS))
-
-
 NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]
-
 IMS = PSA_KEYS + NON_PSA_IMS
+
+MIN_MAX_PRE_PROCESS_CONFIG = {
+    "magnitude": (2, 9),
+    "rake": (-180, 180),
+    "dip": (0, 90),
+    "dtop": (0, 15),
+    "dbottom": (5, 40),
+    "vs30": (100, 1500),
+    "z1p0": (0, 1.5),
+    "z2p5": (0, 12.5),
+    "lon": (166, 179),
+    "lat": (-47.5, -34.2)
+}

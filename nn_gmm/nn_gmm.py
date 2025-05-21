@@ -6,11 +6,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-import ml_tools as mlt  
+import ml_tools as mlt
 
 from . import imdb
+from . import preprocessing
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RunConfig:
@@ -19,6 +21,9 @@ class RunConfig:
 
     rel_imdb_ffp: str
     """Relative path to the IMDB file."""
+
+    max_rrup: float
+    """Maximum Rrup distance to consider."""
 
     ignore_events: list[str]
     """List of events to ignore."""
@@ -59,10 +64,11 @@ class RunConfig:
         return {
             "seed": self.seed,
             "rel_imdb_ffp": self.rel_imdb_ffp,
+            "max_rrup": self.max_rrup,
             "ignore_events": self.ignore_events,
             "device": self.device,
         }
-    
+
     @classmethod
     def from_config_kwargs(cls, config_ffp: Path, **kwargs):
         """
@@ -77,7 +83,6 @@ class RunConfig:
                 config_dict[cur_key] = cur_val
 
         return cls(**config_dict)
-    
 
     @classmethod
     def from_dict(cls, d: dict):
@@ -101,8 +106,39 @@ def run_model_training(
     sites = np.concatenate([train_sites, val_sites])
 
     with imdb.IMDB(run_config.imdb_ffp) as db:
-        rel_df = db.get_rel_df(events=events)
-        # record_info_df = db.get_record_info_df()
+        source_df = db.get_rel_df(events=events)
+        site_event_df = db.get_site_event_df(sites, max_rrup=run_config.max_rrup)
+        record_info_df = db.get_record_info_df(events=events, sites=sites)
 
+    # Add event level source data
+    source_df["tect_type"] = event_df.loc[source_df.event_int_id].tect_type.values
+    source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
+    source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
+    source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
+
+    # Run preprocessing
+    pre_site_df = preprocessing.pre_process_site_features(
+        site_df, run_config.site_inputs
+    )
+
+    pre_source_df = preprocessing.pre_process_source_features(
+        source_df, run_config.source_inputs
+    )
+
+    pre_site_event_df = preprocessing.pre_process_event_site_features(
+        site_event_df, run_config.source_to_site_inputs, run_config.max_rrup
+    )
+
+    # Get the record ids for the training and validation sets
+    train_record_ids = record_info_df.loc[
+        record_info_df.event_id.isin(train_events)
+        & record_info_df.site_id.isin(train_sites)
+    ].index.values.astype(int)
+    val_record_ids = record_info_df.loc[
+        record_info_df.event_id.isin(val_events)
+        & record_info_df.site_id.isin(val_sites)
+    ].index.values.astype(int)
+
+    
 
     print("wtf")

@@ -31,9 +31,8 @@ def train_gmm(run_config_ffp: Path):
     with nng.IMDB(run_config.imdb_ffp) as imdb:
         event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(max_grid_level=0)
-        rel_df = imdb.get_rel_df()
 
-    events, sites = event_df.index.values.astype(str), site_df.index.values.astype(str)
+    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(str)
     logger.info(f"Number of available events: {len(events)}")
     logger.info(f"Number of available sites: {len(sites)}")
 

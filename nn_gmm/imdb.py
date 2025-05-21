@@ -1,7 +1,7 @@
 from pathlib import Path
 import logging
+import time
 
-import numpy.typing as npt
 import numpy as np
 import pandas as pd
 import sqlite3
@@ -18,6 +18,19 @@ class IMDB:
         self.conn = None
         self.cursor = None
 
+        self._event_table_columns = None
+        self._realisation_table_columns = None
+        self._site_table_columns = None
+        self._site_event_table_columns = None
+        self._record_im_table_columns = None
+
+        self._event_to_int_id_mapping = None
+        self._event_int_to_id_mapping = None
+        self._rel_to_int_id_mapping = None
+        self._rel_int_to_id_mapping = None
+        self._site_to_int_id_mapping = None
+        self._site_int_to_id_mapping = None
+
     def __enter__(self) -> "IMDB":
         self.conn = sqlite3.connect(self.db_ffp)
         self.cursor = self.conn.cursor()
@@ -28,6 +41,7 @@ class IMDB:
         self.cursor.execute("PRAGMA cache_size = -500000")  # ~100MB cache
 
         self._create_tables()
+
         return self
 
     def __exit__(
@@ -44,69 +58,89 @@ class IMDB:
             self.conn.close()
 
     @property
-    def event_table_columns(self) -> list:
+    def event_table_columns(self) -> np.ndarray:
         """
         Returns the column names of the events table.
 
         Returns
         -------
-        list
+        np.ndarray
             Column names of the events table.
         """
-        self.cursor.execute("PRAGMA table_info(events)")
-        return [column_info[1] for column_info in self.cursor.fetchall()]
+        if self._event_table_columns is None:
+            self.cursor.execute("PRAGMA table_info(events)")
+            self._event_table_columns = np.array(
+                [column_info[1] for column_info in self.cursor.fetchall()]
+            )
+        return self._event_table_columns
 
     @property
-    def realisation_table_columns(self) -> list:
+    def realisation_table_columns(self) -> np.ndarray:
         """
         Returns the column names of the realisations table.
 
         Returns
         -------
-        list
+        np.ndarray
             Column names of the realisations table.
         """
-        self.cursor.execute("PRAGMA table_info(realisations)")
-        return [column_info[1] for column_info in self.cursor.fetchall()]
+        if self._realisation_table_columns is None:
+            self.cursor.execute("PRAGMA table_info(realisations)")
+            self._realisation_table_columns = np.array(
+                [column_info[1] for column_info in self.cursor.fetchall()]
+            )
+        return self._realisation_table_columns
 
     @property
-    def site_table_columns(self) -> list:
+    def site_table_columns(self) -> np.ndarray:
         """
         Returns the column names of the sites table.
 
         Returns
         -------
-        list
+        np.ndarray
             Column names of the sites table.
         """
-        self.cursor.execute("PRAGMA table_info(sites)")
-        return [column_info[1] for column_info in self.cursor.fetchall()]
+        if self._site_table_columns is None:
+            self.cursor.execute("PRAGMA table_info(sites)")
+            self._site_table_columns = np.array(
+                [column_info[1] for column_info in self.cursor.fetchall()]
+            )
+        return self._site_table_columns
 
     @property
-    def site_event_table_columns(self) -> list:
+    def site_event_table_columns(self) -> np.ndarray:
         """
         Returns the column names of the site_to_event table.
 
         Returns
         -------
-        list
+        np.ndarray
             Column names of the site_to_event table.
         """
-        self.cursor.execute("PRAGMA table_info(site_event)")
-        return [column_info[1] for column_info in self.cursor.fetchall()]
+        if self._site_event_table_columns is None:
+            self.cursor.execute("PRAGMA table_info(site_event)")
+            self._site_event_table_columns = np.array(
+                [column_info[1] for column_info in self.cursor.fetchall()]
+            )
+        return self._site_event_table_columns
 
     @property
-    def record_im_table_columns(self) -> list:
+    def record_im_table_columns(self) -> np.ndarray:
         """
         Returns the column names of the record_ims table.
 
         Returns
         -------
-        list
+        np.ndarray
             Column names of the record_ims table.
         """
-        self.cursor.execute("PRAGMA table_info(record_ims)")
-        return [column_info[1] for column_info in self.cursor.fetchall()]
+        if self._record_im_table_columns is None:
+            self.cursor.execute("PRAGMA table_info(record_ims)")
+            self._record_im_table_columns = np.array(
+                [column_info[1] for column_info in self.cursor.fetchall()]
+            )
+        return self._record_im_table_columns
 
     @property
     def event_to_int_id_mapping(self) -> pd.Series:
@@ -118,13 +152,13 @@ class IMDB:
         dict
             Mapping of event_ids to event_int_ids.
         """
-        self.cursor.execute("SELECT event_id, event_int_id FROM events")
-        mapping = pd.Series(
-            {row[0]: row[1] for row in self.cursor.fetchall()},
-            name="event_int_id",
-        )
-
-        return {row[0]: row[1] for row in self.cursor.fetchall()}
+        if self._event_to_int_id_mapping is None:
+            self._event_to_int_id_mapping = (
+                pd.read_sql("SELECT event_id, event_int_id FROM events", self.conn)
+                .set_index("event_id")
+                .squeeze()
+            )
+        return self._event_to_int_id_mapping
 
     @property
     def event_int_to_id_mapping(self) -> dict:
@@ -136,8 +170,13 @@ class IMDB:
         dict
             Mapping of event_int_ids to event_ids.
         """
-        self.cursor.execute("SELECT event_int_id, event_id FROM events")
-        return {row[0]: row[1] for row in self.cursor.fetchall()}
+        if self._event_int_to_id_mapping is None:
+            self._event_int_to_id_mapping = (
+                pd.read_sql("SELECT event_int_id, event_id FROM events", self.conn)
+                .set_index("event_int_id")
+                .squeeze()
+            ).astype("category")
+        return self._event_int_to_id_mapping
 
     @property
     def rel_to_int_id_mapping(self) -> dict:
@@ -149,8 +188,31 @@ class IMDB:
         dict
             Mapping of rel_ids to rel_int_ids.
         """
-        self.cursor.execute("SELECT rel_id, rel_int_id FROM realisations")
-        return {row[0]: row[1] for row in self.cursor.fetchall()}
+        if self._rel_to_int_id_mapping is None:
+            self._rel_to_int_id_mapping = (
+                pd.read_sql("SELECT rel_id, rel_int_id FROM realisations", self.conn)
+                .set_index("rel_id")
+                .squeeze()
+            )
+        return self._rel_to_int_id_mapping
+
+    @property
+    def rel_int_to_id_mapping(self) -> dict:
+        """
+        Returns a mapping of rel_int_ids to rel_ids.
+
+        Returns
+        -------
+        dict
+            Mapping of rel_int_ids to rel_ids.
+        """
+        if self._rel_int_to_id_mapping is None:
+            self._rel_int_to_id_mapping = (
+                pd.read_sql("SELECT rel_int_id, rel_id FROM realisations", self.conn)
+                .set_index("rel_int_id")
+                .squeeze()
+            ).astype("category")
+        return self._rel_int_to_id_mapping
 
     @property
     def site_to_int_id_mapping(self) -> dict:
@@ -162,77 +224,31 @@ class IMDB:
         dict
             Mapping of site_ids to site_int_ids.
         """
-        self.cursor.execute("SELECT site_id, site_int_id FROM sites")
-        return {row[0]: row[1] for row in self.cursor.fetchall()}
-
-    def get_event_df(self) -> pd.DataFrame:
-        """
-        Returns a DataFrame containing all event data.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing all event data.
-        """
-        self.cursor.execute("SELECT * FROM events")
-        event_df = pd.DataFrame(
-            self.cursor.fetchall(), columns=self.event_table_columns
-        )
-        event_df = event_df.set_index("event_id")
-        return event_df
-
-    def get_site_df(self, max_grid_level: int = None) -> pd.DataFrame:
-        """
-        Returns a DataFrame containing all site data.
-
-        Parameters
-        ----------
-        max_grid_level : int, optional
-            Maximum grid level to filter the sites.
-            If None, all sites are returned.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing all site data.
-        """
-        self.cursor.execute("SELECT * FROM sites")
-        site_df = pd.DataFrame(self.cursor.fetchall(), columns=self.site_table_columns)
-        site_df = site_df.set_index("site_id")
-
-        if max_grid_level is not None:
-            site_df = site_df[site_df["grid_level"] <= max_grid_level]
-
-        return site_df
-
-    def get_rel_df(self, events: npt.ArrayLike | None = None) -> pd.DataFrame:
-        """
-        Returns a DataFrame containing all realisation data.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame containing all realisation data.
-        """
-        a = self.event_to_int_id_mapping
-
-        if events is None:
-            self.cursor.execute("SELECT * FROM realisations")
-        else:
-            self.cursor.execute(
-                "SELECT * FROM realisations WHERE event_int_id IN (?)",
-                (",".join(map(str, events)),),
+        if self._site_to_int_id_mapping is None:
+            self._site_to_int_id_mapping = (
+                pd.read_sql("SELECT site_id, site_int_id FROM sites", self.conn)
+                .set_index("site_id")
+                .squeeze()
             )
+        return self._site_to_int_id_mapping
 
-        rel_df = pd.DataFrame(
-            self.cursor.fetchall(), columns=self.realisation_table_columns
-        )
-        rel_df = rel_df.set_index("rel_id").drop(columns=["rel_int_id"])
+    @property
+    def site_int_to_id_mapping(self) -> dict:
+        """
+        Returns a mapping of site_int_ids to site_ids.
 
-        rel_df["event_id"] = rel_df.event_int_id.map(self.event_int_to_id_mapping)
-        rel_df = rel_df.drop(columns=["event_int_id"])
-
-        return rel_df
+        Returns
+        -------
+        dict
+            Mapping of site_int_ids to site_ids.
+        """
+        if self._site_int_to_id_mapping is None:
+            self._site_int_to_id_mapping = (
+                pd.read_sql("SELECT site_int_id, site_id FROM sites", self.conn)
+                .set_index("site_int_id")
+                .squeeze()
+            ).astype("category")
+        return self._site_int_to_id_mapping
 
     def _get_record_int_id(
         self, event_int_id: np.ndarray, rel_int_id: np.ndarray, site_int_id: np.ndarray
@@ -284,35 +300,171 @@ class IMDB:
 
         return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
 
-    def get_record_info_df(self) -> pd.DataFrame:
+    def get_event_df(self) -> pd.DataFrame:
         """
-        Returns a DataFrame containing 
+        Returns a DataFrame containing all event data.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all event data.
+        """
+        event_df = pd.read_sql("SELECT * FROM events", self.conn, index_col="event_int_id")
+        event_df["tect_type"] = event_df["tect_type"].astype("category")
+
+        return event_df
+
+    def get_site_df(self, max_grid_level: int = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all site data.
+
+        Parameters
+        ----------
+        max_grid_level : int, optional
+            Maximum grid level to filter the sites.
+            If None, all sites are returned.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all site data.
+        """
+        site_df = pd.read_sql("SELECT * FROM sites", self.conn, index_col="site_int_id")
+
+        if max_grid_level is not None:
+            site_df = site_df[site_df["grid_level"] <= max_grid_level]
+
+        return site_df
+
+    def get_rel_df(self, events: np.ndarray | None = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all realisation data.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all realisation data.
+        """
+        logger.info("Getting realisation data from the database.")
+        rel_df = pd.read_sql("SELECT * FROM realisations", self.conn, index_col="rel_int_id")
+        rel_df["event_id"] = self.event_int_to_id_mapping[
+            rel_df.event_int_id.values
+        ].values
+
+        if events is not None:
+            rel_df = rel_df[rel_df["event_id"].isin(events)]
+
+        return rel_df
+
+    def get_site_event_df(self, sites: np.ndarray, max_rrup: float | None = None) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing all site-event data.
+
+        Parameters
+        ----------
+        sites : np.ndarray, optional
+            Array of site IDs to filter the site-event data.
+            If None, all site-event data is returned.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing all site-event data.
+        """
+        logger.info("Getting site-event data from the database.")
+
+        start = time.time()
+        site_int_ids = self.site_to_int_id_mapping[sites].values.tolist()
+        site_event_df = pd.read_sql(
+            f"""
+            SELECT se.*
+            FROM site_event se
+            INNER JOIN (SELECT site_int_id FROM sites WHERE site_int_id IN ({", ".join("?" * len(site_int_ids))})) sf
+            ON sf.site_int_id = se.site_int_id
+            {"WHERE se.rrup <= {}".format(max_rrup) if max_rrup is not None else ""}
+            """,
+            self.conn,
+            params=site_int_ids,
+            index_col="site_event_int_id",
+        )
+        print(f"Took: {time.time() - start:.3f} to get site-event data for {len(site_int_ids)} sites.")
+
+        site_event_df["site_id"] = self.site_int_to_id_mapping[
+            site_event_df.site_int_id.values
+        ].values
+        site_event_df["event_id"] = self.event_int_to_id_mapping[
+            site_event_df.event_int_id.values
+        ].values
+
+        return site_event_df
+
+    def get_record_info_df(
+        self, events: np.ndarray | None = None, sites: np.ndarray | None = None
+    ) -> pd.DataFrame:
+        """
+        Returns a DataFrame containing
         the record_id, event_id, rel_id, and site_id.
         """
+        logger.info("Getting record info from the database.")
 
-        print("wtf")
+        if events is not None and sites is not None:
+            site_int_ids = self.site_to_int_id_mapping[sites].values.tolist()
+            event_int_ids = self.event_to_int_id_mapping[events].values.tolist()
+            start = time.time()
+            record_info_df = pd.read_sql(
+                f"""
+                SELECT r.record_int_id, r.event_int_id, r.site_int_id, r.rel_int_id
+                FROM record_ims r
+                INNER JOIN (SELECT site_int_id FROM sites WHERE site_int_id IN ({", ".join("?" * len(site_int_ids))})) sf
+                ON sf.site_int_id = r.site_int_id
+                INNER JOIN (SELECT event_int_id FROM events WHERE event_int_id IN ({", ".join("?" * len(event_int_ids))})) ef
+                ON ef.event_int_id = r.event_int_id
+                """,
+                self.conn,
+                params=site_int_ids + event_int_ids,
+                index_col="record_int_id",
+            )
+            logger.info(
+                f"Took: {time.time() - start:.3f}s to get record info for {len(site_int_ids)} sites and {len(event_int_ids)} events."
+            )
+        elif sites is not None:
+            site_int_ids = self.site_to_int_id_mapping[sites].values.tolist()
+            start = time.time()
+            record_info_df = pd.read_sql(
+                f"""
+                SELECT r.record_int_id, r.event_int_id, r.site_int_id, r.rel_int_id
+                FROM record_ims r
+                INNER JOIN (SELECT site_int_id FROM sites WHERE site_int_id IN ({", ".join("?" * len(site_int_ids))})) sf
+                ON sf.site_int_id = r.site_int_id
+                """,
+                self.conn,
+                params=site_int_ids,
+                index_col="record_int_id",
+            )
+            logger.info(
+                f"Took: {time.time() - start:.3f}s to get record info for {len(site_int_ids)} sites."
+            )
+        elif events is not None:
+            raise NotImplementedError()
 
-        self.cursor.execute(
-            """
-            SELECT record_int_id, event_int_id, rel_int_id, site_int_id
-            FROM record_ims
-            """
-        )
-
-        record_df = pd.DataFrame(
-            self.cursor.fetchall(),
-            columns=["record_int_id", "event_int_id", "rel_int_id", "site_int_id"],
-        )
-
-        print("wtf")
+        else:
+            logger.warning(
+                "No filters applied, return all records. Currently this is not supported."
+            )
+            return None
 
         # Map the integer IDs back to their original values
-        record_df["event_id"] = record_df.event_int_id.map(self.event_int_to_id_mapping)
-        record_df["rel_id"] = record_df.rel_int_id.map(self.rel_to_int_id_mapping)
-        record_df["site_id"] = record_df.site_int_id.map(self.site_to_int_id_mapping)
+        record_info_df["event_id"] = self.event_int_to_id_mapping[
+            record_info_df.event_int_id.values
+        ].values
+        record_info_df["site_id"] = self.site_int_to_id_mapping[
+            record_info_df.site_int_id.values
+        ].values
+        record_info_df["rel_id"] = self.rel_int_to_id_mapping[
+            record_info_df.rel_int_id.values
+        ].values
 
-        return record_df
-
+        return record_info_df
 
     def add_event_data(self, event_id: str, median_info: pd.Series) -> None:
         """
@@ -609,4 +761,8 @@ class IMDB:
         self.cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_record_ims_site_id 
                ON record_ims (site_int_id)"""
+        )
+        self.cursor.execute(
+            """CREATE INDEX IF NOT EXISTS idx_record_ims_site_event_rel
+                ON record_ims (site_int_id, event_int_id, rel_int_id)"""
         )

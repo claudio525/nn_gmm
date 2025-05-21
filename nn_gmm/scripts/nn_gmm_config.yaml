@@ -1,6 +1,7 @@
 seed: 42
 
 rel_imdb_ffp: "nn_gmm/202505_CS200m_imdb.db"
+max_rrup: 300
 
 ignore_events: null
 
