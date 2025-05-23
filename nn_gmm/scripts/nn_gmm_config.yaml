@@ -2,8 +2,9 @@ seed: 42
 
 rel_imdb_ffp: "nn_gmm/202505_CS200m_imdb.db"
 max_rrup: 300
-
 ignore_events: null
+
+im_set: "pSA"
 
 site_inputs: 
 - "lat"
@@ -29,6 +30,8 @@ source_to_site_inputs:
 - "rx"
 # - "ry"
 
+
+batch_size: 1024
 
 
 

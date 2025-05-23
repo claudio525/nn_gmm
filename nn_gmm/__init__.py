@@ -2,6 +2,7 @@ from . import constants
 from .imdb import IMDB
 from . import utils
 from . import nn_gmm
+from . import data
 from .nn_gmm import RunConfig
 
-__all__ = ['constants', 'IMDB', 'RunConfig', 'utils', 'nn_gmm']
+__all__ = ['constants', 'IMDB', 'RunConfig', 'utils', 'nn_gmm', 'data']

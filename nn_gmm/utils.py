@@ -61,29 +61,32 @@ def setup_logging(log_file: Path, file_level=logging.DEBUG, console_level=loggin
     logger = logging.getLogger()
     # Set logger to the lowest level of any handler
     logger.setLevel(min(file_level, console_level))
-    
+
     # Clear any existing handlers
     logger.handlers = []
-    
+
     # Create file handler with its own level
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(file_level)  # More detailed logging to file
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    ))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     logger.addHandler(file_handler)
-    
+
     # Create console handler with its own level
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(console_level)  # Less verbose on console
-    console_handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s'
-    ))
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    )
     logger.addHandler(console_handler)
-    
+
     return logger
 
-def run_site_to_source_calc(faults: dict[str, sources.Fault], site_df: pd.DataFrame) -> pd.DataFrame:
+
+def run_site_to_source_calc(
+    faults: dict[str, sources.Fault], site_df: pd.DataFrame
+) -> pd.DataFrame:
     """
     Computes the source to site distances for the given faults and sites
 
@@ -126,9 +129,13 @@ def run_site_to_source_calc(faults: dict[str, sources.Fault], site_df: pd.DataFr
 
     # Compute rupture scenario distances
     dist_dfs = []
-    for cur_site_id, cur_site_row in tqdm(site_df.iterrows(), "Processing sites", total=site_df.shape[0]):
-        cur_site_nztm_coords = np.array([cur_site_row["nztm_x"], cur_site_row["nztm_y"], 0])
-        cur_dist_df  = sha.site_source.get_scenario_distances(
+    for cur_site_id, cur_site_row in tqdm(
+        site_df.iterrows(), "Processing sites", total=site_df.shape[0]
+    ):
+        cur_site_nztm_coords = np.array(
+            [cur_site_row["nztm_x"], cur_site_row["nztm_y"], 0]
+        )
+        cur_dist_df = sha.site_source.get_scenario_distances(
             scenario_ids,
             scenario_section_ids,
             plane_nztm_coords,
@@ -144,3 +151,28 @@ def run_site_to_source_calc(faults: dict[str, sources.Fault], site_df: pd.DataFr
     dist_df = dist_df.astype({"event_id": "category", "site_id": "category"})
 
     return dist_df
+
+
+def get_site_event_int_id(
+    site_int_id: np.ndarray, event_int_id: np.ndarray
+) -> np.ndarray:
+    """
+    Generate unique integer IDs for each site-event pair
+    based on site and event IDs.
+
+    Parameters
+    ----------
+    site_int_id : np.ndarray
+        Array of site integer IDs.
+    event_int_id : np.ndarray
+        Array of event integer IDs.
+
+    Returns
+    -------
+    np.ndarray
+        Array of unique integer IDs for each site-event pair.
+    """
+    # Prime multipliers for good distribution
+    p1, p2 = 73856093, 19349663
+
+    return (site_int_id * p1) ^ (event_int_id * p2) % 100000000

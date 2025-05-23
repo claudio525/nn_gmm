@@ -1,3 +1,5 @@
+import pandas as pd
+
 PSA_KEYS = [
     'pSA_0.01', 'pSA_0.02', 'pSA_0.03', 'pSA_0.04', 'pSA_0.05', 'pSA_0.075',
     'pSA_0.1', 'pSA_0.12', 'pSA_0.15', 'pSA_0.17', 'pSA_0.2', 'pSA_0.25',
@@ -21,8 +23,16 @@ DB_PSA_KEYS = ["pSA_0p01", "pSA_0p02", "pSA_0p03", "pSA_0p04", "pSA_0p05", "pSA_
                 "pSA_2p5", "pSA_3p0", "pSA_4p0", "pSA_5p0", "pSA_6p0", "pSA_7p5",
                 "pSA_10p0"]
 PSA_KEYS_TO_DB = dict(zip(PSA_KEYS, DB_PSA_KEYS))
+PSA_KEYS_TO_DB_SERIES = pd.Series(PSA_KEYS_TO_DB)
+DB_PSA_KEYS_TO_PSA = dict(zip(DB_PSA_KEYS, PSA_KEYS))
+
 NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]
 IMS = PSA_KEYS + NON_PSA_IMS
+
+IM_SET_MAPPING = {
+    "pSA": PSA_KEYS,
+    "all": IMS
+}
 
 MIN_MAX_PRE_PROCESS_CONFIG = {
     "magnitude": (2, 9),

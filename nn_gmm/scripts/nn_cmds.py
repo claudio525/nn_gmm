@@ -12,13 +12,14 @@ if torch.cuda.is_available():
     device = "cuda"
 
 
-
 app = typer.Typer()
 
 
 @app.command("train-gmm")
 def train_gmm(run_config_ffp: Path):
-    logger = nng.utils.setup_logging(Path("./nn_cmds.log"))
+    log_ffp = Path(__file__).parent / "nn_cmds.log"
+    logger = nng.utils.setup_logging(log_ffp)
+    print("Writing logs to:", log_ffp)
 
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
