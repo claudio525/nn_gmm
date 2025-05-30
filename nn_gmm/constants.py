@@ -16,6 +16,7 @@ PSA_PERIODS = [
     2.5, 3.0, 4.0, 5.0, 6.0, 7.5,
     10.0
 ]
+
 DB_PSA_KEYS = ["pSA_0p01", "pSA_0p02", "pSA_0p03", "pSA_0p04", "pSA_0p05", "pSA_0p075",
                 "pSA_0p1", "pSA_0p12", "pSA_0p15", "pSA_0p17", "pSA_0p2", "pSA_0p25",
                 "pSA_0p3", "pSA_0p4", "pSA_0p5", "pSA_0p6", "pSA_0p7", "pSA_0p75",
@@ -26,8 +27,13 @@ PSA_KEYS_TO_DB = dict(zip(PSA_KEYS, DB_PSA_KEYS))
 PSA_KEYS_TO_DB_SERIES = pd.Series(PSA_KEYS_TO_DB)
 DB_PSA_KEYS_TO_PSA = dict(zip(DB_PSA_KEYS, PSA_KEYS))
 
+
 NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]
 IMS = PSA_KEYS + NON_PSA_IMS
+
+# PRED_PSA_KEYS = [f"{k}_pred" for k in PSA_KEYS]
+# PRED_NON_PSA_IMS = [f"{k}_pred" for k in NON_PSA_IMS]
+# PRED_IMS = PRED_PSA_KEYS + PRED_NON_PSA_IMS
 
 IM_SET_MAPPING = {
     "pSA": PSA_KEYS,

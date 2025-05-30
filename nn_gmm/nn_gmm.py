@@ -3,9 +3,14 @@ import time
 import logging
 from pathlib import Path
 from dataclasses import dataclass
+from typing import NamedTuple
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 import ml_tools as mlt
 
@@ -14,6 +19,7 @@ from . import preprocessing
 from . import data
 from . import constants
 from . import utils
+from . import nn_gmm_modules
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,9 @@ class RunConfig:
 
     rel_imdb_ffp: str
     """Relative path to the IMDB file."""
+
+    rel_test_events_ffp: str
+    """Relative path to the test events file."""
 
     max_rrup: float
     """Maximum Rrup distance to consider."""
@@ -47,20 +56,73 @@ class RunConfig:
     source_to_site_inputs: list[str]
     """Model source to site inputs"""
 
+    n_epochs: int
+    """Number of epochs to train the model"""
+
     batch_size: int
     """Batch size for training"""
 
+    model_config: "ModelConfig"
+    """Model configuration"""
+
+    rel_results_dir: str
+    """Relative path to the results directory."""
+
+    def __post_init__(self):
+        self._test_events = np.load(self.test_events_ffp)
+
+    @property
+    def test_events_ffp(self) -> Path:
+        """Absolute path to the test events file."""
+        return Path(os.environ["wdata"]) / self.rel_test_events_ffp
+
     @property
     def imdb_ffp(self) -> Path:
-        """
-        Get the absolute path to the IMDB file.
-
-        Returns
-        -------
-        Path
-            Absolute path to the IMDB file.
-        """
+        """Absolute path to the IMDB file."""
         return Path(os.environ["wdata"]) / self.rel_imdb_ffp
+
+    @property
+    def results_dir(self) -> Path:
+        """Absolute path to the results directory."""
+        return Path(os.environ["wdata"]) / self.rel_results_dir
+
+    @property
+    def test_events(self) -> np.ndarray:
+        """Get the test events."""
+        return self._test_events
+
+    @property
+    def ims(self) -> np.ndarray:
+        """IMs to use for the model."""
+        return np.array(constants.IM_SET_MAPPING[self.im_set])
+    
+    @property
+    def pred_mean_keys(self) -> np.ndarray:
+        """Predicted mean IM keys."""
+        return np.array([f"{cur_im}_pred" for cur_im in self.ims])
+    
+    @property
+    def pred_std_keys(self) -> np.ndarray:
+        """Predicted IM std keys."""
+        return np.array([f"{cur_im}_pred_std" for cur_im in self.ims])
+
+    @property
+    def n_inputs(self) -> int:
+        """Get the number of inputs for the model."""
+        n_inputs = (
+            len((self.site_inputs))
+            + len((self.source_inputs))
+            + len(self.source_to_site_inputs)
+        )
+        if "tect_type" in self.source_inputs:
+            n_inputs += 2
+
+        return n_inputs
+
+    @property
+    def n_ims(self) -> int:
+        """Number of IMs."""
+        return len(self.ims)
 
     def to_dict(self) -> dict:
         """
@@ -74,7 +136,8 @@ class RunConfig:
         return {
             "seed": int(self.seed),
             "rel_imdb_ffp": str(self.rel_imdb_ffp),
-            "max_rrup": list(self.max_rrup),
+            "rel_test_events_ffp": str(self.rel_test_events_ffp),
+            "max_rrup": float(self.max_rrup),
             "ignore_events": self.ignore_events,
             "device": self.device,
             "im_set": list(self.im_set),
@@ -83,6 +146,10 @@ class RunConfig:
             "source_to_site_inputs": list(self.source_to_site_inputs),
             "batch_size": float(self.batch_size),
         }
+    
+    def to_yaml(self, ffp: Path):
+        """Save the RunConfig to a YAML file."""
+        mlt.utils.write_to_yaml(self.to_dict(), ffp)
 
     @classmethod
     def from_config_kwargs(cls, config_ffp: Path, **kwargs):
@@ -97,22 +164,85 @@ class RunConfig:
             if cur_val is not None:
                 config_dict[cur_key] = cur_val
 
-        return cls(**config_dict)
+        return cls.from_dict(config_dict)
 
     @classmethod
     def from_dict(cls, d: dict):
+        model_config = ModelConfig.from_dict(d.pop("model"))
+        d["model_config"] = model_config
+
         return cls(**d)
 
     @classmethod
     def from_yaml(cls, ffp: Path):
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
-    @property
-    def ims(self) -> np.ndarray:
-        return np.array(constants.IM_SET_MAPPING[self.im_set])
+
+@dataclass
+class ModelConfig:
+
+    units: list[int]
+    """List of units for each layer in the model."""
+    activation: str
+    """Activation function to use in the model."""
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        """
+        Create a ModelConfig instance from a dictionary.
+
+        Parameters
+        ----------
+        d : dict
+            Dictionary containing model configuration parameters.
+
+        Returns
+        -------
+        ModelConfig
+            An instance of ModelConfig.
+        """
+        return cls(**d)
+
+    @classmethod
+    def to_dict(cls, model_config: "ModelConfig") -> dict:
+        """
+        Convert a ModelConfig instance to a dictionary.
+
+        Parameters
+        ----------
+        model_config : ModelConfig
+            The ModelConfig instance to convert.
+
+        Returns
+        -------
+        dict
+            Dictionary representation of the ModelConfig instance.
+        """
+        return {
+            "units": model_config.units,
+            "activation": model_config.activation,
+        }
+
+
+class BatchResult(NamedTuple):
+    batch: data.BatchData
+    """The batch data"""
+
+    pred_mean: torch.Tensor
+    """The predicted mean values"""
+    pred_ln_std: torch.Tensor
+    """The predicted standard deviation values in logspace"""
+    pred_std: torch.Tensor
+    """The predicted standard deviation values"""
+
+    loss: torch.Tensor
+    """The batch loss"""
+    ind_loss: torch.Tensor
+    """The individual losses, this includes nan-values"""
 
 
 def run_model_training(
+    ouput_dir: Path,
     run_config: RunConfig,
     event_df: pd.DataFrame,
     site_df: pd.DataFrame,
@@ -123,6 +253,11 @@ def run_model_training(
 ):
     events = np.concatenate([train_events, val_events])
     sites = np.concatenate([train_sites, val_sites])
+
+    # Sanity check
+    assert (
+        np.isin(run_config.test_events, events).sum() == 0
+    ), "Test events are not allowed in the training or validation sets. "
 
     with imdb.IMDB(run_config.imdb_ffp) as db:
         source_df = db.get_rel_df(events=events)
@@ -169,6 +304,11 @@ def run_model_training(
         & record_info_df.site_id.isin(val_sites)
     ].index.values.astype(int)
 
+    assert record_info_df.loc[train_record_ids].event_id.isin(val_events).sum() == 0
+    assert record_info_df.loc[val_record_ids].event_id.isin(train_events).sum() == 0
+    assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
+    assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
+
     # train_record_ids = np.sort(train_record_ids)
     # val_record_ids = np.sort(val_record_ids)
 
@@ -198,10 +338,231 @@ def run_model_training(
         val_dataset, batch_size=run_config.batch_size, shuffle=False
     )
 
-    start_time = time.time()
-    for cur_batch in train_dataloader:
-        cur_time = time.time()
-        print("Batch time: ", cur_time - start_time)
-        start_time = cur_time
+    model = nn_gmm_modules.create_multi_mlp(
+        run_config.n_inputs,
+        run_config.model_config.units,
+        run_config.n_ims * 2,
+        run_config.model_config.activation,
+    )
+
+    logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
+    logger.info(
+        f"Training model with {len(train_dataset)} training records "
+        f"and {len(val_dataset)} validation records"
+    )
+
+    metrics, best_model_state, best_model_epoch = train(
+        run_config, model, train_dataloader, val_dataloader
+    )
+    metrics_df = pd.DataFrame(metrics)
+
+    # Load the best model
+    model.load_state_dict(best_model_state)
+
+    # Get predictions
+    logging.info("Getting validation dataset predictions")
+    val_results_df = get_predictions(model, val_dataset, run_config)
+
+    logging.info("Getting training dataset predictions")
+    train_results_df = get_predictions(model, train_dataset, run_config)
+
+    # Create output directory
+    ouput_dir.mkdir()
+
+    run_config.to_yaml(ouput_dir / "run_config.yaml")
+    metrics_df.to_parquet(ouput_dir / "metrics.parquet")
+    val_results_df.to_parquet(ouput_dir / "val_results.parquet")
+    train_results_df.to_parquet(ouput_dir / "train_results.parquet")
+
+    torch.save(model, ouput_dir / "model.pt")
+
+    metadata = {
+        "best_model_epoch": int(best_model_epoch),
+        "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]),
+        "n_train_samples": int(train_results_df.shape[0]),
+        "n_val_samples": int(val_results_df.shape[0]),
+        "n_model_params": int(nn_gmm_modules.get_n_params(model)),
+    }
+    mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
 
     print("wtf")
+
+
+def get_predictions(
+    model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig
+):
+    """
+    Get predictions for the given model and dataset.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The trained model to use for predictions.
+    dataset : data.IMDBDataset
+        The dataset to get predictions for.
+    run_config : RunConfig
+        The run configuration containing the necessary parameters.
+    
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame containing the predicted mean and standard deviation values.
+    """
+    dataloader = data.CustomDataLoader(
+        dataset, batch_size=2048, shuffle=False)
+    
+    result_dfs = []
+    with imdb.IMDB(run_config.imdb_ffp, readonly=True) as db:
+        for cur_batch in tqdm(dataloader, desc="Predicting"):
+            model.eval()
+            with torch.no_grad():
+                pred_mean, pred_ln_std = model(cur_batch.X.to(run_config.device)).chunk(2, dim=-1)
+                pred_std = torch.exp(pred_ln_std)
+
+                cur_result_df = pd.DataFrame(data=np.concatenate([pred_mean.cpu().numpy(force=True), pred_std.cpu().numpy(force=True)], axis=1),
+                                            columns=np.concatenate((run_config.pred_mean_keys, run_config.pred_std_keys)),
+                                            index=cur_batch.record_int_ids)
+                
+                result_dfs.append(cur_result_df)
+
+    result_df = pd.concat(result_dfs, axis=0)
+    return result_df
+
+def train(
+    run_config: RunConfig,
+    model: nn.Module,
+    train_dataloader: data.CustomDataLoader,
+    val_dataloader: data.CustomDataLoader,
+    verbose: bool = True,
+):
+    # Setup metrics to log
+    metrics = {
+        "loss_hist_train": np.zeros(run_config.n_epochs),
+        "loss_hist_val": np.zeros(run_config.n_epochs),
+        "mse_hist_train": np.zeros(run_config.n_epochs),
+        "mse_hist_val": np.zeros(run_config.n_epochs),
+        "mean_sigma_hist_train": np.zeros(run_config.n_epochs),
+        "mean_sigma_hist_val": np.zeros(run_config.n_epochs),
+    }
+
+    best_val_loss = np.inf
+    best_model_state, best_model_epoch = None, None
+
+    model = model.to(run_config.device)
+    optimizer = torch.optim.Adam(model.parameters())
+
+    for cur_epoch_ix in range(run_config.n_epochs):
+        if verbose:
+            logging.debug(f"Epoch: {cur_epoch_ix + 1}/{run_config.n_epochs}")
+
+        ### Training
+        n_samples = 0
+        model.train()
+        for cur_batch in tqdm(train_dataloader, disable=not verbose):
+            optimizer.zero_grad()
+
+            cur_bresult = _get_batch_result(cur_batch, model, run_config)
+
+            cur_bresult.loss.backward()
+            optimizer.step()
+
+            metrics = _save_metrics(
+                cur_bresult, metrics, run_config, cur_epoch_ix, "train"
+            )
+            n_samples += cur_batch.n_samples
+
+        metrics["loss_hist_train"][cur_epoch_ix] /= n_samples
+        metrics["mse_hist_train"][cur_epoch_ix] /= n_samples
+        metrics["mean_sigma_hist_train"][cur_epoch_ix] /= n_samples
+
+        ### Validation
+        if val_dataloader is not None:
+            model.eval()
+            n_samples = 0
+            with torch.no_grad():
+                for cur_batch in val_dataloader:
+                    cur_bresult = _get_batch_result(cur_batch, model, run_config)
+
+                    metrics = _save_metrics(
+                        cur_bresult, metrics, run_config, cur_epoch_ix, "val"
+                    )
+                    n_samples += cur_batch.n_samples
+
+            metrics["loss_hist_val"][cur_epoch_ix] /= n_samples
+            metrics["mse_hist_val"][cur_epoch_ix] /= n_samples
+            metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_samples
+
+            # Keep track of the best model
+            if metrics["loss_hist_val"][cur_epoch_ix] < best_val_loss:
+                best_val_loss = metrics["loss_hist_val"][cur_epoch_ix]
+                best_model_state = model.state_dict()
+                best_model_epoch = cur_epoch_ix
+
+        if verbose:
+            logging.info(
+                f"\tTraining\t\t"
+                f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
+                f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
+            )
+            if val_dataloader is not None:
+                logging.info(
+                    f"\tValidation\t\t"
+                    f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
+                    f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
+                )
+
+    return metrics, best_model_state, best_model_epoch
+
+
+def _get_batch_result(
+    batch: data.BatchData,
+    model: nn.Module,
+    run_config: RunConfig,
+) -> BatchResult:
+    X, y = batch.X.to(run_config.device), batch.y.to(run_config.device)
+
+    pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+    pred_std = torch.exp(pred_ln_std)
+
+    ind_loss = F.gaussian_nll_loss(
+        pred_mean,
+        y,
+        pred_std**2,
+        reduction="none",
+    )
+    if (nan_count := ind_loss.isnan().sum()) > 0:
+        logger.warning(f"Loss has {nan_count} NaN values!!")
+    loss = ind_loss.mean()
+
+    return BatchResult(batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss)
+
+
+def _save_metrics(
+    batch_result: BatchResult,
+    metrics: dict[str, np.ndarray[float]],
+    run_config: RunConfig,
+    epoch_ix: int,
+    result_type: str,
+):
+    """Computes and saves the metrics for a single batch"""
+    loss_hist_key = f"loss_hist_{result_type}"
+    mse_hist_key = f"mse_hist_{result_type}"
+    mean_sigma_hist_key = f"mean_sigma_hist_{result_type}"
+
+    # Save metrics
+    metrics[loss_hist_key][epoch_ix] += batch_result.ind_loss.mean(dim=1).sum().item()
+    metrics[mse_hist_key][epoch_ix] += (
+        F.mse_loss(
+            batch_result.pred_mean,
+            batch_result.batch.y.to(run_config.device),
+            reduction="none",
+        )
+        .mean(dim=1)
+        .sum()
+        .item()
+    )
+    metrics[mean_sigma_hist_key][epoch_ix] += (
+        batch_result.pred_std.mean(dim=1).sum().item()
+    )
+
+    return metrics

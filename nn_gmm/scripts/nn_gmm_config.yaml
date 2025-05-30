@@ -1,17 +1,18 @@
 seed: 42
 
-rel_imdb_ffp: "nn_gmm/202505_CS200m_imdb.db"
+rel_imdb_ffp: nn_gmm/202505_CS200m_imdb.db
+rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
 
-im_set: "pSA"
+im_set: pSA
 
 site_inputs: 
-- "lat"
-- "lon"
-- "vs30"
-- "z1p0"
-- "z2p5"
+- lat
+- lon
+- vs30
+- z1p0
+- z2p5
 
 source_inputs:
 - "magnitude"
@@ -30,8 +31,14 @@ source_to_site_inputs:
 - "rx"
 # - "ry"
 
-
+n_epochs: 100
 batch_size: 1024
 
 
+model:
+  units: [32, 32, 32]
+  activation: relu
 
+
+
+rel_results_dir: nn_gmm/results

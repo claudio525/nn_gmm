@@ -4,7 +4,6 @@ import dataclasses
 from pathlib import Path
 import time
 
-from tqdm import tqdm
 import psutil
 import pandas as pd
 import numpy as np
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 class BaseBatchData(abc.ABC):
 
     @abc.abstractmethod
-    def to_tensor(self) -> "BaseBatchData":
+    def to_tensor(self, device: str = None) -> "BaseBatchData":
         pass
 
 
@@ -34,6 +33,43 @@ class BaseDataset(abc.ABC):
     @abc.abstractmethod
     def __len__(self) -> int:
         pass
+
+
+class BatchData(BaseBatchData):
+    """
+    Represents a single batch
+    """
+
+    def __init__(
+        self,
+        record_int_ids: np.ndarray,
+        X: np.ndarray,
+        y: np.ndarray,
+    ):
+        self.y = y
+        self.X = X
+
+        self.record_int_ids = record_int_ids
+
+    @property
+    def n_samples(self) -> int:
+        return self.y.shape[0]
+
+    def to_tensor(self, device: str = None) -> "BatchData":
+        """
+        Convert the data to PyTorch tensors
+        """
+        if device is None:
+            self.y = torch.from_numpy(self.y).to(dtype=torch.float32)
+            self.X = torch.from_numpy(self.X).to(dtype=torch.float32)
+        else:
+            self.y = torch.from_numpy(self.y).to(dtype=torch.float32, device=device)
+            self.X = torch.from_numpy(self.X).to(dtype=torch.float32, device=device)
+
+        return self
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, y={self.y.shape})"
 
 
 class CustomDataLoader:
@@ -62,7 +98,7 @@ class CustomDataLoader:
     def __len__(self) -> int:
         return self.n_batches
 
-    def __next__(self) -> BaseBatchData:
+    def __next__(self) -> BatchData:
         if self.i >= len(self.dataset):
             raise StopIteration
 
@@ -120,31 +156,28 @@ class IMDBDataset(BaseDataset):
         logger.info(f"Memory required: {mem_req:.2f} GB")
 
         if mem_req > (total_mem_avail := psutil.virtual_memory().total / 1e9):
-            logger.warning(
-                f"Not enough memory available ({total_mem_avail:.2f} GB)"
-            )
+            logger.warning(f"Not enough memory available ({total_mem_avail:.2f} GB)")
             raise MemoryError("Not enough memory available")
 
         # Load IM data into memory
         logger.info(
             f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
         )
-        self._im_data = self.imdb.get_im_data_tmp_table(
-            self.ims, self.record_int_ids
-        )
+        self._im_data = self.imdb.get_im_data_tmp_table(self.ims, self.record_int_ids)
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
         if len(zero_record_ids) > 0:
             logger.warning(
                 f"Dropping {len(zero_record_ids)} records with zero IM values"
             )
-            self._im_data = self._im_data.loc[~self._im_data.index.isin(zero_record_ids)]
+            self._im_data = self._im_data.loc[
+                ~self._im_data.index.isin(zero_record_ids)
+            ]
             self.record_int_ids = self.record_int_ids[
                 ~np.isin(self.record_int_ids, zero_record_ids)
             ]
         # Convert to log
         self._im_data = np.log(self._im_data)
-            
 
     def __del__(self):
         try:
@@ -158,8 +191,12 @@ class IMDBDataset(BaseDataset):
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         y = self._im_data.loc[self.record_int_ids[indices]].values
 
-        site_int_ids = self.record_info_df.loc[self.record_int_ids[indices]].site_int_id.values
-        event_int_ids = self.record_info_df.loc[self.record_int_ids[indices]].event_int_id.values
+        site_int_ids = self.record_info_df.loc[
+            self.record_int_ids[indices]
+        ].site_int_id.values
+        event_int_ids = self.record_info_df.loc[
+            self.record_int_ids[indices]
+        ].event_int_id.values
         site_event_int_ids = utils.get_site_event_int_id(site_int_ids, event_int_ids)
 
         site_data = self.site_df.loc[site_int_ids]
@@ -178,32 +215,6 @@ class IMDBDataset(BaseDataset):
         )
 
         return BatchData(self.record_int_ids[indices], X, y)
-
-class BatchData(BaseBatchData):
-    """
-    Represents a single batch
-    """
-
-    def __init__(
-        self,
-        record_int_ids: np.ndarray,
-        X: np.ndarray,
-        y: np.ndarray,
-    ):
-        self.y = y
-        self.X = X
-
-        self.record_int_ids = record_int_ids
-
-    def to_tensor(self) -> "BatchData":
-        self.y = torch.from_numpy(self.y).to(torch.float32)
-        self.X = torch.from_numpy(self.X).to(torch.float32)
-        self.record_int_ids = torch.from_numpy(self.record_int_ids).to(torch.int64)
-
-        return self
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, y={self.y.shape})"
 
 
 def imdb_get_im_data_batched(

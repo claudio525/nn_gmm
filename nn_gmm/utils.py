@@ -7,6 +7,7 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from source_modelling import sources
+from qcore import nhm
 import seismic_hazard_analysis as sha
 
 
@@ -66,7 +67,7 @@ def setup_logging(log_file: Path, file_level=logging.DEBUG, console_level=loggin
     logger.handlers = []
 
     # Create file handler with its own level
-    file_handler = logging.FileHandler(log_file)
+    file_handler = logging.FileHandler(log_file, mode='w')
     file_handler.setLevel(file_level)  # More detailed logging to file
     file_handler.setFormatter(
         logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -176,3 +177,48 @@ def get_site_event_int_id(
     p1, p2 = 73856093, 19349663
 
     return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
+
+
+def get_fault(
+        nhm_flt_ffp: Path, fault_name: str
+) -> sources.Fault:
+    """
+    Get a fault object from the NHM fault definitions.
+
+    Parameters
+    ----------
+    nhm_flt_ffp : Path
+        Path to the NHM fault definitions file.
+    fault_name : str
+        Name of the fault to retrieve.
+
+    Returns
+    -------
+    sources.Fault
+        The fault object corresponding to the given name.
+    """
+    flt_definitions = nhm.load_nhm(nhm_flt_ffp)
+    if fault_name not in flt_definitions:
+        raise ValueError(f"Fault '{fault_name}' not found in NHM definitions.")
+    
+    return sha.nshm_2010.utils.get_fault_objects(flt_definitions[fault_name])
+
+def get_faults(nhm_flt_ffp: Path) -> dict[str, sources.Fault]:
+    """
+    Get all faults from the NHM fault definitions.
+
+    Parameters
+    ----------
+    nhm_flt_ffp : Path
+        Path to the NHM fault definitions file.
+
+    Returns
+    -------
+    dict[str, sources.Fault]
+        Dictionary mapping fault names to their corresponding Fault objects.
+    """
+    flt_definitions = nhm.load_nhm(nhm_flt_ffp)
+    return {
+        cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
+        for cur_name, cur_fault in flt_definitions.items()
+    }

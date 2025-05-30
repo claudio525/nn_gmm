@@ -338,7 +338,7 @@ class IMDB:
 
         return event_df
 
-    def get_site_df(self, max_grid_level: int = None) -> pd.DataFrame:
+    def get_site_df(self, max_grid_level: int | None = None, min_grid_level: int | None = None) -> pd.DataFrame:
         """
         Returns a DataFrame containing all site data.
 
@@ -346,6 +346,9 @@ class IMDB:
         ----------
         max_grid_level : int, optional
             Maximum grid level to filter the sites.
+            If None, all sites are returned.
+        min_grid_level : int, optional
+            Minimum grid level to filter the sites.
             If None, all sites are returned.
 
         Returns
@@ -357,6 +360,8 @@ class IMDB:
 
         if max_grid_level is not None:
             site_df = site_df[site_df["grid_level"] <= max_grid_level]
+        if min_grid_level is not None:
+            site_df = site_df[site_df["grid_level"] >= min_grid_level]
 
         return site_df
 
