@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,7 @@ app = typer.Typer()
 
 
 @app.command("train-gmm")
-def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None):
+def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None, n_sites: int = None):
     log_ffp = Path(__file__).parent / "nn_cmds.log"
     logger = nng.utils.setup_logging(log_ffp)
     print("Writing logs to:", log_ffp)
@@ -42,7 +43,8 @@ def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None)
     events = events[~np.isin(events, run_config.test_events)]
 
     ### TMP
-    sites = sites[:1000]
+    if n_sites is not None:
+        sites = sites[:n_sites]
 
     logger.info(f"Number of available events: {len(events)}")
     logger.info(f"Number of available sites: {len(sites)}")
@@ -75,6 +77,12 @@ def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None)
         val_events,
         train_sites,
         val_sites,
+    )
+
+    # Move log file to output directory
+    shutil.move(
+        log_ffp,
+        out_dir / log_ffp.name
     )
 
 

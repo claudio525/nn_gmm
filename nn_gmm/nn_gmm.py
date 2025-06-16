@@ -1,5 +1,4 @@
 import os
-import time
 import logging
 from pathlib import Path
 from dataclasses import dataclass
@@ -95,12 +94,12 @@ class RunConfig:
     def ims(self) -> np.ndarray:
         """IMs to use for the model."""
         return np.array(constants.IM_SET_MAPPING[self.im_set])
-    
+
     @property
     def pred_mean_keys(self) -> np.ndarray:
         """Predicted mean IM keys."""
         return np.array([f"{cur_im}_pred" for cur_im in self.ims])
-    
+
     @property
     def pred_std_keys(self) -> np.ndarray:
         """Predicted IM std keys."""
@@ -118,7 +117,7 @@ class RunConfig:
             n_inputs += 2
 
         return n_inputs
-
+    
     @property
     def n_ims(self) -> int:
         """Number of IMs."""
@@ -140,13 +139,16 @@ class RunConfig:
             "max_rrup": float(self.max_rrup),
             "ignore_events": self.ignore_events,
             "device": self.device,
-            "im_set": list(self.im_set),
+            "im_set": str(self.im_set),
             "site_inputs": list(self.site_inputs),
             "source_inputs": list(self.source_inputs),
             "source_to_site_inputs": list(self.source_to_site_inputs),
-            "batch_size": float(self.batch_size),
+            "batch_size": int(self.batch_size),
+            "model": ModelConfig.to_dict(self.model_config),
+            "rel_results_dir": str(self.rel_results_dir),
+            "n_epochs": int(self.n_epochs),
         }
-    
+
     def to_yaml(self, ffp: Path):
         """Save the RunConfig to a YAML file."""
         mlt.utils.write_to_yaml(self.to_dict(), ffp)
@@ -220,7 +222,7 @@ class ModelConfig:
         """
         return {
             "units": model_config.units,
-            "activation": model_config.activation,
+            "activation": str(model_config.activation),
         }
 
 
@@ -251,6 +253,28 @@ def run_model_training(
     train_sites: list[str],
     val_sites: list[str],
 ):
+    """
+    Runs the model training process for the given run configuration,
+      training and validation events and sites.
+
+    Parameters
+    ----------
+    ouput_dir : Path
+        Directory to save the results.
+    run_config : RunConfig
+    event_df : pd.DataFrame
+        DataFrame containing event information.
+    site_df : pd.DataFrame
+        DataFrame containing site information.
+    train_events : list[str]
+        List of training event IDs.
+    val_events : list[str]
+        List of validation event IDs.
+    train_sites : list[str]
+        List of training site IDs.
+    val_sites : list[str]
+        List of validation site IDs.
+    """
     events = np.concatenate([train_events, val_events])
     sites = np.concatenate([train_sites, val_sites])
 
@@ -385,12 +409,8 @@ def run_model_training(
     }
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
 
-    print("wtf")
 
-
-def get_predictions(
-    model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig
-):
+def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig):
     """
     Get predictions for the given model and dataset.
 
@@ -402,31 +422,42 @@ def get_predictions(
         The dataset to get predictions for.
     run_config : RunConfig
         The run configuration containing the necessary parameters.
-    
+
     Returns
     -------
     pd.DataFrame
         A DataFrame containing the predicted mean and standard deviation values.
     """
-    dataloader = data.CustomDataLoader(
-        dataset, batch_size=2048, shuffle=False)
-    
-    result_dfs = []
-    with imdb.IMDB(run_config.imdb_ffp, readonly=True) as db:
-        for cur_batch in tqdm(dataloader, desc="Predicting"):
-            model.eval()
-            with torch.no_grad():
-                pred_mean, pred_ln_std = model(cur_batch.X.to(run_config.device)).chunk(2, dim=-1)
-                pred_std = torch.exp(pred_ln_std)
+    dataloader = data.CustomDataLoader(dataset, batch_size=2048, shuffle=False)
 
-                cur_result_df = pd.DataFrame(data=np.concatenate([pred_mean.cpu().numpy(force=True), pred_std.cpu().numpy(force=True)], axis=1),
-                                            columns=np.concatenate((run_config.pred_mean_keys, run_config.pred_std_keys)),
-                                            index=cur_batch.record_int_ids)
-                
-                result_dfs.append(cur_result_df)
+    result_dfs = []
+    for cur_batch in tqdm(dataloader, desc="Predicting"):
+        model.eval()
+        with torch.no_grad():
+            pred_mean, pred_ln_std = model(cur_batch.X.to(run_config.device)).chunk(
+                2, dim=-1
+            )
+            pred_std = torch.exp(pred_ln_std)
+
+            cur_result_df = pd.DataFrame(
+                data=np.concatenate(
+                    [
+                        pred_mean.cpu().numpy(force=True),
+                        pred_std.cpu().numpy(force=True),
+                    ],
+                    axis=1,
+                ),
+                columns=np.concatenate(
+                    (run_config.pred_mean_keys, run_config.pred_std_keys)
+                ),
+                index=cur_batch.record_int_ids,
+            )
+
+            result_dfs.append(cur_result_df)
 
     result_df = pd.concat(result_dfs, axis=0)
     return result_df
+
 
 def train(
     run_config: RunConfig,
@@ -499,14 +530,15 @@ def train(
                 best_model_epoch = cur_epoch_ix
 
         if verbose:
+            logging.info(f"Epoch {cur_epoch_ix + 1}/{run_config.n_epochs} completed.")
             logging.info(
-                f"\tTraining\t\t"
+                f"Training\t"
                 f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
                 f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
             )
             if val_dataloader is not None:
                 logging.info(
-                    f"\tValidation\t\t"
+                    f"Validation\t"
                     f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
                     f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
                 )
@@ -566,3 +598,4 @@ def _save_metrics(
     )
 
     return metrics
+

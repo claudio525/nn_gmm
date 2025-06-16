@@ -20,8 +20,8 @@ logging.basicConfig(
 app = typer.Typer()
 
 
-@app.command("create-db")
-def create_db(
+@app.command("create-imdb")
+def create_imdb(
     db_ffp: Path = typer.Argument(..., help="Path to the database file"),
     im_data_dir: Path = typer.Argument(
         ..., help="Path to the Cybershake IM data directory"
@@ -143,6 +143,15 @@ def create_db(
             )
             rel_df["event_id"] = cur_event
 
+            # Add hypocentre information
+            cur_fault = faults[cur_event]
+            s = ((cur_fault.length / 2) - rel_df.shypo.values) / cur_fault.length
+            d = rel_df.dhypo.values / cur_fault.width
+            hypo_info = np.stack([cur_fault.fault_coordinates_to_wgs_depth_coordinates((s[i], d[i])) for i in range(rel_df.shape[0])], axis=0)
+            rel_df["hypo_lat"] = hypo_info[:, 0]
+            rel_df["hypo_lon"] = hypo_info[:, 1]
+            rel_df["hypo_depth"] = hypo_info[:, 2] / 1000
+
             # Read the IM data
             im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
             rel_im_dfs = []
@@ -178,6 +187,16 @@ def create_db(
         
 
     logging.info(f"Database {db_ffp} created successfully.")
+
+@app.command("create-empirical-db")
+def create_emp_db(db_ffp: Path = typer.Argument(..., help="Path to the database file"),
+                  imdb_ffp: Path = typer.Argument(..., help="Path to the IMDB file")):
+    if db_ffp.exists():
+        logging.info(f"Database {db_ffp} already exists. Exiting.")
+        return
+
+    with nng.EmpiricalDB(db_ffp) as emp_db:
+        emp_db.populate(imdb_ffp, nng.constants.GMM_MAPPING)
 
 if __name__ == "__main__":
     app()

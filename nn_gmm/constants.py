@@ -1,5 +1,25 @@
 import pandas as pd
 
+import oq_wrapper as oqw
+
+GMM_MAPPING = {
+        oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
+        oqw.constants.TectType.VOLCANIC: oqw.constants.GMM.Br_13,
+        oqw.constants.TectType.SUBDUCTION_INTERFACE: oqw.constants.GMM.K_20,
+    }
+
+TECT_TYPES = [
+    oqw.constants.TectType.SUBDUCTION_INTERFACE,
+    oqw.constants.TectType.ACTIVE_SHALLOW,
+    oqw.constants.TectType.VOLCANIC]
+
+TECTONIC_TYPE_MAPPING = {
+    "SUBDUCTION_INTERFACE": oqw.constants.TectType.SUBDUCTION_INTERFACE,
+    "SUBDUCTION_SLAB": oqw.constants.TectType.SUBDUCTION_SLAB,
+    "ACTIVE_SHALLOW": oqw.constants.TectType.ACTIVE_SHALLOW,
+    "VOLCANIC": oqw.constants.TectType.VOLCANIC,
+}
+
 PSA_KEYS = [
     'pSA_0.01', 'pSA_0.02', 'pSA_0.03', 'pSA_0.04', 'pSA_0.05', 'pSA_0.075',
     'pSA_0.1', 'pSA_0.12', 'pSA_0.15', 'pSA_0.17', 'pSA_0.2', 'pSA_0.25',
@@ -26,6 +46,12 @@ DB_PSA_KEYS = ["pSA_0p01", "pSA_0p02", "pSA_0p03", "pSA_0p04", "pSA_0p05", "pSA_
 PSA_KEYS_TO_DB = dict(zip(PSA_KEYS, DB_PSA_KEYS))
 PSA_KEYS_TO_DB_SERIES = pd.Series(PSA_KEYS_TO_DB)
 DB_PSA_KEYS_TO_PSA = dict(zip(DB_PSA_KEYS, PSA_KEYS))
+
+GMM_PSA_MEAN_KEYS = [f"{k}_mean" for k in PSA_KEYS]
+GMM_PSA_TOTAL_STD_KEYS = [f"{k}_std" for k in PSA_KEYS]
+
+DB_GMM_PSA_MEAN_KEYS = [f"{k}_mean" for k in DB_PSA_KEYS]
+DB_GMM_PSA_TOTAL_STD_KEYS = [f"{k}_std" for k in DB_PSA_KEYS]
 
 
 NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]

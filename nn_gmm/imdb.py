@@ -14,11 +14,31 @@ logger = logging.getLogger(__name__)
 
 class IMDB:
 
-    def __init__(self, db_ffp: Path, readonly: bool = False, memory_map_size: int = 2, cache_size: int = 1000):
+    def __init__(
+        self,
+        db_ffp: Path,
+        readonly: bool = False,
+        memory_map_size: int = 2,
+        cache_size: int = 1000,
+    ):
+        """
+        Initializes the IMDB class.
+
+        Parameters
+        ----------
+        db_ffp : Path
+            File path to the SQLite database.
+        readonly : bool, optional
+            Whether to open the database in read-only mode, by default False.
+        memory_map_size : int, optional
+            Size of the memory map in GB, by default 2.
+        cache_size : int, optional
+            Size of the cache in MB, by default 1000.
+        """
         self.db_ffp = db_ffp
         self.readonly = readonly
-        self.conn = None
-        self.cursor = None
+        self._conn = None
+        self._cursor = None
 
         self._event_table_columns = None
         self._realisation_table_columns = None
@@ -42,23 +62,27 @@ class IMDB:
         Opens a connection to the database.
         """
         if self.readonly:
-            self.conn = sqlite3.connect(f"file:{self.db_ffp}?mode=ro&immutable=1", uri=True)
+            self._conn = sqlite3.connect(
+                f"file:{self.db_ffp}?mode=ro&immutable=1", uri=True
+            )
             # Performance optimizations for read mode
-            self.cursor = self.conn.cursor()
-            self.cursor.execute("PRAGMA journal_mode = OFF")
-            self.cursor.execute("PRAGMA synchronous = OFF")
-            self.cursor.execute("PRAGMA automatic_index = OFF")
-            self.cursor.execute(f"PRAGMA cache_size = -{self._cache_size * 1024}")  
-            self.cursor.execute("PRAGMA temp_store = MEMORY")
-            self.cursor.execute(f"PRAGMA mmap_size = {self._memory_map_size * 1024**3}") 
+            self._cursor = self._conn.cursor()
+            self._cursor.execute("PRAGMA journal_mode = OFF")
+            self._cursor.execute("PRAGMA synchronous = OFF")
+            self._cursor.execute("PRAGMA automatic_index = OFF")
+            self._cursor.execute(f"PRAGMA cache_size = -{self._cache_size * 1024}")
+            self._cursor.execute("PRAGMA temp_store = MEMORY")
+            self._cursor.execute(
+                f"PRAGMA mmap_size = {self._memory_map_size * 1024**3}"
+            )
         else:
-            self.conn = sqlite3.connect(self.db_ffp)
+            self._conn = sqlite3.connect(self.db_ffp)
             # Performance optimizations for write mode
-            self.cursor = self.conn.cursor()
-            self.cursor.execute("PRAGMA page_size = 32768")
-            self.cursor.execute("PRAGMA journal_mode = MEMORY")
-            self.cursor.execute("PRAGMA synchronous = OFF")
-            self.cursor.execute(f"PRAGMA cache_size = -{self._cache_size * 1024}")  
+            self._cursor = self._conn.cursor()
+            self._cursor.execute("PRAGMA page_size = 32768")
+            self._cursor.execute("PRAGMA journal_mode = MEMORY")
+            self._cursor.execute("PRAGMA synchronous = OFF")
+            self._cursor.execute(f"PRAGMA cache_size = -{self._cache_size * 1024}")
             self._create_tables()
 
     def close(self, commit: bool = True) -> None:
@@ -71,13 +95,13 @@ class IMDB:
             Whether to commit changes before closing, by default True.
             Ignored in readonly mode.
         """
-        if self.conn:
+        if self._conn:
             if not self.readonly and commit:
-                self.cursor.execute("PRAGMA optimize")
-                self.conn.commit()
-            self.conn.close()
-            self.conn = None
-            self.cursor = None
+                self._cursor.execute("PRAGMA optimize")
+                self._conn.commit()
+            self._conn.close()
+            self._conn = None
+            self._cursor = None
 
     def __enter__(self) -> "IMDB":
         self.open()
@@ -89,12 +113,12 @@ class IMDB:
         exc_val: BaseException | None,
         exc_tb: object | None,
     ) -> None:
-        if self.conn:
+        if self._conn:
             if exc_type is None:
                 self.close(commit=not self.readonly)
             else:
                 if not self.readonly:
-                    self.conn.rollback()
+                    self._conn.rollback()
                 self.close(commit=False)
 
     @property
@@ -108,9 +132,9 @@ class IMDB:
             Column names of the events table.
         """
         if self._event_table_columns is None:
-            self.cursor.execute("PRAGMA table_info(events)")
+            self._cursor.execute("PRAGMA table_info(events)")
             self._event_table_columns = np.array(
-                [column_info[1] for column_info in self.cursor.fetchall()]
+                [column_info[1] for column_info in self._cursor.fetchall()]
             )
         return self._event_table_columns
 
@@ -125,9 +149,9 @@ class IMDB:
             Column names of the realisations table.
         """
         if self._realisation_table_columns is None:
-            self.cursor.execute("PRAGMA table_info(realisations)")
+            self._cursor.execute("PRAGMA table_info(realisations)")
             self._realisation_table_columns = np.array(
-                [column_info[1] for column_info in self.cursor.fetchall()]
+                [column_info[1] for column_info in self._cursor.fetchall()]
             )
         return self._realisation_table_columns
 
@@ -142,9 +166,9 @@ class IMDB:
             Column names of the sites table.
         """
         if self._site_table_columns is None:
-            self.cursor.execute("PRAGMA table_info(sites)")
+            self._cursor.execute("PRAGMA table_info(sites)")
             self._site_table_columns = np.array(
-                [column_info[1] for column_info in self.cursor.fetchall()]
+                [column_info[1] for column_info in self._cursor.fetchall()]
             )
         return self._site_table_columns
 
@@ -159,9 +183,9 @@ class IMDB:
             Column names of the site_to_event table.
         """
         if self._site_event_table_columns is None:
-            self.cursor.execute("PRAGMA table_info(site_event)")
+            self._cursor.execute("PRAGMA table_info(site_event)")
             self._site_event_table_columns = np.array(
-                [column_info[1] for column_info in self.cursor.fetchall()]
+                [column_info[1] for column_info in self._cursor.fetchall()]
             )
         return self._site_event_table_columns
 
@@ -176,9 +200,9 @@ class IMDB:
             Column names of the record_ims table.
         """
         if self._record_im_table_columns is None:
-            self.cursor.execute("PRAGMA table_info(record_ims)")
+            self._cursor.execute("PRAGMA table_info(record_ims)")
             self._record_im_table_columns = np.array(
-                [column_info[1] for column_info in self.cursor.fetchall()]
+                [column_info[1] for column_info in self._cursor.fetchall()]
             )
         return self._record_im_table_columns
 
@@ -195,7 +219,7 @@ class IMDB:
         if self._event_to_int_id_mapping is None or not self.readonly:
             self._event_to_int_id_mapping = pd.read_sql(
                 "SELECT event_id, event_int_id FROM events",
-                self.conn,
+                self._conn,
                 index_col="event_id",
             ).squeeze(axis=1)
         return self._event_to_int_id_mapping
@@ -210,10 +234,18 @@ class IMDB:
         dict
             Mapping of event_int_ids to event_ids.
         """
-        if self._event_int_to_id_mapping is None or not self.readonly:  
+        if self._event_int_to_id_mapping is None or not self.readonly:
             self._event_int_to_id_mapping = (
-                pd.read_sql("SELECT event_int_id, event_id FROM events", self.conn, index_col="event_int_id")
-            ).squeeze(axis=1).astype("category")
+                (
+                    pd.read_sql(
+                        "SELECT event_int_id, event_id FROM events",
+                        self._conn,
+                        index_col="event_int_id",
+                    )
+                )
+                .squeeze(axis=1)
+                .astype("category")
+            )
         return self._event_int_to_id_mapping
 
     @property
@@ -228,7 +260,11 @@ class IMDB:
         """
         if self._rel_to_int_id_mapping is None or not self.readonly:
             self._rel_to_int_id_mapping = (
-                pd.read_sql("SELECT rel_id, rel_int_id FROM realisations", self.conn, index_col="rel_id")
+                pd.read_sql(
+                    "SELECT rel_id, rel_int_id FROM realisations",
+                    self._conn,
+                    index_col="rel_id",
+                )
             ).squeeze(axis=1)
         return self._rel_to_int_id_mapping
 
@@ -244,8 +280,16 @@ class IMDB:
         """
         if self._rel_int_to_id_mapping is None:
             self._rel_int_to_id_mapping = (
-                pd.read_sql("SELECT rel_int_id, rel_id FROM realisations", self.conn, index_col="rel_int_id")
-            ).squeeze(axis=1).astype("category")
+                (
+                    pd.read_sql(
+                        "SELECT rel_int_id, rel_id FROM realisations",
+                        self._conn,
+                        index_col="rel_int_id",
+                    )
+                )
+                .squeeze(axis=1)
+                .astype("category")
+            )
         return self._rel_int_to_id_mapping
 
     @property
@@ -260,7 +304,11 @@ class IMDB:
         """
         if self._site_to_int_id_mapping is None:
             self._site_to_int_id_mapping = (
-                pd.read_sql("SELECT site_id, site_int_id FROM sites", self.conn, index_col="site_id")
+                pd.read_sql(
+                    "SELECT site_id, site_int_id FROM sites",
+                    self._conn,
+                    index_col="site_id",
+                )
             ).squeeze(axis=1)
         return self._site_to_int_id_mapping
 
@@ -276,10 +324,18 @@ class IMDB:
         """
         if self._site_int_to_id_mapping is None:
             self._site_int_to_id_mapping = (
-                pd.read_sql("SELECT site_int_id, site_id FROM sites", self.conn, index_col="site_int_id")
-            ).squeeze(axis=1).astype("category")
+                (
+                    pd.read_sql(
+                        "SELECT site_int_id, site_id FROM sites",
+                        self._conn,
+                        index_col="site_int_id",
+                    )
+                )
+                .squeeze(axis=1)
+                .astype("category")
+            )
         return self._site_int_to_id_mapping
-    
+
     @property
     def n_records(self) -> int:
         """
@@ -291,8 +347,8 @@ class IMDB:
             Number of records in the database.
         """
         if self._n_records is None or not self.readonly:
-            self.cursor.execute("SELECT COUNT(*) FROM record_ims")
-            self._n_records = self.cursor.fetchone()[0]
+            self._cursor.execute("SELECT COUNT(*) FROM record_ims")
+            self._n_records = self._cursor.fetchone()[0]
 
         return self._n_records
 
@@ -332,13 +388,15 @@ class IMDB:
             DataFrame containing all event data.
         """
         event_df = pd.read_sql(
-            "SELECT * FROM events", self.conn, index_col="event_int_id"
+            "SELECT * FROM events", self._conn, index_col="event_int_id"
         )
         event_df["tect_type"] = event_df["tect_type"].astype("category")
 
         return event_df
 
-    def get_site_df(self, max_grid_level: int | None = None, min_grid_level: int | None = None) -> pd.DataFrame:
+    def get_site_df(
+        self, max_grid_level: int | None = None, min_grid_level: int | None = None
+    ) -> pd.DataFrame:
         """
         Returns a DataFrame containing all site data.
 
@@ -356,7 +414,9 @@ class IMDB:
         pd.DataFrame
             DataFrame containing all site data.
         """
-        site_df = pd.read_sql("SELECT * FROM sites", self.conn, index_col="site_int_id")
+        site_df = pd.read_sql(
+            "SELECT * FROM sites", self._conn, index_col="site_int_id"
+        )
 
         if max_grid_level is not None:
             site_df = site_df[site_df["grid_level"] <= max_grid_level]
@@ -376,7 +436,7 @@ class IMDB:
         """
         logger.info("Getting realisation data from the database.")
         rel_df = pd.read_sql(
-            "SELECT * FROM realisations", self.conn, index_col="rel_int_id"
+            "SELECT * FROM realisations", self._conn, index_col="rel_int_id"
         )
         rel_df["event_id"] = self.event_int_to_id_mapping.loc[
             rel_df.event_int_id.values
@@ -421,7 +481,7 @@ class IMDB:
                 INNER JOIN (SELECT event_int_id FROM events WHERE event_int_id IN ({", ".join("?" * len(event_int_ids))})) ef
                 ON ef.event_int_id = se.event_int_id
                 """,
-                self.conn,
+                self._conn,
                 params=event_int_ids,
                 index_col="site_event_int_id",
             )
@@ -439,7 +499,7 @@ class IMDB:
                 ON sf.site_int_id = se.site_int_id
                 {"WHERE se.rrup <= {}".format(max_rrup) if max_rrup is not None else ""}
                 """,
-                self.conn,
+                self._conn,
                 params=site_int_ids,
                 index_col="site_event_int_id",
             )
@@ -452,11 +512,9 @@ class IMDB:
             )
             start = time.time()
             site_event_df = pd.read_sql(
-                "SELECT * FROM site_event", self.conn, index_col="site_event_int_id"
+                "SELECT * FROM site_event", self._conn, index_col="site_event_int_id"
             )
-            logger.info(
-                f"Took: {time.time() - start:.3f} to get all site-event data."
-            )
+            logger.info(f"Took: {time.time() - start:.3f} to get all site-event data.")
 
         site_event_df["site_id"] = self.site_int_to_id_mapping.loc[
             site_event_df.site_int_id.values
@@ -489,7 +547,7 @@ class IMDB:
                 INNER JOIN (SELECT event_int_id FROM events WHERE event_int_id IN ({", ".join("?" * len(event_int_ids))})) ef
                 ON ef.event_int_id = r.event_int_id
                 """,
-                self.conn,
+                self._conn,
                 params=site_int_ids + event_int_ids,
                 index_col="record_int_id",
             )
@@ -506,7 +564,7 @@ class IMDB:
                 INNER JOIN (SELECT site_int_id FROM sites WHERE site_int_id IN ({", ".join("?" * len(site_int_ids))})) sf
                 ON sf.site_int_id = r.site_int_id
                 """,
-                self.conn,
+                self._conn,
                 params=site_int_ids,
                 index_col="record_int_id",
             )
@@ -515,12 +573,16 @@ class IMDB:
             )
         elif events is not None:
             raise NotImplementedError()
-
         else:
-            logger.warning(
-                "No filters applied, return all records. Currently this is not supported."
+            # If no filters are applied, return all records
+            logger.warning("No filters applied, returning all records. This is slow!")
+            start = time.time()
+            record_info_df = pd.read_sql(
+                "SELECT record_int_id, event_int_id, site_int_id, rel_int_id FROM record_ims",
+                self._conn,
+                index_col="record_int_id",
             )
-            return None
+            logger.info(f"Took: {time.time() - start:.3f}s to get all record info.")
 
         # Map the integer IDs back to their original values
         record_info_df["event_id"] = self.event_int_to_id_mapping.loc[
@@ -536,9 +598,8 @@ class IMDB:
         return record_info_df
 
     def get_im_data_tmp_table(
-        self,
-        ims: np.ndarray,
-        record_int_ids: np.ndarray) -> pd.DataFrame:
+        self, ims: np.ndarray, record_int_ids: np.ndarray
+    ) -> pd.DataFrame:
         """
         Returns a DataFrame containing the IM data for the given record IDs.
         This method uses a temporary table to speed up the query.
@@ -546,10 +607,10 @@ class IMDB:
         Parameters
         ----------
         ims: np.ndarray
-            IMs to retrieve
+            IMs to retrieve.
         record_int_ids: np.ndarray
-            Record int ids to retrieve
-        
+            Record int ids to retrieve IM data for.
+
         Returns
         -------
         pd.DataFrame
@@ -558,12 +619,17 @@ class IMDB:
         logger.info("Getting IM data from the database.")
 
         start = time.time()
-        self.cursor.execute("CREATE TEMP TABLE IF NOT EXISTS temp_record_ids (record_int_id INTEGER PRIMARY KEY)")
-        self.cursor.executemany("INSERT OR IGNORE INTO temp_record_ids VALUES (?)", [(int(cur_id),) for cur_id in record_int_ids])
+        self._cursor.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS temp_record_ids (record_int_id INTEGER PRIMARY KEY)"
+        )
+        self._cursor.executemany(
+            "INSERT OR IGNORE INTO temp_record_ids VALUES (?)",
+            [(int(cur_id),) for cur_id in record_int_ids],
+        )
         logger.info(
             f"Took: {time.time() - start:.3f}s to create temp table with {len(record_int_ids)} records."
         )
-        
+
         # Query using a join instead of IN clause
         start = time.time()
         im_df = pd.read_sql(
@@ -572,7 +638,7 @@ class IMDB:
             FROM record_ims r
             JOIN temp_record_ids t ON r.record_int_id = t.record_int_id
             """,
-            self.conn,
+            self._conn,
             index_col="record_int_id",
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
@@ -580,13 +646,15 @@ class IMDB:
         )
 
         # Clean up
-        self.cursor.execute("DROP TABLE IF EXISTS temp_record_ids")
+        self._cursor.execute("DROP TABLE IF EXISTS temp_record_ids")
         return im_df
 
     def get_im_data(
         self,
         ims: np.ndarray,
-        record_int_ids: np.ndarray,
+        record_int_ids: np.ndarray = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> pd.DataFrame:
         """
         Returns a DataFrame containing the IM data for the given record IDs.
@@ -613,28 +681,30 @@ class IMDB:
                 FROM record_ims
                 WHERE record_int_id IN ({", ".join("?" * len(record_int_ids))})
                 """,
-                self.conn,
+                self._conn,
                 params=record_int_ids.tolist(),
                 index_col="record_int_id",
             ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
             logger.debug(
                 f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."
             )
-        else:
-            logger.warning(
-                "No filters applied, returning all IM data. This is slow."
-            )
+        elif limit is not None and offset is not None:
             start = time.time()
             im_df = pd.read_sql(
                 f"""
                 SELECT record_int_id, {", ".join(constants.PSA_KEYS_TO_DB_SERIES.loc[ims].values.astype(str).tolist())}
                 FROM record_ims
+                LIMIT {limit} OFFSET {offset}
                 """,
-                self.conn,
+                self._conn,
                 index_col="record_int_id",
             ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
             logger.debug(
-                f"Took: {time.time() - start:.3f}s to get all IM data."
+                f"Took: {time.time() - start:.3f}s to get IM data with limit={limit} and offset={offset}."
+            )
+        else:
+            raise ValueError(
+                "Either record_int_ids or both limit and offset must be provided."
             )
 
         return im_df
@@ -653,8 +723,8 @@ class IMDB:
         assert np.all(np.isin(self.event_table_columns[2:], median_info.index.values))
 
         # Check if event_id already exists in the database
-        self.cursor.execute("SELECT 1 FROM events WHERE event_id = ?", (event_id,))
-        if self.cursor.fetchone() is not None:
+        self._cursor.execute("SELECT 1 FROM events WHERE event_id = ?", (event_id,))
+        if self._cursor.fetchone() is not None:
             logger.warning(f"Event ID {event_id} already exists. Skipping insert.")
             return
 
@@ -665,8 +735,15 @@ class IMDB:
         INSERT INTO events (
             {columns}
         ) VALUES ({placeholders})"""
-        values = [event_id] + [median_info[col] for col in self.event_table_columns[2:]]
-        self.cursor.execute(query, values)
+        values = [event_id] + [
+            (
+                int(median_info[col])
+                if col in ["sim_type", "plane_count"]
+                else median_info[col]
+            )
+            for col in self.event_table_columns[2:]
+        ]
+        self._cursor.execute(query, values)
         logger.debug(f"Inserted event data for event {event_id}.")
 
     def add_realisation_data(self, rel_df: pd.DataFrame) -> None:
@@ -690,11 +767,11 @@ class IMDB:
         ].values
 
         # Check if realisation for the event already exists in the database
-        self.cursor.execute(
+        self._cursor.execute(
             "SELECT 1 FROM realisations WHERE event_int_id = ?",
             (rel_df.event_int_id.iloc[0],),
         )
-        if self.cursor.fetchone() is not None:
+        if self._cursor.fetchone() is not None:
             logger.warning(
                 f"Realisations data for event {rel_df.event_id.iloc[0]}"
                 f"already exists. Skipping insert."
@@ -711,7 +788,7 @@ class IMDB:
         values = list(
             rel_df[self.realisation_table_columns[2:]].itertuples(index=True, name=None)
         )
-        self.cursor.executemany(query, values)
+        self._cursor.executemany(query, values)
 
         logger.debug(f"Inserted realisation data for event {rel_df.event_id.iloc[0]}")
 
@@ -737,7 +814,7 @@ class IMDB:
             {columns}
         ) VALUES ({placeholders})"""
         values = list(site_df.itertuples(index=True, name=None))
-        self.cursor.executemany(query, values)
+        self._cursor.executemany(query, values)
         logger.debug(f"Inserted site data for {len(site_df)} sites.")
 
     def add_site_event_data(self, site_event_df: pd.DataFrame) -> None:
@@ -751,8 +828,12 @@ class IMDB:
         """
         assert np.all(np.isin(self.site_event_table_columns[3:], site_event_df.columns))
 
-        site_event_df["site_int_id"] = self.site_to_int_id_mapping.loc[site_event_df.site_id].values.astype(int)
-        site_event_df["event_int_id"] = self.event_to_int_id_mapping.loc[site_event_df.event_id].values.astype(int)
+        site_event_df["site_int_id"] = self.site_to_int_id_mapping.loc[
+            site_event_df.site_id
+        ].values.astype(int)
+        site_event_df["event_int_id"] = self.event_to_int_id_mapping.loc[
+            site_event_df.event_id
+        ].values.astype(int)
         site_event_df["site_event_int_id"] = utils.get_site_event_int_id(
             site_event_df.site_int_id.values, site_event_df.event_int_id.values
         )
@@ -770,7 +851,7 @@ class IMDB:
                 index=False, name=None
             )
         )
-        self.cursor.executemany(query, values)
+        self._cursor.executemany(query, values)
         logger.debug(
             f"Inserted site-event data for {len(site_event_df)} site-event pairs."
         )
@@ -784,7 +865,9 @@ class IMDB:
         im_df : pd.DataFrame
             DataFrame containing the IM data to add
         """
-        im_df = im_df.rename(columns=constants.PSA_KEYS_TO_DB)
+        im_df = im_df.rename(
+            columns=dict(zip(constants.PSA_KEYS, constants.PSA_KEYS_TO_DB))
+        )
         assert np.all(np.isin(self.record_im_table_columns[4:], im_df.columns))
 
         im_df["event_int_id"] = self.event_to_int_id_mapping.loc[im_df.event_id].values
@@ -805,7 +888,7 @@ class IMDB:
         values = list(
             im_df[self.record_im_table_columns].itertuples(index=False, name=None)
         )
-        self.cursor.executemany(query, values)
+        self._cursor.executemany(query, values)
 
         logger.debug(f"Inserted IM data for {len(im_df)} records.")
 
@@ -819,7 +902,7 @@ class IMDB:
             return
 
         # Event table
-        self.cursor.execute(
+        self._cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
             event_int_id INTEGER PRIMARY KEY,
@@ -836,13 +919,13 @@ class IMDB:
             dip_dir REAL)"""
         )
         # Create index for fast access using event_id
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_events_event_id 
                ON events (event_id)"""
         )
 
         # Realisation table
-        self.cursor.execute(
+        self._cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS realisations (
             rel_int_id INTEGER PRIMARY KEY,
@@ -852,16 +935,19 @@ class IMDB:
             rake REAL,
             shypo REAL,
             dhypo REAL,
+            hypo_lat REAL,
+            hypo_lon REAL,
+            hypo_depth REAL,
             FOREIGN KEY (event_int_id) REFERENCES events (event_int_id))"""
         )
         # Create index for fast access using rel_id
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_realisations_rel_id 
                ON realisations (rel_id)"""
         )
 
         # Site table
-        self.cursor.execute(
+        self._cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS sites (
             site_int_id INTEGER PRIMARY KEY,
@@ -874,13 +960,13 @@ class IMDB:
             grid_level INTEGER)"""
         )
         # Create index for fast access using site_id
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_sites_site_id 
                ON sites (site_id)"""
         )
 
         # Site-Event table
-        self.cursor.execute(
+        self._cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS site_event (
             site_event_int_id INTEGER PRIMARY KEY,
@@ -896,12 +982,12 @@ class IMDB:
         """
         )
         # Create index for fast access using site_int_id
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_site_event_site_id 
                 ON site_event (site_int_id)"""
         )
         # Create index for fast access using event_int_id
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_site_event_event_id 
                 ON site_event (event_int_id)"""
         )
@@ -913,7 +999,7 @@ class IMDB:
                 for cur_col in constants.DB_PSA_KEYS + constants.NON_PSA_IMS
             ]
         )
-        self.cursor.execute(
+        self._cursor.execute(
             f"""
             CREATE TABLE IF NOT EXISTS record_ims (
             record_int_id INTEGER PRIMARY KEY,
@@ -929,21 +1015,19 @@ class IMDB:
         )
 
         # Create indexes for faster querying
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_record_ims_event_id 
                ON record_ims (event_int_id)"""
         )
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_record_ims_rel_id 
                ON record_ims (rel_int_id)"""
         )
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_record_ims_site_id 
                ON record_ims (site_int_id)"""
         )
-        self.cursor.execute(
+        self._cursor.execute(
             """CREATE INDEX IF NOT EXISTS idx_record_ims_site_event_rel
                 ON record_ims (site_int_id, event_int_id, rel_int_id)"""
         )
-
-
