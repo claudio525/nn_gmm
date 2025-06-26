@@ -1,4 +1,5 @@
 import abc
+import itertools
 import logging
 import dataclasses
 from pathlib import Path
@@ -12,6 +13,9 @@ import torch
 
 from .imdb import IMDB
 from . import utils
+
+if typing.TYPE_CHECKING:
+    from . import nn_gmm
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +125,8 @@ class IMDBDataset(BaseDataset):
         source_df: pd.DataFrame,
         site_event_df: pd.DataFrame,
         record_info_df: pd.DataFrame,
+        run_config: "nn_gmm.RunConfig",
+        is_train: bool,
     ):
         """
         Parameters
@@ -139,6 +145,10 @@ class IMDBDataset(BaseDataset):
             The site event data
         record_info_df : pd.DataFrame
             The record info data
+        run_config : nn_gmm.RunConfig
+            The run configuration
+        is_train : bool
+            Whether the dataset is for training
         """
         super().__init__()
 
@@ -179,6 +189,20 @@ class IMDBDataset(BaseDataset):
             ]
         # Convert to log
         self._im_data = np.log(self._im_data)
+
+        if run_config.scale_ims:
+            logger.info("Scaling IM data, shape {self._im_data.shape}")
+            # Compute scale parameters
+            if is_train:
+                logger.info("Calculating mean and std for IM data")
+                run_config.im_scale_params = {
+                    "mean": self._im_data.mean(axis=0),
+                    "std": self._im_data.std(axis=0),
+                }
+            # Scale the IM data
+            self._im_data = (
+                self._im_data - run_config.im_scale_params["mean"]
+            ) / run_config.im_scale_params["std"]
 
     def __del__(self):
         try:
@@ -264,3 +288,97 @@ def imdb_get_im_data_batched(
     )
 
     return pd.concat(im_data, axis=0)
+
+def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limits: dict, record_int_ids: np.ndarray = None):
+    logging.info("Getting similar records for fixed inputs:")
+    for k, v in fixed_inputs.items():
+        if k in limits:
+            logging.info(f"{k}: {v} ± {limits[k]}")
+        else:
+            logging.info(f"{k}: {v} (no limits defined)")
+
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df  = imdb.get_site_df()
+        event_df = imdb.get_event_df()
+        rel_df = imdb.get_rel_df()
+
+    # Valid sites
+    for k in run_config.site_inputs:
+        if k in fixed_inputs and k in limits:
+            site_df = site_df.loc[site_df[k].between(
+                fixed_inputs[k] - limits[k][0],
+                fixed_inputs[k] + limits[k][1],
+            )]
+        else:
+            logger.info(f"Skipping site input {k}, not in fixed inputs or limits")
+    logger.info(f"Found {len(site_df)} valid sites")
+
+    # Valid events & realisations
+    for k in run_config.source_inputs:
+        if (k in fixed_inputs and k in limits) or k == "tect_type":
+            if k == "tect_type":
+                event_df = event_df.loc[event_df.tect_type == fixed_inputs[k]]
+            # Event property
+            elif k in event_df:
+                event_df = event_df.loc[event_df[k].between(
+                    fixed_inputs[k] - limits[k][0],
+                    fixed_inputs[k] + limits[k][1],
+                )]
+            # Realisation property
+            else:
+                rel_df = rel_df.loc[rel_df[k].between(
+                    fixed_inputs[k] - limits[k][0],
+                    fixed_inputs[k] + limits[k][1],
+                )]
+        else:
+            logger.info(f"Skipping source input {k}, not in fixed inputs or limits")
+    
+    rel_df = rel_df.loc[rel_df.event_int_id.isin(event_df.index)]
+    logger.info(f"Found {len(event_df)} valid events and {len(rel_df)} valid realisations")
+
+
+    comb = np.array(list(itertools.product(site_df.index, event_df.index)))
+    site_event_int_ids = utils.get_site_event_int_id(comb[:, 0], comb[:, 1])
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_event_df = imdb.get_site_event_df(
+            site_event_int_ids=site_event_int_ids,
+        )
+
+    # Valid site-event pairs
+    for k in run_config.source_to_site_inputs:
+        if k in fixed_inputs and k in limits:
+            site_event_df = site_event_df.loc[
+                site_event_df[k].between(
+                    fixed_inputs[k] - limits[k][0],
+                    fixed_inputs[k] + limits[k][1],
+                )
+            ]
+        else:
+            logger.info(f"Skipping event-site input {k}, not in fixed inputs or limits")
+    logger.info(f"Found {len(site_event_df)} valid site-event pairs")
+
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        record_info_df = imdb.get_record_info_df(
+            events=event_df.event_id.values.astype(str),
+            sites=site_df.site_id.values.astype(str),
+        )
+
+    # Site, Event and Realisation filtering
+    record_mask = record_info_df.site_int_id.isin(site_df.index) & \
+                  record_info_df.event_int_id.isin(event_df.index) & \
+                  record_info_df.rel_int_id.isin(rel_df.index)
+    record_info_df = record_info_df.loc[record_mask]
+
+    # Site-Event filtering
+    record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+        record_info_df.site_int_id.values,
+        record_info_df.event_int_id.values,
+    )
+    record_info_df = record_info_df.loc[
+        record_info_df.site_event_int_id.isin(site_event_df.index)
+    ]
+
+    if record_int_ids is not None:
+        record_info_df = record_info_df.loc[record_info_df.index.isin(record_int_ids)]
+
+    return record_info_df.index.values

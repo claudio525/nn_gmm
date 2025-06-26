@@ -451,6 +451,7 @@ class IMDB:
         self,
         events: np.ndarray | None = None,
         sites: np.ndarray | None = None,
+        site_event_int_ids: np.ndarray | None = None,
         max_rrup: float | None = None,
     ) -> pd.DataFrame:
         """
@@ -471,6 +472,52 @@ class IMDB:
 
         if events is not None and sites is not None:
             raise NotImplementedError()
+        elif site_event_int_ids is not None:
+            if site_event_int_ids.size > 1000:
+                logger.info("Using tmp table for site-event data retrieval.")
+                start = time.time()
+                self._cursor.execute(
+                    "CREATE TEMP TABLE IF NOT EXISTS temp_site_event_ids (site_event_int_id INTEGER PRIMARY KEY)"
+                )
+                self._cursor.executemany(
+                    "INSERT OR IGNORE INTO temp_site_event_ids VALUES (?)",
+                    [(int(site_event_int_id),) for site_event_int_id in site_event_int_ids]
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f} to create temp table with {len(site_event_int_ids)} site-event IDs."
+                )
+
+                # Query using a join instead of IN clause
+                start = time.time()
+                site_event_df = pd.read_sql(
+                    """
+                    SELECT se.*
+                    FROM site_event se
+                    INNER JOIN temp_site_event_ids tei
+                    ON tei.site_event_int_id = se.site_event_int_id
+                    """,
+                    self._conn,
+                    index_col="site_event_int_id",
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f} to get site-event data for {len(site_event_int_ids)} site-event IDs."
+                )
+
+                # Clean up
+                self._cursor.execute("DROP TABLE IF EXISTS temp_site_event_ids")
+            else:
+                start = time.time()
+                site_event_df = pd.read_sql(
+                    f"""
+                    SELECT * FROM site_event WHERE site_event_int_id IN ({", ".join("?" * len(site_event_int_ids))})
+                    """,
+                    self._conn,
+                    params=site_event_int_ids.tolist(),
+                    index_col="site_event_int_id",
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f} to get site-event data for {len(site_event_int_ids)} site-event IDs."
+                )
         elif events is not None:
             start = time.time()
             event_int_ids = self.event_to_int_id_mapping.loc[events].values.tolist()
@@ -482,7 +529,7 @@ class IMDB:
                 ON ef.event_int_id = se.event_int_id
                 """,
                 self._conn,
-                params=event_int_ids,
+                params=event_int_ids.tolist(),
                 index_col="site_event_int_id",
             )
             logger.info(
@@ -526,7 +573,7 @@ class IMDB:
         return site_event_df
 
     def get_record_info_df(
-        self, events: np.ndarray | None = None, sites: np.ndarray | None = None
+        self, events: np.ndarray | None = None, sites: np.ndarray | None = None, record_int_ids: np.ndarray | None = None
     ) -> pd.DataFrame:
         """
         Returns a DataFrame containing
@@ -534,7 +581,53 @@ class IMDB:
         """
         logger.info("Getting record info from the database.")
 
-        if events is not None and sites is not None:
+        if record_int_ids is not None:
+            if record_int_ids.size > 1000:
+                logger.info("Using tmp table for record info retrieval.")
+                start = time.time()
+                self._cursor.execute(
+                    "CREATE TEMP TABLE IF NOT EXISTS temp_record_ids (record_int_id INTEGER PRIMARY KEY)"
+                )
+                self._cursor.executemany(
+                    "INSERT OR IGNORE INTO temp_record_ids VALUES (?)",
+                    [(int(cur_id),) for cur_id in record_int_ids],
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f}s to create temp table with {len(record_int_ids)} records."
+                )
+
+                # Query using a join instead of IN clause
+                start = time.time()
+                record_info_df = pd.read_sql(
+                    """
+                    SELECT r.record_int_id, r.event_int_id, r.site_int_id, r.rel_int_id
+                    FROM record_ims r
+                    JOIN temp_record_ids t ON r.record_int_id = t.record_int_id
+                    """,
+                    self._conn,
+                    index_col="record_int_id",
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f}s to get record info for {len(record_int_ids)} records."
+                )
+
+                # Clean up
+                self._cursor.execute("DROP TABLE IF EXISTS temp_record_ids")
+            else:
+                start = time.time()
+                record_info_df = pd.read_sql(
+                    f"""
+                    SELECT record_int_id, event_int_id, site_int_id, rel_int_id
+                    FROM record_ims WHERE record_int_id IN ({", ".join("?" * len(record_int_ids))})
+                    """,
+                    self._conn,
+                    params=record_int_ids.tolist(),
+                    index_col="record_int_id",
+                )
+                logger.info(
+                    f"Took: {time.time() - start:.3f}s to get record info for {len(record_int_ids)} records."
+                )
+        elif events is not None and sites is not None:
             site_int_ids = self.site_to_int_id_mapping.loc[sites].values.tolist()
             event_int_ids = self.event_to_int_id_mapping.loc[events].values.tolist()
             start = time.time()

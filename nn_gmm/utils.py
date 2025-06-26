@@ -57,7 +57,7 @@ def get_site_grid_level(site_ids: np.ndarray) -> int:
     return site_grid_level
 
 
-def setup_logging(log_file: Path, file_level=logging.DEBUG, console_level=logging.INFO):
+def setup_logging(log_file: Path = None, file_level=logging.DEBUG, console_level=logging.INFO):
     # Create a logger
     logger = logging.getLogger()
     # Set logger to the lowest level of any handler
@@ -67,12 +67,13 @@ def setup_logging(log_file: Path, file_level=logging.DEBUG, console_level=loggin
     logger.handlers = []
 
     # Create file handler with its own level
-    file_handler = logging.FileHandler(log_file, mode='w')
-    file_handler.setLevel(file_level)  # More detailed logging to file
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(file_handler)
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file, mode='w')
+        file_handler.setLevel(file_level)  # More detailed logging to file
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(file_handler)
 
     # Create console handler with its own level
     console_handler = logging.StreamHandler(sys.stdout)
@@ -222,3 +223,36 @@ def get_faults(nhm_flt_ffp: Path) -> dict[str, sources.Fault]:
         cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
         for cur_name, cur_fault in flt_definitions.items()
     }
+
+
+def reverse_im_filename(im: str):
+    if im.startswith("pSA"):
+        return im[::-1].replace("p", ".", 1)[::-1]
+    return im
+
+
+def get_im_filename(im: str):
+    if im.startswith("pSA"):
+        return im.replace(".", "p", 1)
+    return im
+
+
+def get_nice_im_name(im: str, use_latex: bool = False):
+    if im.startswith("pSA"):
+        return f"pSA({im.split('_')[-1]}s)"
+
+    if use_latex:
+        match im.lower():
+            case "ds595":
+                return "$D_{s595}$"
+            case "ds575":
+                return "$D_{s575}$"
+            case _:
+                return im
+    return im
+
+
+def get_pSA_period(im: str):
+    if im.startswith("pSA"):
+        return float(im.split("_")[-1])
+    return None

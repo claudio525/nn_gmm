@@ -46,6 +46,9 @@ class RunConfig:
     im_set: str
     """IM set to use"""
 
+    scale_ims: bool
+    """Whether to scale the IMs or not"""
+
     site_inputs: list[str]
     """Model site inputs"""
 
@@ -67,8 +70,18 @@ class RunConfig:
     rel_results_dir: str
     """Relative path to the results directory."""
 
+    _im_scale_params: dict[str, pd.Series] | None = None
+
     def __post_init__(self):
         self._test_events = np.load(self.test_events_ffp)
+
+        # Handle loading IM scale parameters from a dict
+        if self._im_scale_params is not None:
+            tmp = {
+                cur_key: pd.Series(cur_dict)
+                for cur_key, cur_dict in self._im_scale_params.items()
+            }
+            self._im_scale_params = tmp
 
     @property
     def test_events_ffp(self) -> Path:
@@ -117,11 +130,28 @@ class RunConfig:
             n_inputs += 2
 
         return n_inputs
-    
+
     @property
     def n_ims(self) -> int:
         """Number of IMs."""
         return len(self.ims)
+
+    @property
+    def im_scale_params(self):
+        if self.scale_ims:
+            return self._im_scale_params
+
+        raise ValueError("IM standardization is not enabled")
+
+    @im_scale_params.setter
+    def im_scale_params(self, value):
+        if self.scale_ims:
+            if self._im_scale_params is None:
+                self._im_scale_params = value
+            else:
+                raise ValueError("IM standardization is already set")
+        else:
+            raise ValueError("IM standardization is not enabled")
 
     def to_dict(self) -> dict:
         """
@@ -132,7 +162,7 @@ class RunConfig:
         dict
             Dictionary representation of the RunConfig object.
         """
-        return {
+        config_dict = {
             "seed": int(self.seed),
             "rel_imdb_ffp": str(self.rel_imdb_ffp),
             "rel_test_events_ffp": str(self.rel_test_events_ffp),
@@ -140,6 +170,7 @@ class RunConfig:
             "ignore_events": self.ignore_events,
             "device": self.device,
             "im_set": str(self.im_set),
+            "scale_ims": self.scale_ims,
             "site_inputs": list(self.site_inputs),
             "source_inputs": list(self.source_inputs),
             "source_to_site_inputs": list(self.source_to_site_inputs),
@@ -148,6 +179,12 @@ class RunConfig:
             "rel_results_dir": str(self.rel_results_dir),
             "n_epochs": int(self.n_epochs),
         }
+        if self.scale_ims:
+            config_dict["_im_scale_params"] = {
+                cur_key: cur_df.to_dict()
+                for cur_key, cur_df in self.im_scale_params.items()
+            }
+        return config_dict
 
     def to_yaml(self, ffp: Path):
         """Save the RunConfig to a YAML file."""
@@ -333,9 +370,6 @@ def run_model_training(
     assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
     assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
 
-    # train_record_ids = np.sort(train_record_ids)
-    # val_record_ids = np.sort(val_record_ids)
-
     train_dataset = data.IMDBDataset(
         run_config.imdb_ffp,
         train_record_ids,
@@ -344,6 +378,8 @@ def run_model_training(
         pre_source_df,
         pre_site_event_df,
         record_info_df,
+        run_config,
+        True,
     )
     val_dataset = data.IMDBDataset(
         run_config.imdb_ffp,
@@ -353,6 +389,8 @@ def run_model_training(
         pre_source_df,
         pre_site_event_df,
         record_info_df,
+        run_config,
+        False,
     )
 
     train_dataloader = data.CustomDataLoader(
@@ -398,6 +436,13 @@ def run_model_training(
     val_results_df.to_parquet(ouput_dir / "val_results.parquet")
     train_results_df.to_parquet(ouput_dir / "train_results.parquet")
 
+    np.save(ouput_dir / "train_record_ids.npy", train_record_ids)
+    np.save(ouput_dir / "val_record_ids.npy", val_record_ids)
+    np.save(ouput_dir / "train_events.npy", train_events)
+    np.save(ouput_dir / "val_events.npy", val_events)
+    np.save(ouput_dir / "train_sites.npy", train_sites)
+    np.save(ouput_dir / "val_sites.npy", val_sites)
+
     torch.save(model, ouput_dir / "model.pt")
 
     metadata = {
@@ -437,13 +482,17 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
             pred_mean, pred_ln_std = model(cur_batch.X.to(run_config.device)).chunk(
                 2, dim=-1
             )
-            pred_std = torch.exp(pred_ln_std)
+            pred_std = torch.exp(pred_ln_std).cpu().numpy(force=True)
+            pred_mean = pred_mean.cpu().numpy(force=True)
+
+            if run_config.scale_ims:
+                pred_mean, pred_std = revert_im_scaling(pred_mean, run_config, pred_std)
 
             cur_result_df = pd.DataFrame(
                 data=np.concatenate(
                     [
-                        pred_mean.cpu().numpy(force=True),
-                        pred_std.cpu().numpy(force=True),
+                        pred_mean,
+                        pred_std,
                     ],
                     axis=1,
                 ),
@@ -599,3 +648,42 @@ def _save_metrics(
 
     return metrics
 
+
+def revert_im_scaling(
+    scaled_ln_im_mean: np.ndarray[float],
+    run_config: RunConfig,
+    scaled_ln_im_std: np.ndarray[float] = None,
+):
+    """
+    Reverts the IM scaling
+
+    Parameters
+    ----------
+    scaled_ln_im_mean: np.ndarray[float]
+        The scaled IM (mean) values
+    run_config: RunConfig
+    scaled_ln_im_std: np.ndarray[float], optional
+        The scaled IM standard deviation values
+
+    Returns
+    -------
+    ln_im_mean: np.ndarray[float]
+        The unscaled IM (mean) values
+    ln_im_std: np.ndarray[float]
+        The unscaled IM standard deviation values.
+        Only returned if scaled_ln_im_std is not None.
+    """
+    ln_im_mean = (
+        scaled_ln_im_mean
+        * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+        + run_config.im_scale_params["mean"][run_config.ims].values[None, :]
+    )
+
+    if scaled_ln_im_std is not None:
+        ln_im_std = (
+            scaled_ln_im_std
+            * run_config.im_scale_params["std"][run_config.ims].values[None, :]
+        )
+        return ln_im_mean, ln_im_std
+
+    return ln_im_mean, None

@@ -36,9 +36,7 @@ def get_gmm_predictions(input_df: pd.DataFrame, gmm_mapping: dict[oqw.constants.
 
     result = []
     for cur_tect_type in rupture_df["tect_type"].unique():
-        cur_oqw_tect_type = oqw.constants.TectType(
-            cur_tect_type
-        )
+        cur_oqw_tect_type = constants.TECTONIC_TYPE_MAPPING[cur_tect_type] 
         cur_gmm = gmm_mapping[cur_oqw_tect_type]
 
         cur_result = oqw.run_gmm(

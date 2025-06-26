@@ -6,21 +6,22 @@ max_rrup: 300
 ignore_events: null
 
 im_set: pSA
+scale_ims: False
 
 site_inputs: 
 # - lat
 # - lon
 - vs30
 - z1p0
-- z2p5
+# - z2p5
 
 source_inputs:
 - "magnitude"
 - "tect_type"
-- "rake" 
-- "dip"
-- "dtop"
-- "dbottom"
+# - "rake" 
+# - "dip"
+# - "dtop"
+# - "dbottom"
 # - "hypo_depth"
 # - "hypo_lat"
 # - "hypo_lon"
@@ -36,9 +37,8 @@ batch_size: 1024
 
 
 model:
-  units: [32, 32, 32]
+  units: [32, 64]
   activation: relu
-
 
 
 rel_results_dir: nn_gmm/results

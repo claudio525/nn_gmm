@@ -19,6 +19,9 @@ TECTONIC_TYPE_MAPPING = {
     "ACTIVE_SHALLOW": oqw.constants.TectType.ACTIVE_SHALLOW,
     "VOLCANIC": oqw.constants.TectType.VOLCANIC,
 }
+REVERSE_TECTONIC_TYPE_MAPPING = {
+    v: k for k, v in TECTONIC_TYPE_MAPPING.items()
+}
 
 PSA_KEYS = [
     'pSA_0.01', 'pSA_0.02', 'pSA_0.03', 'pSA_0.04', 'pSA_0.05', 'pSA_0.075',

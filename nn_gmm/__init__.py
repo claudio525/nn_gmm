@@ -6,6 +6,8 @@ from . import utils
 from . import nn_gmm
 from . import data
 from . import plot_utils
+from . import plots_spatial
+from . import plots
 from .nn_gmm import RunConfig
 from . import nn_gmm_predict
 
@@ -21,4 +23,6 @@ __all__ = [
     "nn_gmm_predict",
     "data",
     "plot_utils",
+    "plots",
+    "plots_spatial",    
 ]

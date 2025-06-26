@@ -1,3 +1,6 @@
+import tempfile
+
+import pygmt
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
@@ -50,8 +53,11 @@ def get_pSA_bias_residual_fig(
     ax2.set_ylim(*std_y_axis_limits)
     ax2.set_xlim(0.01, 10.0)
 
-    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=main_wspace)
+    fig.subplots_adjust(
+        left=left, right=right, top=top, bottom=bottom, wspace=main_wspace
+    )
     return fig, ax1, ax2
+
 
 def get_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
@@ -85,7 +91,7 @@ def get_bias_residual_fig(
         I.e. space between ax2 and ax3
     sub_wspace : float, optional
         Space between the subplots.
-        I.e. space between ax1 and ax2 
+        I.e. space between ax1 and ax2
         and between ax3 and ax4
 
     Returns
@@ -118,12 +124,31 @@ def get_bias_residual_fig(
     ax1.set_ylim(*bias_y_axis_limits)
     ax1.set_xlim(0.01, 10.0)
 
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        # fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        # fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+
     ax2 = fig.add_subplot(grid_bias[1])
     ax2.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax2.set_yticklabels([])
     ax2.set_ylim(*bias_y_axis_limits)
     ax2.axhline(0, color="black", zorder=0)
-    ax2.tick_params(axis='y', which='both', length=0)
+    ax2.tick_params(axis="y", which="both", length=0)
 
     grid_residual = gridspec.GridSpecFromSubplotSpec(
         1, 2, subplot_spec=main_grid[1], wspace=sub_wspace, width_ratios=[5, 1]
@@ -141,7 +166,7 @@ def get_bias_residual_fig(
     ax4.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax4.set_yticklabels([])
     ax4.set_ylim(*std_y_axis_limits)
-    ax4.tick_params(axis='y', which='both', length=0)
+    ax4.tick_params(axis="y", which="both", length=0)
 
     # Remove general figure padding
     fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom)
@@ -190,3 +215,45 @@ def get_single_pSA_otherIMs_fig(
     fig.subplots_adjust(left=0, right=1, top=top, bottom=0)
 
     return fig, ax1, ax2
+
+
+def pygmt_side_by_side(
+    fig1: pygmt.Figure, fig2: pygmt.Figure, figsize: tuple[float, float] = (16, 10), title_1: str | None = None, title_2: str | None = None
+) -> plt.Figure:
+    """
+    Combine two PyGMT figures to be side by side using matplotlib.
+
+    Parameters
+    ----------
+    fig1 : pygmt.Figure
+        The first figure.
+    fig2 : pygmt.Figure
+        The second figure.
+
+    Returns
+    -------
+    plt.Figure
+        A new figure with the two figures side by side.
+    """
+    with tempfile.NamedTemporaryFile(
+        suffix=".png"
+    ) as tmp1, tempfile.NamedTemporaryFile(suffix=".png") as tmp2:
+
+        fig1.savefig(tmp1.name, dpi=900, anti_alias=True)
+        fig2.savefig(tmp2.name, dpi=900, anti_alias=True)
+
+        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=figsize)
+
+        ax1.imshow(plt.imread(tmp1.name), aspect="equal")
+        ax1.axis("off")
+        if title_1 is not None:
+            ax1.set_title(title_1)
+
+        ax2.imshow(plt.imread(tmp2.name), aspect="equal")
+        ax2.axis("off")
+        if title_2 is not None:
+            ax2.set_title(title_2)
+
+        fig.tight_layout()
+
+    return fig

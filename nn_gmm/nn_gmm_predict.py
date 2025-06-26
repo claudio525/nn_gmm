@@ -30,7 +30,6 @@ def run_predictions(model_dir: Path, input_df: pd.DataFrame, device: str):
     pre_site_df = preprocessing.pre_process_site_features(
         input_df, run_config.site_inputs
     )
-    input_df["tect_type"] = pd.Categorical(input_df["tect_type"], [str(v) for v in nn_gmm.constants.TECT_TYPES])
     pre_source_df = preprocessing.pre_process_source_features(
         input_df, run_config.source_inputs
     )
@@ -46,16 +45,20 @@ def run_predictions(model_dir: Path, input_df: pd.DataFrame, device: str):
     model.eval()
     with torch.no_grad():
         pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
-        pred_std = torch.exp(pred_ln_std)
+        pred_std = torch.exp(pred_ln_std).cpu().numpy()
+        pred_mean = pred_mean.cpu().numpy()
 
-    pred_mean_df = pd.DataFrame(data=pred_mean.cpu().numpy(), columns=run_config.pred_mean_keys)
-    pred_std_df = pd.DataFrame(data=pred_std.cpu().numpy(), columns=run_config.pred_std_keys)
+    if run_config.scale_ims:
+        pred_mean, pred_std = nn_gmm.revert_im_scaling(pred_mean, run_config, pred_std)
+
+    pred_mean_df = pd.DataFrame(data=pred_mean, columns=run_config.pred_mean_keys)
+    pred_std_df = pd.DataFrame(data=pred_std, columns=run_config.pred_std_keys)
     pred_df = pd.concat([input_df, pred_mean_df, pred_std_df], axis=1)
 
     return pred_df
 
 
-def get_mag_input_df(mag_values: np.ndarray, run_config: nn_gmm.RunConfig | None =None, **kwargs) -> pd.DataFrame:
+def get_mag_input_df(mag_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs) -> pd.DataFrame:
     """
     Create a DataFrame with the given magnitude values and additional parameters.
 
@@ -75,6 +78,49 @@ def get_mag_input_df(mag_values: np.ndarray, run_config: nn_gmm.RunConfig | None
     """
     input_df = pd.DataFrame({
         "magnitude": mag_values,
+    })
+
+    for k, v in kwargs.items():
+        input_df[k] = v
+
+    # Check inputs
+    if run_config is not None:
+        for key in run_config.site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required site input: {key}")
+        for key in run_config.source_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required source input: {key}")
+        for key in run_config.source_to_site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required event-site input: {key}")
+
+    return input_df
+
+def get_rrup_input_df(
+    rrup_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs
+) -> pd.DataFrame:
+    """
+    Create a DataFrame with the given rrup values and additional parameters.
+
+    Parameters
+    ----------
+    rrup_values : np.ndarray
+        Array of rrup values.
+    run_config : nn_gmm.RunConfig
+        Run configuration of the model
+    **kwargs : dict
+        Additional parameters to include in the DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the rrup values and additional parameters.
+    """
+    input_df = pd.DataFrame({
+        "rrup": rrup_values,
+        "rjb": rrup_values,  
+        "rx": rrup_values,
     })
 
     for k, v in kwargs.items():

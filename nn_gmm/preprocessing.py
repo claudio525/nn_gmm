@@ -60,6 +60,7 @@ def pre_process_source_features(
         DataFrame containing the pre-processed source features.
     """
     pre_source_df = source_df.copy()
+    pre_source_df["tect_type"] = pd.Categorical(pre_source_df["tect_type"], [str(v) for v in constants.TECT_TYPES])
     pre_source_df = pre_source_df.loc[:, source_feature_keys]
 
     for cur_key in source_feature_keys:
