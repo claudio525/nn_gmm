@@ -14,12 +14,18 @@ device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
 
+print(f"Using device: {device.upper()}")
 
-app = typer.Typer()
+app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
-@app.command("train-gmm")
-def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None, n_sites: int = None):
+@app.command("train-gmm-holdout")
+def train_gmm(
+    run_config_ffp: Path,
+    n_epochs: int = None,
+    id_suffix: str = None,
+    n_sites: int = None,
+):
     log_ffp = Path(__file__).parent / "nn_cmds.log"
     logger = nng.utils.setup_logging(log_ffp)
     print("Writing logs to:", log_ffp)
@@ -37,12 +43,14 @@ def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None,
         event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(max_grid_level=0)
 
-    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(str)
+    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
+        str
+    )
 
     # Drop test events
     events = events[~np.isin(events, run_config.test_events)]
 
-    ### TMP
+    # Only use a subset of sites for testing/debugging
     if n_sites is not None:
         sites = sites[:n_sites]
 
@@ -80,15 +88,43 @@ def train_gmm(run_config_ffp: Path, n_epochs: int = None, id_suffix: str = None,
     )
 
     # Move log file to output directory
-    shutil.move(
-        log_ffp,
-        out_dir / log_ffp.name
+    shutil.move(log_ffp, out_dir / log_ffp.name)
+
+
+@app.command("train-gmm-cv")
+def train_cv(
+    run_config_ffp: Path,
+    n_event_folds: int,
+    n_site_folds: int,
+    n_epochs: int = None,
+    id_suffix: str = None,
+    n_sites: int = None,
+):
+    run_config = nng.RunConfig.from_config_kwargs(
+        config_ffp=run_config_ffp,
+        device=device,
+        n_epochs=n_epochs,
     )
 
+    id_suffix = f"_{id_suffix}" if id_suffix is not None else ""
+    base_out_dir = (
+        run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    )
+    assert not base_out_dir.exists(), "Output directory already exists!"
+    base_out_dir.mkdir()
 
-@app.command("train-cv")
-def train_cv(run_config_ffp: Path):
-    pass
+    log_ffp = base_out_dir / "nn_train_cv.log"
+    logger = nng.utils.setup_logging(log_ffp)
+    print("Writing logs to:", log_ffp)
+
+    nng.train_cv(
+        run_config,
+        n_event_folds,
+        n_site_folds,
+        base_out_dir,
+        device,
+        n_sites,
+    )
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ from collections.abc import Sequence
 
 import pandas as pd
 
+from qcore import coordinates as coords
+
 from . import constants
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ def pre_process_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence
     pre_site_df = pre_site_df.loc[:, site_feature_keys]
 
     for cur_feature in site_feature_keys:
+        # Standard min-max pre-processing
         if cur_feature in constants.MIN_MAX_PRE_PROCESS_CONFIG:
             cur_min, cur_max = constants.MIN_MAX_PRE_PROCESS_CONFIG[cur_feature]
             pre_site_df[cur_feature] = (

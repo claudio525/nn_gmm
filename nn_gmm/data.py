@@ -338,6 +338,9 @@ def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limi
 
 
     comb = np.array(list(itertools.product(site_df.index, event_df.index)))
+    if comb.shape[0] == 0:
+        logger.warning("No valid site-event combinations found")
+        return np.array([])
     site_event_int_ids = utils.get_site_event_int_id(comb[:, 0], comb[:, 1])
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_event_df = imdb.get_site_event_df(

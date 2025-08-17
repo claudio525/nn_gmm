@@ -219,6 +219,7 @@ class EmpiricalDB:
             """,
             self._conn,
             index_col="record_int_id",
+            dtype={cur_key: "float32" for cur_key in constants.DB_GMM_PSA_MEAN_KEYS + constants.DB_GMM_PSA_TOTAL_STD_KEYS}
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
             f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."

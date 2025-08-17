@@ -9,6 +9,8 @@ im_set: pSA
 scale_ims: False
 
 site_inputs: 
+# - nztm_x
+# - nztm_y 
 # - lat
 # - lon
 - vs30

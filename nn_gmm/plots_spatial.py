@@ -58,8 +58,6 @@ def site_bias_res_std(pred_df: pd.DataFrame, sim_df: pd.DataFrame, site_df: pd.D
         # Bias plot
         grid_bias = plotting.create_grid(site_bias, im)
         bias_fig = plotting.gen_region_fig(
-            region="NZ",
-            map_data=None,
             # plot_kwargs={
             #     "highway_pen_width": 0.1,
             #     "coastline_pen_width": 0.01,
@@ -90,8 +88,6 @@ def site_bias_res_std(pred_df: pd.DataFrame, sim_df: pd.DataFrame, site_df: pd.D
         # Residual Standard Deviation
         grid_res_std = plotting.create_grid(site_res_std, im)
         res_std_fig = plotting.gen_region_fig(
-            region="NZ",
-            map_data=None,
             # plot_kwargs={
             #     "highway_pen_width": 0.1,
             #     "coastline_pen_width": 0.01,

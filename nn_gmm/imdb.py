@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import sqlite3
 
+from qcore import coordinates as coords
+
 from . import constants
 from . import utils
 
@@ -395,7 +397,7 @@ class IMDB:
         return event_df
 
     def get_site_df(
-        self, max_grid_level: int | None = None, min_grid_level: int | None = None
+        self, max_grid_level: int | None = None, min_grid_level: int | None = None, add_nztm: bool = False
     ) -> pd.DataFrame:
         """
         Returns a DataFrame containing all site data.
@@ -422,6 +424,10 @@ class IMDB:
             site_df = site_df[site_df["grid_level"] <= max_grid_level]
         if min_grid_level is not None:
             site_df = site_df[site_df["grid_level"] >= min_grid_level]
+
+        if add_nztm:
+            nztm_coords = coords.wgs_depth_to_nztm(site_df[["lat", "lon"]].values)
+            site_df.loc[:,"nztm_y"], site_df.loc[:, "nztm_x"] = nztm_coords[:, 0], nztm_coords[:, 1]
 
         return site_df
 
@@ -733,6 +739,7 @@ class IMDB:
             """,
             self._conn,
             index_col="record_int_id",
+            dtype={cur_key: "float32" for cur_key in constants.DB_IM_KEYS if cur_key in ims or cur_key in constants.DB_PSA_KEYS}
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
             f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."

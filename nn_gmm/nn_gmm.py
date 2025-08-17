@@ -289,6 +289,7 @@ def run_model_training(
     val_events: list[str],
     train_sites: list[str],
     val_sites: list[str],
+    save_train_results: bool = True,
 ):
     """
     Runs the model training process for the given run configuration,
@@ -421,20 +422,21 @@ def run_model_training(
     # Load the best model
     model.load_state_dict(best_model_state)
 
+    # Create output directory
+    ouput_dir.mkdir(parents=True, exist_ok=True)
+
     # Get predictions
     logging.info("Getting validation dataset predictions")
     val_results_df = get_predictions(model, val_dataset, run_config)
+    val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
     logging.info("Getting training dataset predictions")
     train_results_df = get_predictions(model, train_dataset, run_config)
-
-    # Create output directory
-    ouput_dir.mkdir()
+    if save_train_results:
+        train_results_df.to_parquet(ouput_dir / "train_results.parquet")
 
     run_config.to_yaml(ouput_dir / "run_config.yaml")
     metrics_df.to_parquet(ouput_dir / "metrics.parquet")
-    val_results_df.to_parquet(ouput_dir / "val_results.parquet")
-    train_results_df.to_parquet(ouput_dir / "train_results.parquet")
 
     np.save(ouput_dir / "train_record_ids.npy", train_record_ids)
     np.save(ouput_dir / "val_record_ids.npy", val_record_ids)
@@ -453,6 +455,8 @@ def run_model_training(
         "n_model_params": int(nn_gmm_modules.get_n_params(model)),
     }
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
+
+    
 
 
 def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig):

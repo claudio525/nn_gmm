@@ -59,6 +59,7 @@ DB_GMM_PSA_TOTAL_STD_KEYS = [f"{k}_std" for k in DB_PSA_KEYS]
 
 NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]
 IMS = PSA_KEYS + NON_PSA_IMS
+DB_IM_KEYS = DB_PSA_KEYS + NON_PSA_IMS
 
 # PRED_PSA_KEYS = [f"{k}_pred" for k in PSA_KEYS]
 # PRED_NON_PSA_IMS = [f"{k}_pred" for k in NON_PSA_IMS]
@@ -79,5 +80,10 @@ MIN_MAX_PRE_PROCESS_CONFIG = {
     "z1p0": (0, 1.5),
     "z2p5": (0, 12.5),
     "lon": (166, 179),
-    "lat": (-47.5, -34.2)
+    "lat": (-47.5, -34),
+    "nztm_x": (952959.37518638, 2154468.7808133774),
+    "nztm_y": (4721798.07382891, 6215675.54086617),
 }
+
+# NZ bounding box
+NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
