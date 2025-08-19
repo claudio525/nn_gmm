@@ -12,6 +12,7 @@ import seismic_hazard_analysis as sha
 from qcore import coordinates as coords
 from qcore import nhm
 
+
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     level=logging.INFO

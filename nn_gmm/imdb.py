@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import sqlite3
 
+from qcore import coordinates as coords
+
 from . import constants
 from . import utils
 
@@ -395,7 +397,7 @@ class IMDB:
         return event_df
 
     def get_site_df(
-        self, max_grid_level: int | None = None, min_grid_level: int | None = None
+        self, max_grid_level: int | None = None, min_grid_level: int | None = None, add_nztm: bool = False
     ) -> pd.DataFrame:
         """
         Returns a DataFrame containing all site data.
@@ -422,6 +424,10 @@ class IMDB:
             site_df = site_df[site_df["grid_level"] <= max_grid_level]
         if min_grid_level is not None:
             site_df = site_df[site_df["grid_level"] >= min_grid_level]
+
+        if add_nztm:
+            nztm_coords = coords.wgs_depth_to_nztm(site_df[["lat", "lon"]].values)
+            site_df.loc[:,"nztm_y"], site_df.loc[:, "nztm_x"] = nztm_coords[:, 0], nztm_coords[:, 1]
 
         return site_df
 
@@ -727,12 +733,13 @@ class IMDB:
         start = time.time()
         im_df = pd.read_sql(
             f"""
-            SELECT r.record_int_id, {", ".join(constants.PSA_KEYS_TO_DB_SERIES.loc[ims].values.astype(str).tolist())}
+            SELECT r.record_int_id, {", ".join(constants.IMS_TO_DB_IMS_SERIES.loc[ims].values.astype(str).tolist())}
             FROM record_ims r
             JOIN temp_record_ids t ON r.record_int_id = t.record_int_id
             """,
             self._conn,
             index_col="record_int_id",
+            dtype={cur_key: "float32" for cur_key in constants.IMS_TO_DB_IMS_SERIES.loc[ims].values}
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
             f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."

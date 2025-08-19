@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 import ml_tools as mlt
 
@@ -23,6 +24,9 @@ def magnitude_trend_plot(
     record_limits: dict,
     record_int_ids: np.ndarray,
     device: str,
+    cv: bool = False,
+    major_line_width: float = 3.0,
+    minor_line_width: float = 2.0,
 ):
     """
     Create magnitude trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -38,7 +42,7 @@ def magnitude_trend_plot(
     record_limits : dict
         Dictionary specifying record selection limits
     record_int_ids : np.ndarray
-        Record integer IDs which can be plotted
+        Record integer IDs which can be plotted.
         Must be in the simulation DataFrame
     device : str
         Device to run the predictions on (e.g., "cpu" or "cuda")
@@ -52,11 +56,47 @@ def magnitude_trend_plot(
 
     min_mag, max_mag = 5.25, 8.25
     input_df = nn_gmm_predict.get_mag_input_df(
-        mag_values=np.linspace(min_mag, max_mag, 250), run_config=run_config, **fixed_inputs
+        mag_values=np.linspace(min_mag, max_mag, 250),
+        run_config=run_config,
+        **fixed_inputs,
     )
 
     # Get magnitude predictions
-    pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
+    if cv:
+        cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
+        pred_dfs = {
+            cur_dir.stem: nn_gmm_predict.run_predictions(
+                cur_dir, input_df, device=device
+            )
+            for cur_dir in cv_dirs
+        }
+        mean_pred_values = np.stack(
+            [cur_df[run_config.pred_mean_keys].values for cur_df in pred_dfs.values()]
+        )
+        mean_pred_da = xr.DataArray(
+            data=mean_pred_values,
+            dims=["cv", "mag", "im"],
+            coords={
+                "cv": list(pred_dfs.keys()),
+                "mag": input_df["magnitude"].values,
+                "im": run_config.pred_mean_keys,
+            },
+        )
+        std_pred_values = np.stack(
+            [cur_df[run_config.pred_std_keys].values for cur_df in pred_dfs.values()]
+        )
+        std_pred_da = xr.DataArray(
+            data=std_pred_values,
+            dims=["cv", "mag", "im"],
+            coords={
+                "cv": list(pred_dfs.keys()),
+                "mag": input_df["magnitude"].values,
+                "im": run_config.pred_std_keys,
+            },
+        )
+
+    else:
+        pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
@@ -70,50 +110,101 @@ def magnitude_trend_plot(
     fig, axs = mlt.plotting.get_fig_axes(4, 2, 2, ind_figsize=(8, 6))
 
     for i, (ax, im) in enumerate(zip(axs, plot_ims)):
-        ax.plot(
-            pred_df["magnitude"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM"
-        )
-        ax.plot(
-            pred_df["magnitude"],
-            np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-            c="b",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.plot(
-            pred_df["magnitude"],
-            np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-            c="b",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.fill_between(
-            pred_df["magnitude"],
-            np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-            np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-            color="b",
-            alpha=0.2,
-        )
+        # CV predictions
+        # Plot the average mean prediction across all CV folds
+        if cv:
+            # Plot individual CV predictions
+            ax.plot(
+                mean_pred_da.coords["mag"].values,
+                np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
+                c="k",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
 
+            avg_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
+            avg_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
+            ax.plot(
+                mean_pred_da.coords["mag"].values,
+                np.exp(avg_mean + avg_std),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                mean_pred_da.coords["mag"].values,
+                np.exp(avg_mean - avg_std),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+                label="NN-GMM Average Std",
+            )
+            ax.fill_between(
+                mean_pred_da.coords["mag"].values,
+                np.exp(avg_mean - avg_std),
+                np.exp(avg_mean + avg_std),
+                color="b",
+                alpha=0.2,
+            )
+
+            ax.plot(
+                mean_pred_da.coords["mag"].values,
+                np.exp(avg_mean),
+                c="b",
+                label="NN-GMM Average Mean",
+                linewidth=major_line_width,
+            )
+        else:
+            ax.plot(
+                pred_df["magnitude"],
+                np.exp(pred_df[f"{im}_pred"]),
+                c="b",
+                label="NN-GMM",
+                linewidth=major_line_width,
+            )
+            ax.plot(
+                pred_df["magnitude"],
+                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                pred_df["magnitude"],
+                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.fill_between(
+                pred_df["magnitude"],
+                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                color="b",
+                alpha=0.2,
+            )
+
+        # Empirical GMM predictions
         ax.plot(
             emp_pred_df["magnitude"],
             np.exp(emp_pred_df[f"{im}_mean"]),
             c="g",
             label="Empirical GMM",
+            linewidth=major_line_width,
         )
         ax.plot(
             emp_pred_df["magnitude"],
             np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
             c="g",
             linestyle="--",
-            linewidth=1,
+            linewidth=minor_line_width,
         )
         ax.plot(
             emp_pred_df["magnitude"],
             np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
             c="g",
             linestyle="--",
-            linewidth=1,
+            linewidth=minor_line_width,
         )
         ax.fill_between(
             emp_pred_df["magnitude"],
@@ -153,6 +244,9 @@ def rrup_trend_plot(
     record_limits: dict,
     record_int_ids: np.ndarray,
     device: str,
+    cv: bool = False,
+    major_line_width: float = 3.0,
+    minor_line_width: float = 2.0,
 ):
     """
     Create rrup trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -186,7 +280,40 @@ def rrup_trend_plot(
     )
 
     # Get rrup predictions
-    pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
+    if cv:
+        cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
+        pred_dfs = {
+            cur_dir.stem: nn_gmm_predict.run_predictions(
+                cur_dir, input_df, device=device
+            )
+            for cur_dir in cv_dirs
+        }
+        mean_pred_values = np.stack(
+            [cur_df[run_config.pred_mean_keys].values for cur_df in pred_dfs.values()]
+        )
+        mean_pred_da = xr.DataArray(
+            data=mean_pred_values,
+            dims=["cv", "rrup", "im"],
+            coords={
+                "cv": list(pred_dfs.keys()),
+                "rrup": input_df["rrup"].values,
+                "im": run_config.pred_mean_keys,
+            },
+        )
+        std_pred_values = np.stack(
+            [cur_df[run_config.pred_std_keys].values for cur_df in pred_dfs.values()]
+        )
+        std_pred_da = xr.DataArray(
+            data=std_pred_values,
+            dims=["cv", "rrup", "im"],
+            coords={
+                "cv": list(pred_dfs.keys()),
+                "rrup": input_df["rrup"].values,
+                "im": run_config.pred_std_keys,
+            },
+        )
+    else:
+        pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
@@ -200,31 +327,73 @@ def rrup_trend_plot(
     fig, axs = mlt.plotting.get_fig_axes(4, 2, 2, ind_figsize=(8, 6))
 
     for i, (ax, im) in enumerate(zip(axs, plot_ims)):
-        ax.plot(
-            pred_df["rrup"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM"
-        )
-        ax.plot(
-            pred_df["rrup"],
-            np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-            c="b",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.plot(
-            pred_df["rrup"],
-            np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-            c="b",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.fill_between(
-            pred_df["rrup"],
-            np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-            np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-            color="b",
-            alpha=0.2,
-        )
+        if cv:
+            # Plot individual CV predictions
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
+                c="k",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
 
+            avg_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
+            avg_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(avg_mean + avg_std),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(avg_mean - avg_std),
+                c="b",
+                linestyle="--",
+                linewidth=minor_line_width,
+                label="NN-GMM Average Std",
+            )
+            ax.fill_between(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(avg_mean - avg_std),
+                np.exp(avg_mean + avg_std),
+                color="b",
+                alpha=0.2,
+            )
+
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(avg_mean),
+                c="b",
+                label="NN-GMM Average Mean",
+                linewidth=major_line_width,
+            )
+        else: 
+            ax.plot(pred_df["rrup"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM")
+            ax.plot(
+                pred_df["rrup"],
+                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                c="b",
+                linestyle="--",
+                linewidth=1,
+            )
+            ax.plot(
+                pred_df["rrup"],
+                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                c="b",
+                linestyle="--",
+                linewidth=1,
+            )
+            ax.fill_between(
+                pred_df["rrup"],
+                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                color="b",
+                alpha=0.2,
+            )
+
+        # Empirical GMM predictions
         ax.plot(
             emp_pred_df["rrup"],
             np.exp(emp_pred_df[f"{im}_mean"]),

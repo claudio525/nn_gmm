@@ -10,6 +10,7 @@ from . import plots_spatial
 from . import plots
 from .nn_gmm import RunConfig
 from . import nn_gmm_predict
+from .nn_gmm_train_cv import train_cv
 
 __all__ = [
     "constants",
@@ -24,5 +25,6 @@ __all__ = [
     "data",
     "plot_utils",
     "plots",
-    "plots_spatial",    
+    "plots_spatial",  
+    "train_cv",
 ]
