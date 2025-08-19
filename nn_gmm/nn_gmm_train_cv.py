@@ -101,12 +101,14 @@ def train_cv(
         coords={
             "cv_iter": cv_iters,
             "epoch": np.arange(run_config.n_epochs),
-            "metric": list(metrics["cv_00"].columns)
-        }
+            "metric": list(metrics["cv_00"].columns),
+        },
     )
     metrics_da.to_netcdf(base_out_dir / "metrics.nc")
 
-    results_report_notebook_ffp = Path(__file__).parent / "result_notebooks/cv_result_analysis.ipynb"
+    results_report_notebook_ffp = (
+        Path(__file__).parent / "result_notebooks/cv_result_analysis.ipynb"
+    )
     mlt.quarto.render_quarto(
         "mamba activate nn-gmm",
         results_report_notebook_ffp,
@@ -119,7 +121,7 @@ def _run_helper(
     run_config: nn_gmm.RunConfig,
     event_df: pd.DataFrame,
     site_df: pd.DataFrame,
-        event_folds: list[np.ndarray],
+    event_folds: list[np.ndarray],
     site_folds: list[np.ndarray],
     cv_iter: int,
     train_folds_ind: list[tuple[int, int]],
@@ -139,9 +141,7 @@ def _run_helper(
     train_events = np.unique(
         np.concatenate([event_folds[i] for i, _ in train_folds_ind])
     )
-    train_sites = np.unique(
-        np.concatenate([site_folds[j] for _, j in train_folds_ind])
-    )
+    train_sites = np.unique(np.concatenate([site_folds[j] for _, j in train_folds_ind]))
 
     nn_gmm.run_model_training(
         out_dir,
@@ -152,7 +152,7 @@ def _run_helper(
         val_events,
         train_sites,
         val_sites,
-        save_train_results=False
+        save_train_results=False,
     )
 
     root_logger.removeHandler(file_handler)

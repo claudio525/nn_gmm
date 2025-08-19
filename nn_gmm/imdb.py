@@ -733,13 +733,13 @@ class IMDB:
         start = time.time()
         im_df = pd.read_sql(
             f"""
-            SELECT r.record_int_id, {", ".join(constants.PSA_KEYS_TO_DB_SERIES.loc[ims].values.astype(str).tolist())}
+            SELECT r.record_int_id, {", ".join(constants.IMS_TO_DB_IMS_SERIES.loc[ims].values.astype(str).tolist())}
             FROM record_ims r
             JOIN temp_record_ids t ON r.record_int_id = t.record_int_id
             """,
             self._conn,
             index_col="record_int_id",
-            dtype={cur_key: "float32" for cur_key in constants.DB_IM_KEYS if cur_key in ims or cur_key in constants.DB_PSA_KEYS}
+            dtype={cur_key: "float32" for cur_key in constants.IMS_TO_DB_IMS_SERIES.loc[ims].values}
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
             f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."
