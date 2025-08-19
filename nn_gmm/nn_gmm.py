@@ -225,6 +225,9 @@ class ModelConfig:
     activation: str
     """Activation function to use in the model."""
 
+    l2_reg: float = 0.0
+    """L2 regularization strength."""
+
     @classmethod
     def from_dict(cls, d: dict):
         """
@@ -260,6 +263,7 @@ class ModelConfig:
         return {
             "units": model_config.units,
             "activation": str(model_config.activation),
+            "l2_reg": float(model_config.l2_reg),
         }
 
 
@@ -533,7 +537,7 @@ def train(
     best_model_state, best_model_epoch = None, None
 
     model = model.to(run_config.device)
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), weight_decay=run_config.model_config.l2_reg)
 
     for cur_epoch_ix in range(run_config.n_epochs):
         if verbose:
