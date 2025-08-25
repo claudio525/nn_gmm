@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+import multiprocessing as mp
 
 import numpy as np
 import torch
@@ -9,6 +10,7 @@ from sklearn.model_selection import train_test_split
 import ml_tools as mlt
 import nn_gmm as nng
 
+torch.multiprocessing.set_start_method("spawn", force=True)
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -99,6 +101,9 @@ def train_cv(
     n_epochs: int = None,
     id_suffix: str = None,
     n_sites: int = None,
+    n_procs: int = 1,
+    run_notebook: bool = True,
+    save_cv_results: bool = True,
 ):
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
@@ -123,7 +128,9 @@ def train_cv(
         n_site_folds,
         base_out_dir,
         device,
-        n_sites,
+        n_sites=n_sites,
+        n_procs=n_procs,
+        run_notebook=run_notebook,
     )
 
 

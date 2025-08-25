@@ -23,10 +23,7 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class BaseBatchData(abc.ABC):
-
-    @abc.abstractmethod
-    def to_tensor(self, device: str = None) -> "BaseBatchData":
-        pass
+    pass
 
 
 class BaseDataset(abc.ABC):
@@ -48,8 +45,8 @@ class BatchData(BaseBatchData):
     def __init__(
         self,
         record_int_ids: np.ndarray,
-        X: np.ndarray,
-        y: np.ndarray,
+        X: torch.Tensor,
+        y: torch.Tensor,
     ):
         self.y = y
         self.X = X
@@ -59,19 +56,6 @@ class BatchData(BaseBatchData):
     @property
     def n_samples(self) -> int:
         return self.y.shape[0]
-
-    def to_tensor(self, device: str = None) -> "BatchData":
-        """
-        Convert the data to PyTorch tensors
-        """
-        if device is None:
-            self.y = torch.from_numpy(self.y).to(dtype=torch.float32)
-            self.X = torch.from_numpy(self.X).to(dtype=torch.float32)
-        else:
-            self.y = torch.from_numpy(self.y).to(dtype=torch.float32, device=device)
-            self.X = torch.from_numpy(self.X).to(dtype=torch.float32, device=device)
-
-        return self
 
     def __repr__(self):
         return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, y={self.y.shape})"
@@ -111,11 +95,10 @@ class CustomDataLoader:
         self.i += self.batch_size
 
         # Get, convert and return batch
-        return self.dataset.get_batch(batch_ind).to_tensor()
+        return self.dataset.get_batch(batch_ind)
 
 
-class IMDBDataset(BaseDataset):
-
+class BaseIMDBDataset(BaseDataset):
     def __init__(
         self,
         imdb_ffp: Path,
@@ -134,7 +117,7 @@ class IMDBDataset(BaseDataset):
         imdb_ffp : Path
             The path to the IMDB file
         record_int_ids : np.ndarray
-            The record ids to get the IM data for
+            The record ids to include
         ims : np.ndarray
             The IMs to get the data for
         site_df : pd.DataFrame
@@ -155,12 +138,8 @@ class IMDBDataset(BaseDataset):
         self.imdb = IMDB(imdb_ffp, readonly=True, memory_map_size=30, cache_size=5000)
         self.imdb.open()
 
-        self.record_int_ids = record_int_ids
         self.ims = ims
-        self.site_df = site_df
-        self.source_df = source_df
-        self.site_event_df = site_event_df
-        self.record_info_df = record_info_df
+        self.record_int_ids = np.sort(record_int_ids)
 
         # Check required memory
         mem_req = self.record_int_ids.size * self.ims.size * 8 / 1e9
@@ -174,7 +153,9 @@ class IMDBDataset(BaseDataset):
         logger.info(
             f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
         )
-        self._im_data = self.imdb.get_im_data_tmp_table(self.ims, self.record_int_ids)
+        self._im_data = self.imdb.get_im_data_tmp_table(
+            self.ims, self.record_int_ids
+        ).sort_index()
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
         if len(zero_record_ids) > 0:
@@ -187,6 +168,19 @@ class IMDBDataset(BaseDataset):
             self.record_int_ids = self.record_int_ids[
                 ~np.isin(self.record_int_ids, zero_record_ids)
             ]
+
+        # Filter dataframes to only include relevant records
+        self.record_info_df = record_info_df.loc[self.record_int_ids]
+        self.site_df = site_df.loc[
+            site_df.index.isin(self.record_info_df.site_int_id)
+        ].sort_index()
+        self.source_df = source_df.loc[
+            source_df.index.isin(self.record_info_df.rel_int_id)
+        ].sort_index()
+        self.site_event_df = site_event_df.loc[
+            site_event_df.index.isin(self.record_info_df.site_event_int_id)
+        ].sort_index()
+
         # Convert to log
         self._im_data = np.log(self._im_data)
 
@@ -213,7 +207,119 @@ class IMDBDataset(BaseDataset):
     def __len__(self) -> int:
         return self.record_int_ids.size
 
+
+class OptimizedIMDBDataset(BaseIMDBDataset):
+
+    def __init__(
+        self,
+        imdb_ffp: Path,
+        record_int_ids: np.ndarray,
+        ims: np.ndarray,
+        site_df: pd.DataFrame,
+        source_df: pd.DataFrame,
+        site_event_df: pd.DataFrame,
+        record_info_df: pd.DataFrame,
+        run_config: "nn_gmm.RunConfig",
+        is_train: bool,
+    ) -> None:
+        super().__init__(
+            imdb_ffp,
+            record_int_ids,
+            ims,
+            site_df,
+            source_df,
+            site_event_df,
+            record_info_df,
+            run_config,
+            is_train,
+        )
+
+        assert np.all(self.record_int_ids == self._im_data.index.values)
+        assert np.all(self.record_info_df.index.values == self.record_int_ids)
+
+        self._index_to_site_ix = self.site_df.index.get_indexer(
+            self.record_info_df.loc[self.record_int_ids].site_int_id.values
+        )
+        self._index_to_source_ix = self.source_df.index.get_indexer(
+            self.record_info_df.loc[self.record_int_ids].rel_int_id.values
+        )
+        self._index_to_site_event_ix = self.site_event_df.index.get_indexer(
+            self.record_info_df.loc[self.record_int_ids].site_event_int_id.values
+        )
+
+        self._im_data_tensor = torch.tensor(
+            self._im_data.values, device=run_config.device, dtype=torch.float32
+        )
+        self._source_data_tensor = torch.tensor(
+            self.source_df.values, device=run_config.device, dtype=torch.float32
+        )
+        self._site_data_tensor = torch.tensor(
+            self.site_df.values, device=run_config.device, dtype=torch.float32
+        )
+        self._site_event_tensor = torch.tensor(
+            self.site_event_df.values, device=run_config.device, dtype=torch.float32
+        )
+
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
+        """
+        Get a batch of data for the given indices.
+
+        indices: np.ndarray
+            GM record indices
+        """
+        y = self._im_data_tensor[indices, :]
+
+        site_data = self._site_data_tensor[self._index_to_site_ix[indices], :]
+        source_data = self._source_data_tensor[self._index_to_source_ix[indices], :]
+        site_event_data = self._site_event_tensor[
+            self._index_to_site_event_ix[indices], :
+        ]
+
+        X = torch.cat(
+            (
+                site_data,
+                source_data,
+                site_event_data,
+            ),
+            dim=1,
+        )
+
+        return BatchData(self.record_int_ids[indices], X, y)
+
+
+class IMDBDataset(BaseIMDBDataset):
+
+    def __init__(
+        self,
+        imdb_ffp: Path,
+        record_int_ids: np.ndarray,
+        ims: np.ndarray,
+        site_df: pd.DataFrame,
+        source_df: pd.DataFrame,
+        site_event_df: pd.DataFrame,
+        record_info_df: pd.DataFrame,
+        run_config: "nn_gmm.RunConfig",
+        is_train: bool,
+    ) -> None:
+        super().__init__(
+            imdb_ffp,
+            record_int_ids,
+            ims,
+            site_df,
+            source_df,
+            site_event_df,
+            record_info_df,
+            run_config,
+            is_train,
+        )
+
+    def get_batch(self, indices: np.ndarray) -> BaseBatchData:
+        """
+        Get a batch of data for the given indices.
+
+        indices: np.ndarray
+            GM record indices
+        """
         y = self._im_data.loc[self.record_int_ids[indices]].values
 
         site_int_ids = self.record_info_df.loc[
@@ -239,7 +345,11 @@ class IMDBDataset(BaseDataset):
             axis=1,
         )
 
-        return BatchData(self.record_int_ids[indices], X, y)
+        return BatchData(
+            self.record_int_ids[indices],
+            torch.from_numpy(X).to(dtype=torch.float32, device=self.run_config.device),
+            torch.from_numpy(y).to(dtype=torch.float32, device=self.run_config.device),
+        )
 
 
 def imdb_get_im_data_batched(
@@ -289,7 +399,13 @@ def imdb_get_im_data_batched(
 
     return pd.concat(im_data, axis=0)
 
-def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limits: dict, record_int_ids: np.ndarray = None):
+
+def get_similar_records(
+    run_config: "nn_gmm.RunConfig",
+    fixed_inputs: dict,
+    limits: dict,
+    record_int_ids: np.ndarray = None,
+):
     logging.info("Getting similar records for fixed inputs:")
     for k, v in fixed_inputs.items():
         if k in limits:
@@ -298,17 +414,19 @@ def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limi
             logging.info(f"{k}: {v} (no limits defined)")
 
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
-        site_df  = imdb.get_site_df()
+        site_df = imdb.get_site_df()
         event_df = imdb.get_event_df()
         rel_df = imdb.get_rel_df()
 
     # Valid sites
     for k in run_config.site_inputs:
         if k in fixed_inputs and k in limits:
-            site_df = site_df.loc[site_df[k].between(
-                fixed_inputs[k] - limits[k][0],
-                fixed_inputs[k] + limits[k][1],
-            )]
+            site_df = site_df.loc[
+                site_df[k].between(
+                    fixed_inputs[k] - limits[k][0],
+                    fixed_inputs[k] + limits[k][1],
+                )
+            ]
         else:
             logger.info(f"Skipping site input {k}, not in fixed inputs or limits")
     logger.info(f"Found {len(site_df)} valid sites")
@@ -320,22 +438,27 @@ def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limi
                 event_df = event_df.loc[event_df.tect_type == fixed_inputs[k]]
             # Event property
             elif k in event_df:
-                event_df = event_df.loc[event_df[k].between(
-                    fixed_inputs[k] - limits[k][0],
-                    fixed_inputs[k] + limits[k][1],
-                )]
+                event_df = event_df.loc[
+                    event_df[k].between(
+                        fixed_inputs[k] - limits[k][0],
+                        fixed_inputs[k] + limits[k][1],
+                    )
+                ]
             # Realisation property
             else:
-                rel_df = rel_df.loc[rel_df[k].between(
-                    fixed_inputs[k] - limits[k][0],
-                    fixed_inputs[k] + limits[k][1],
-                )]
+                rel_df = rel_df.loc[
+                    rel_df[k].between(
+                        fixed_inputs[k] - limits[k][0],
+                        fixed_inputs[k] + limits[k][1],
+                    )
+                ]
         else:
             logger.info(f"Skipping source input {k}, not in fixed inputs or limits")
-    
-    rel_df = rel_df.loc[rel_df.event_int_id.isin(event_df.index)]
-    logger.info(f"Found {len(event_df)} valid events and {len(rel_df)} valid realisations")
 
+    rel_df = rel_df.loc[rel_df.event_int_id.isin(event_df.index)]
+    logger.info(
+        f"Found {len(event_df)} valid events and {len(rel_df)} valid realisations"
+    )
 
     comb = np.array(list(itertools.product(site_df.index, event_df.index)))
     if comb.shape[0] == 0:
@@ -367,9 +490,11 @@ def get_similar_records(run_config: "nn_gmm.RunConfig", fixed_inputs: dict, limi
         )
 
     # Site, Event and Realisation filtering
-    record_mask = record_info_df.site_int_id.isin(site_df.index) & \
-                  record_info_df.event_int_id.isin(event_df.index) & \
-                  record_info_df.rel_int_id.isin(rel_df.index)
+    record_mask = (
+        record_info_df.site_int_id.isin(site_df.index)
+        & record_info_df.event_int_id.isin(event_df.index)
+        & record_info_df.rel_int_id.isin(rel_df.index)
+    )
     record_info_df = record_info_df.loc[record_mask]
 
     # Site-Event filtering

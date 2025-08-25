@@ -57,7 +57,7 @@ def get_site_grid_level(site_ids: np.ndarray) -> int:
     return site_grid_level
 
 
-def setup_logging(log_file: Path = None, file_level=logging.DEBUG, console_level=logging.INFO):
+def setup_logging(log_file: Path = None, file_level=logging.DEBUG, enable_console: bool = True, console_level=logging.INFO):
     # Create a logger
     logger = logging.getLogger()
     # Set logger to the lowest level of any handler
@@ -69,19 +69,20 @@ def setup_logging(log_file: Path = None, file_level=logging.DEBUG, console_level
     # Create file handler with its own level
     if log_file is not None:
         file_handler = logging.FileHandler(log_file, mode='w')
-        file_handler.setLevel(file_level)  # More detailed logging to file
+        file_handler.setLevel(file_level)  
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
         logger.addHandler(file_handler)
 
     # Create console handler with its own level
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(console_level)  # Less verbose on console
-    console_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    )
-    logger.addHandler(console_handler)
+    if enable_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(console_level)  
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(console_handler)
 
     return logger
 

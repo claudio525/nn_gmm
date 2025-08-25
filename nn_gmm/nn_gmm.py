@@ -1,3 +1,4 @@
+import time
 import os
 import logging
 from pathlib import Path
@@ -294,6 +295,7 @@ def run_model_training(
     train_sites: list[str],
     val_sites: list[str],
     save_train_results: bool = True,
+    verbose: bool = True,
 ):
     """
     Runs the model training process for the given run configuration,
@@ -375,7 +377,7 @@ def run_model_training(
     assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
     assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
 
-    train_dataset = data.IMDBDataset(
+    train_dataset = data.OptimizedIMDBDataset(
         run_config.imdb_ffp,
         train_record_ids,
         run_config.ims,
@@ -384,9 +386,9 @@ def run_model_training(
         pre_site_event_df,
         record_info_df,
         run_config,
-        True,
+        is_train=True,
     )
-    val_dataset = data.IMDBDataset(
+    val_dataset = data.OptimizedIMDBDataset(
         run_config.imdb_ffp,
         val_record_ids,
         run_config.ims,
@@ -395,7 +397,7 @@ def run_model_training(
         pre_site_event_df,
         record_info_df,
         run_config,
-        False,
+        is_train=False,
     )
 
     train_dataloader = data.CustomDataLoader(
@@ -419,7 +421,7 @@ def run_model_training(
     )
 
     metrics, best_model_state, best_model_epoch = train(
-        run_config, model, train_dataloader, val_dataloader
+        run_config, model, train_dataloader, val_dataloader, verbose=verbose
     )
     metrics_df = pd.DataFrame(metrics)
 
@@ -481,13 +483,13 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
     pd.DataFrame
         A DataFrame containing the predicted mean and standard deviation values.
     """
-    dataloader = data.CustomDataLoader(dataset, batch_size=2048, shuffle=False)
+    dataloader = data.CustomDataLoader(dataset, batch_size=100_000, shuffle=False)
 
     result_dfs = []
     for cur_batch in tqdm(dataloader, desc="Predicting"):
         model.eval()
         with torch.no_grad():
-            pred_mean, pred_ln_std = model(cur_batch.X.to(run_config.device)).chunk(
+            pred_mean, pred_ln_std = model(cur_batch.X).chunk(
                 2, dim=-1
             )
             pred_std = torch.exp(pred_ln_std).cpu().numpy(force=True)
@@ -608,7 +610,7 @@ def _get_batch_result(
     model: nn.Module,
     run_config: RunConfig,
 ) -> BatchResult:
-    X, y = batch.X.to(run_config.device), batch.y.to(run_config.device)
+    X, y = batch.X, batch.y
 
     pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
     pred_std = torch.exp(pred_ln_std)
