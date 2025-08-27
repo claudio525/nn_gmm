@@ -27,12 +27,12 @@ def train_cv(
     n_sites: int = None,
     n_procs: int = 1,
     run_notebook: bool = True,
-    save_cv_results: bool = True
+    remove_cv_results: bool = False
 ):
     logger.info(f"Using device: {device.upper()}")
 
     # Get the data
-    with IMDB(run_config.imdb_ffp) as imdb:
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(max_grid_level=0, add_nztm=True)
 
@@ -150,10 +150,12 @@ def train_cv(
             result_dir=str(base_out_dir),
         )
 
-    # Remove the individual CV result directories
-    if not save_cv_results:
+    # Remove the train/validation result files 
+    # for each CV directory
+    if remove_cv_results:
         for cur_cv_dir in out_dirs:
-            shutil.rmtree(cur_cv_dir)
+            (cur_cv_dir / "val_results.parquet").unlink()
+            (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
 
 def _run_helper(
     run_config: nn_gmm.RunConfig,
@@ -179,8 +181,8 @@ def _run_helper(
     else:
         logger = utils.setup_logging(log_ffp, enable_console=False)
         logging.info(f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}.")
-        logging.info(f"Sleeping for {90 * p_ix} seconds to stagger process start times.")    
-        time.sleep(90 * p_ix)
+        logging.info(f"Sleeping for {10 * p_ix} seconds to stagger process start times.")    
+        time.sleep(10 * p_ix)
 
     val_events = event_folds[val_fold_ind[0]]
     val_sites = site_folds[val_fold_ind[1]]

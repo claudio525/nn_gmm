@@ -41,7 +41,7 @@ def train_gmm(
     logger.info(f"Using device: {device.upper()}")
 
     # Get the data
-    with nng.IMDB(run_config.imdb_ffp) as imdb:
+    with nng.IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(max_grid_level=0)
 
@@ -103,7 +103,7 @@ def train_cv(
     n_sites: int = None,
     n_procs: int = 1,
     run_notebook: bool = True,
-    save_cv_results: bool = True,
+    remove_cv_results: bool = False,
 ):
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
@@ -131,6 +131,7 @@ def train_cv(
         n_sites=n_sites,
         n_procs=n_procs,
         run_notebook=run_notebook,
+        remove_cv_results=remove_cv_results
     )
 
 

@@ -59,6 +59,27 @@ class RunConfig:
     source_to_site_inputs: list[str]
     """Model source to site inputs"""
 
+    apply_mag_sample_weighting: bool
+    """Whether to apply magnitude-based sample weighting"""
+
+    max_mag_weight: float
+    """Maximum weight for magnitude-based sample weighting"""
+
+    apply_rrup_sample_weighting: bool
+    """Whether to apply Rrup-based sample weighting"""
+
+    max_rrup_weight: float
+    """Maximum weight for Rrup-based sample weighting"""
+
+    apply_vs30_sample_weighting: bool
+    """Whether to apply Vs30-based sample weighting"""
+
+    max_vs30_weight: float
+    """Maximum weight for Vs30-based sample weighting"""
+
+    total_max_weight: float
+    """Maximum total weight allowed for any sample"""
+
     n_epochs: int
     """Number of epochs to train the model"""
 
@@ -138,6 +159,15 @@ class RunConfig:
         return len(self.ims)
 
     @property
+    def use_sample_weights(self) -> bool:
+        """Whether to use sample weights."""
+        return (
+            self.apply_mag_sample_weighting
+            or self.apply_rrup_sample_weighting
+            or self.apply_vs30_sample_weighting
+        )
+
+    @property
     def im_scale_params(self):
         if self.scale_ims:
             return self._im_scale_params
@@ -175,6 +205,13 @@ class RunConfig:
             "site_inputs": list(self.site_inputs),
             "source_inputs": list(self.source_inputs),
             "source_to_site_inputs": list(self.source_to_site_inputs),
+            "apply_mag_sample_weighting": self.apply_mag_sample_weighting,
+            "max_mag_weight": float(self.max_mag_weight),
+            "apply_rrup_sample_weighting": self.apply_rrup_sample_weighting,
+            "max_rrup_weight": float(self.max_rrup_weight),
+            "apply_vs30_sample_weighting": self.apply_vs30_sample_weighting,
+            "max_vs30_weight": float(self.max_vs30_weight),
+            "total_max_weight": float(self.total_max_weight),
             "batch_size": int(self.batch_size),
             "model": ModelConfig.to_dict(self.model_config),
             "rel_results_dir": str(self.rel_results_dir),
@@ -283,6 +320,9 @@ class BatchResult(NamedTuple):
     """The batch loss"""
     ind_loss: torch.Tensor
     """The individual losses, this includes nan-values"""
+    ind_w_loss: torch.Tensor
+    """The individual weighted losses, this includes nan-values"""
+
 
 
 def run_model_training(
@@ -327,20 +367,25 @@ def run_model_training(
         np.isin(run_config.test_events, events).sum() == 0
     ), "Test events are not allowed in the training or validation sets. "
 
-    with imdb.IMDB(run_config.imdb_ffp) as db:
+    with imdb.IMDB(run_config.imdb_ffp, readonly=True) as db:
         source_df = db.get_rel_df(events=events)
         site_event_df = db.get_site_event_df(sites=sites, max_rrup=run_config.max_rrup)
         record_info_df = db.get_record_info_df(events=events, sites=sites)
-
-    # Drop records that based not in site_event_df (due to max_rrup)
+    # Add site-event-int-id, and update types to reduce memory usage
     record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
         record_info_df.site_int_id.values, record_info_df.event_int_id.values
     )
+    record_info_df = record_info_df.astype(
+        {"event_int_id": np.uint32, "site_int_id": np.uint32, "rel_int_id": np.uint32}
+    )
+    assert record_info_df.site_event_int_id.dtype == np.int64
+
+    # Drop records that based not in site_event_df (due to max_rrup)
     drop_mask = ~record_info_df.site_event_int_id.isin(site_event_df.index.values)
     if np.any(drop_mask):
         record_info_df = record_info_df.loc[~drop_mask]
         logger.info(
-            f"Dropping {drop_mask.sum()} records that are not in the site_event_df"
+            f"Dropping {drop_mask.sum()} records that are not in the site_event_df due to max_rrup"
         )
 
     # Add event level source data
@@ -348,6 +393,39 @@ def run_model_training(
     source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
     source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
+
+    # Add sample weights
+    record_info_df["sample_weight"] = np.float32(1.0)
+    if run_config.use_sample_weights:
+        record_info_df["magnitude"] = event_df.loc[
+            record_info_df.event_int_id
+        ].magnitude.values.astype(np.float32)
+        record_info_df["rrup"] = site_event_df.loc[
+            record_info_df.site_event_int_id
+        ].rrup.values.astype(np.float32)
+        record_info_df["vs30"] = site_df.loc[
+            record_info_df.site_int_id
+        ].vs30.values.astype(np.float32)
+
+        if run_config.apply_mag_sample_weighting:
+            record_info_df = get_mag_weights(
+                record_info_df, max_weight=run_config.max_mag_weight
+            )
+        if run_config.apply_rrup_sample_weighting:
+            record_info_df = get_rrup_weights(
+                record_info_df, max_weight=run_config.max_rrup_weight
+            )
+        if run_config.apply_vs30_sample_weighting:
+            record_info_df = get_vs30_weights(
+                record_info_df, max_weight=run_config.max_vs30_weight
+            )
+
+        record_info_df["sample_weight"] += np.clip(
+            record_info_df.get("mag_weight", 0).values
+            + record_info_df.get("rrup_weight", 0).values
+            + record_info_df.get("vs30_weight", 0).values,
+            0, run_config.total_max_weight
+        )
 
     # Run preprocessing
     pre_site_df = preprocessing.pre_process_site_features(
@@ -436,11 +514,12 @@ def run_model_training(
     val_results_df = get_predictions(model, val_dataset, run_config)
     val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
-    logging.info("Getting training dataset predictions")
-    train_results_df = get_predictions(model, train_dataset, run_config)
     if save_train_results:
+        logging.info("Getting training dataset predictions")
+        train_results_df = get_predictions(model, train_dataset, run_config)
         train_results_df.to_parquet(ouput_dir / "train_results.parquet")
 
+    logging.info("Saving results")
     run_config.to_yaml(ouput_dir / "run_config.yaml")
     metrics_df.to_parquet(ouput_dir / "metrics.parquet")
 
@@ -456,13 +535,11 @@ def run_model_training(
     metadata = {
         "best_model_epoch": int(best_model_epoch),
         "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]),
-        "n_train_samples": int(train_results_df.shape[0]),
-        "n_val_samples": int(val_results_df.shape[0]),
+        "n_train_samples": int(train_record_ids.shape[0]),
+        "n_val_samples": int(val_record_ids.shape[0]),
         "n_model_params": int(nn_gmm_modules.get_n_params(model)),
     }
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
-
-    
 
 
 def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig):
@@ -489,9 +566,7 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
     for cur_batch in tqdm(dataloader, desc="Predicting"):
         model.eval()
         with torch.no_grad():
-            pred_mean, pred_ln_std = model(cur_batch.X).chunk(
-                2, dim=-1
-            )
+            pred_mean, pred_ln_std = model(cur_batch.X).chunk(2, dim=-1)
             pred_std = torch.exp(pred_ln_std).cpu().numpy(force=True)
             pred_mean = pred_mean.cpu().numpy(force=True)
 
@@ -527,6 +602,8 @@ def train(
 ):
     # Setup metrics to log
     metrics = {
+        "w_loss_hist_train": np.zeros(run_config.n_epochs),
+        "w_loss_hist_val": np.zeros(run_config.n_epochs),
         "loss_hist_train": np.zeros(run_config.n_epochs),
         "loss_hist_val": np.zeros(run_config.n_epochs),
         "mse_hist_train": np.zeros(run_config.n_epochs),
@@ -539,7 +616,9 @@ def train(
     best_model_state, best_model_epoch = None, None
 
     model = model.to(run_config.device)
-    optimizer = torch.optim.Adam(model.parameters(), weight_decay=run_config.model_config.l2_reg)
+    optimizer = torch.optim.Adam(
+        model.parameters(), weight_decay=run_config.model_config.l2_reg
+    )
 
     for cur_epoch_ix in range(run_config.n_epochs):
         if verbose:
@@ -623,9 +702,15 @@ def _get_batch_result(
     )
     if (nan_count := ind_loss.isnan().sum()) > 0:
         logger.warning(f"Loss has {nan_count} NaN values!!")
-    loss = ind_loss.mean()
 
-    return BatchResult(batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss)
+    if run_config.use_sample_weights:
+        ind_w_loss = ind_loss * batch.sample_weights[:, None]
+        loss = ind_w_loss.mean()
+    else:
+        ind_w_loss = None
+        loss = ind_loss.mean()
+
+    return BatchResult(batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss)
 
 
 def _save_metrics(
@@ -637,6 +722,7 @@ def _save_metrics(
 ):
     """Computes and saves the metrics for a single batch"""
     loss_hist_key = f"loss_hist_{result_type}"
+    w_loss_hist_key = f"w_loss_hist_{result_type}"
     mse_hist_key = f"mse_hist_{result_type}"
     mean_sigma_hist_key = f"mean_sigma_hist_{result_type}"
 
@@ -655,6 +741,9 @@ def _save_metrics(
     metrics[mean_sigma_hist_key][epoch_ix] += (
         batch_result.pred_std.mean(dim=1).sum().item()
     )
+
+    if run_config.use_sample_weights:
+        metrics[w_loss_hist_key][epoch_ix] += batch_result.ind_w_loss.mean(dim=1).sum().item()
 
     return metrics
 
@@ -697,3 +786,70 @@ def revert_im_scaling(
         return ln_im_mean, ln_im_std
 
     return ln_im_mean, None
+
+
+def get_mag_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFrame:
+    """
+    Computes the additional sample weight due to magnitude,
+    to be added to the base weight of one.
+    """
+    record_info_df["mag_bin"] = pd.cut(
+        record_info_df.magnitude,
+        constants.MAG_WEIGHTING_BINS,
+        labels=constants.MAG_WEIGHTING_BIN_NAMES,
+    )
+
+    mag_bin_counts = record_info_df.mag_bin.value_counts().sort_index()
+
+    mag_bin_weights = np.clip(mag_bin_counts.max() / mag_bin_counts, 1, max_weight) - 1
+    record_info_df["mag_weight"] = record_info_df.mag_bin.map(mag_bin_weights).astype(
+        np.float16
+    )
+
+    return record_info_df
+
+
+def get_rrup_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFrame:
+    """
+    Computes the additional sample weight due to rrup,
+    to be added to the base weight of one.
+    """
+    record_info_df["rrup_bin"] = pd.cut(
+        record_info_df.rrup,
+        constants.RRUP_WEIGHTING_BINS,
+        labels=constants.RRUP_WEIGHTING_BIN_NAMES,
+    )
+
+    rrup_bin_counts = record_info_df.rrup_bin.value_counts().sort_index()
+
+    rrup_bin_weights = (
+        np.clip(rrup_bin_counts.max() / rrup_bin_counts, 1, max_weight) - 1
+    )
+    record_info_df["rrup_weight"] = record_info_df.rrup_bin.map(
+        rrup_bin_weights
+    ).astype(np.float16)
+
+    return record_info_df
+
+
+def get_vs30_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFrame:
+    """
+    Computes the additional sample weight due to Vs30,
+    to be added to the base weight of one.
+    """
+    record_info_df["vs30_bin"] = pd.cut(
+        record_info_df.vs30,
+        constants.VS30_WEIGHTING_BINS,
+        labels=constants.VS30_WEIGHTING_BIN_NAMES,
+    )
+
+    vs30_bin_counts = record_info_df.vs30_bin.value_counts().sort_index()
+
+    vs30_bin_weights = (
+        np.clip(vs30_bin_counts.max() / vs30_bin_counts, 1, max_weight) - 1
+    )
+    record_info_df["vs30_weight"] = record_info_df.vs30_bin.map(
+        vs30_bin_weights
+    ).astype(np.float16)
+
+    return record_info_df

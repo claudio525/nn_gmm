@@ -47,9 +47,11 @@ class BatchData(BaseBatchData):
         record_int_ids: np.ndarray,
         X: torch.Tensor,
         y: torch.Tensor,
+        sample_weights: torch.Tensor | None = None,
     ):
         self.y = y
         self.X = X
+        self.sample_weights = sample_weights
 
         self.record_int_ids = record_int_ids
 
@@ -58,7 +60,8 @@ class BatchData(BaseBatchData):
         return self.y.shape[0]
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, y={self.y.shape})"
+        return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, " \
+               f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
 
 
 class CustomDataLoader:
@@ -135,14 +138,11 @@ class BaseIMDBDataset(BaseDataset):
         """
         super().__init__()
 
-        self.imdb = IMDB(imdb_ffp, readonly=True, memory_map_size=30, cache_size=5000)
-        self.imdb.open()
-
         self.ims = ims
         self.record_int_ids = np.sort(record_int_ids)
 
         # Check required memory
-        mem_req = self.record_int_ids.size * self.ims.size * 8 / 1e9
+        mem_req = self.record_int_ids.size * self.ims.size * 4 / 1e9
         logger.info(f"Memory required: {mem_req:.2f} GB")
 
         if mem_req > (total_mem_avail := psutil.virtual_memory().total / 1e9):
@@ -153,9 +153,11 @@ class BaseIMDBDataset(BaseDataset):
         logger.info(
             f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
         )
-        self._im_data = self.imdb.get_im_data_tmp_table(
-            self.ims, self.record_int_ids
-        ).sort_index()
+        with IMDB(imdb_ffp, readonly=True, memory_map_size=30, cache_size=5000) as imdb:
+            self._im_data = imdb.get_im_data_tmp_table(
+                self.ims, self.record_int_ids
+            ).sort_index()
+
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
         if len(zero_record_ids) > 0:
@@ -197,12 +199,6 @@ class BaseIMDBDataset(BaseDataset):
             self._im_data = (
                 self._im_data - run_config.im_scale_params["mean"]
             ) / run_config.im_scale_params["std"]
-
-    def __del__(self):
-        try:
-            self.imdb.close()
-        except Exception as e:
-            logger.error(f"Error closing IMDB: {e}")
 
     def __len__(self) -> int:
         return self.record_int_ids.size
@@ -260,6 +256,10 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             self.site_event_df.values, device=run_config.device, dtype=torch.float32
         )
 
+        self._sample_weight_tensor = torch.tensor(
+            self.record_info_df["sample_weight"].values, device=run_config.device, dtype=torch.float32
+        )
+
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """
         Get a batch of data for the given indices.
@@ -284,7 +284,7 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             dim=1,
         )
 
-        return BatchData(self.record_int_ids[indices], X, y)
+        return BatchData(self.record_int_ids[indices], X, y, self._sample_weight_tensor[indices])
 
 
 class IMDBDataset(BaseIMDBDataset):

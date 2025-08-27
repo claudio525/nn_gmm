@@ -36,11 +36,11 @@ source_to_site_inputs:
 
 
 # Sample weighting
-apply_mag_sample_weighting: False
+apply_mag_sample_weighting: True
 max_mag_weight: 5.0
-apply_rrup_sample_weighting: False
+apply_rrup_sample_weighting: True
 max_rrup_weight: 5.0
-apply_vs30_sample_weighting: False
+apply_vs30_sample_weighting: True
 max_vs30_weight: 5.0
 total_max_weight: 10.0
 
