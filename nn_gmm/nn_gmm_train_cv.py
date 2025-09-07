@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import ml_tools as mlt
+from sklearn.model_selection import StratifiedKFold
 
 from . import utils
 from . import nn_gmm
@@ -34,7 +35,7 @@ def train_cv(
     # Get the data
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         event_df = imdb.get_event_df()
-        site_df = imdb.get_site_df(max_grid_level=0, add_nztm=True)
+        site_df = imdb.get_site_df(min_grid_level=0, max_grid_level=0, add_nztm=True)
 
     events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
         str
@@ -48,10 +49,21 @@ def train_cv(
         sites = sites[:n_sites]
 
     np.random.seed(run_config.seed)
-    np.random.shuffle(events)
-    np.random.shuffle(sites)
-    event_folds = np.array_split(events, n_event_folds)
-    site_folds = np.array_split(sites, n_site_folds)
+    # np.random.shuffle(events)
+    # np.random.shuffle(sites)
+
+    site_df["vs30_bin"] = pd.cut(site_df["vs30"], bins=[0, 180, 360, 760, 1500], labels=["vs30_0_180", "vs30_180_360", "vs30_360_760", "vs30_760_1500"])
+    event_df["mag_bin"] = pd.cut(event_df["magnitude"], bins=[5.5, 6.25, 7.25, 8.5], labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_8p5"])
+    
+    # Ensure even sampling of events wrt. magnitude
+    mag_split = StratifiedKFold(n_splits=n_event_folds, shuffle=True, random_state=run_config.seed)
+    event_folds = [events[ind[1]] for ind in mag_split.split(event_df.loc[event_df.event_id.isin(events)], event_df.loc[event_df.event_id.isin(events), "mag_bin"])]
+
+    vs30_split = StratifiedKFold(n_splits=n_site_folds, shuffle=True, random_state=run_config.seed)
+    site_folds = [sites[ind[1]] for ind in vs30_split.split(site_df.loc[site_df.site_id.isin(sites)], site_df.loc[site_df.site_id.isin(sites), "vs30_bin"])]
+
+    # event_folds = np.array_split(events, n_event_folds)
+    # site_folds = np.array_split(sites, n_site_folds)
 
     fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
 

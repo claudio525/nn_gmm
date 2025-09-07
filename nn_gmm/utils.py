@@ -7,8 +7,10 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 from source_modelling import sources
-from qcore import nhm
+from qcore import nhm, point_in_polygon as pip
 import seismic_hazard_analysis as sha
+
+from . import constants
 
 
 def get_site_grid_level(site_ids: np.ndarray) -> int:
@@ -80,7 +82,8 @@ def setup_logging(log_file: Path = None, file_level=logging.DEBUG, enable_consol
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(console_level)  
         console_handler.setFormatter(
-            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            # logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         )
         logger.addHandler(console_handler)
 
@@ -257,3 +260,16 @@ def get_pSA_period(im: str):
     if im.startswith("pSA"):
         return float(im.split("_")[-1])
     return None
+
+
+def add_basin_column(site_df: pd.DataFrame) -> pd.DataFrame:
+    """Adds a basin column to the given site dataframe"""
+    basin_boundary_files = [constants.BASIN_BOUNDARIES_DIR / f for f in constants.BASIN_BOUNDARIES_DIR.iterdir() if f.endswith(".txt")]
+    basin_boundaries = {f.stem.split("_", maxsplit=1)[0]: np.loadtxt(f) for f in basin_boundary_files}
+
+    site_df["basin"] = None
+    for basin_name, boundary in basin_boundaries.items():
+        mask = pip.is_inside_postgis_parallel(site_df[["lon", "lat"]].values, boundary)
+        site_df.loc[mask, "basin"] = basin_name
+
+    return site_df

@@ -1,3 +1,4 @@
+import logging
 import shutil
 from pathlib import Path
 import multiprocessing as mp
@@ -119,7 +120,7 @@ def train_cv(
     base_out_dir.mkdir()
 
     log_ffp = base_out_dir / "nn_train_cv.log"
-    logger = nng.utils.setup_logging(log_ffp)
+    logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
     print("Writing logs to:", log_ffp)
 
     nng.train_cv(

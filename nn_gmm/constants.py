@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import pandas as pd
 
@@ -175,7 +176,7 @@ RRUP_WEIGHTING_BIN_NAMES = [
     f"{RRUP_WEIGHTING_BINS[i]:.2f}_{RRUP_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(RRUP_WEIGHTING_BINS) - 1)
 ]
-VS30_WEIGHTING_BINS = np.logspace(np.log(150), np.log(800), 10, base=np.e)
+VS30_WEIGHTING_BINS = np.logspace(np.log(100), np.log(1200), 10, base=np.e)
 VS30_WEIGHTING_BIN_NAMES = [
     f"{VS30_WEIGHTING_BINS[i]:.2f}_{VS30_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(VS30_WEIGHTING_BINS) - 1)
@@ -184,3 +185,6 @@ VS30_WEIGHTING_BIN_NAMES = [
 
 # NZ bounding box
 NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
+
+
+BASIN_BOUNDARIES_DIR = Path(__file__).parent / "resources/basin_boundaries"

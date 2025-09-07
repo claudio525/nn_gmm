@@ -260,6 +260,8 @@ class ModelConfig:
 
     units: list[int]
     """List of units for each layer in the model."""
+    use_batch_norm: bool
+    """Whether to use batch normalization in the model."""
     activation: str
     """Activation function to use in the model."""
 
@@ -300,6 +302,7 @@ class ModelConfig:
         """
         return {
             "units": model_config.units,
+            "use_batch_norm": model_config.use_batch_norm,
             "activation": str(model_config.activation),
             "l2_reg": float(model_config.l2_reg),
         }
@@ -322,7 +325,6 @@ class BatchResult(NamedTuple):
     """The individual losses, this includes nan-values"""
     ind_w_loss: torch.Tensor
     """The individual weighted losses, this includes nan-values"""
-
 
 
 def run_model_training(
@@ -424,8 +426,11 @@ def run_model_training(
             record_info_df.get("mag_weight", 0).values
             + record_info_df.get("rrup_weight", 0).values
             + record_info_df.get("vs30_weight", 0).values,
-            0, run_config.total_max_weight
+            0,
+            run_config.total_max_weight,
         )
+
+        assert not record_info_df["sample_weight"].isna().any()
 
     # Run preprocessing
     pre_site_df = preprocessing.pre_process_site_features(
@@ -490,6 +495,7 @@ def run_model_training(
         run_config.model_config.units,
         run_config.n_ims * 2,
         run_config.model_config.activation,
+        use_batch_norm=run_config.model_config.use_batch_norm,
     )
 
     logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
@@ -625,6 +631,7 @@ def train(
             logging.debug(f"Epoch: {cur_epoch_ix + 1}/{run_config.n_epochs}")
 
         ### Training
+        grad_norms = []
         n_samples = 0
         model.train()
         for cur_batch in tqdm(train_dataloader, disable=not verbose):
@@ -635,11 +642,21 @@ def train(
             cur_bresult.loss.backward()
             optimizer.step()
 
+            grad_norms.append(torch.nn.utils.get_total_norm(
+                [param.grad for param in model.parameters() if param.grad is not None]
+            ).numpy(force=True))
+
             metrics = _save_metrics(
                 cur_bresult, metrics, run_config, cur_epoch_ix, "train"
             )
             n_samples += cur_batch.n_samples
 
+        logging.debug(
+            f"Gradient Norm: {np.mean(grad_norms):.4f} ± {np.std(grad_norms):.4f}, "
+            f"Max: {np.max(grad_norms):.4f}, Min: {np.min(grad_norms):.4f}"
+        )
+
+        metrics["w_loss_hist_train"][cur_epoch_ix] /= n_samples
         metrics["loss_hist_train"][cur_epoch_ix] /= n_samples
         metrics["mse_hist_train"][cur_epoch_ix] /= n_samples
         metrics["mean_sigma_hist_train"][cur_epoch_ix] /= n_samples
@@ -657,6 +674,7 @@ def train(
                     )
                     n_samples += cur_batch.n_samples
 
+            metrics["w_loss_hist_val"][cur_epoch_ix] /= n_samples
             metrics["loss_hist_val"][cur_epoch_ix] /= n_samples
             metrics["mse_hist_val"][cur_epoch_ix] /= n_samples
             metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_samples
@@ -710,7 +728,9 @@ def _get_batch_result(
         ind_w_loss = None
         loss = ind_loss.mean()
 
-    return BatchResult(batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss)
+    return BatchResult(
+        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss
+    )
 
 
 def _save_metrics(
@@ -743,7 +763,9 @@ def _save_metrics(
     )
 
     if run_config.use_sample_weights:
-        metrics[w_loss_hist_key][epoch_ix] += batch_result.ind_w_loss.mean(dim=1).sum().item()
+        metrics[w_loss_hist_key][epoch_ix] += (
+            batch_result.ind_w_loss.mean(dim=1).sum().item()
+        )
 
     return metrics
 

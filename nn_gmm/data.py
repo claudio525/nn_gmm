@@ -60,8 +60,10 @@ class BatchData(BaseBatchData):
         return self.y.shape[0]
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, " \
-               f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
+        return (
+            f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, "
+            f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
+        )
 
 
 class CustomDataLoader:
@@ -257,7 +259,9 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         )
 
         self._sample_weight_tensor = torch.tensor(
-            self.record_info_df["sample_weight"].values, device=run_config.device, dtype=torch.float32
+            self.record_info_df["sample_weight"].values,
+            device=run_config.device,
+            dtype=torch.float32,
         )
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
@@ -284,7 +288,9 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             dim=1,
         )
 
-        return BatchData(self.record_int_ids[indices], X, y, self._sample_weight_tensor[indices])
+        return BatchData(
+            self.record_int_ids[indices], X, y, self._sample_weight_tensor[indices]
+        )
 
 
 class IMDBDataset(BaseIMDBDataset):

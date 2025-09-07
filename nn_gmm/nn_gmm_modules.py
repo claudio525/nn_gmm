@@ -12,6 +12,7 @@ def create_multi_mlp(
     n_outputs: int,
     act_fn_str: str | None,
     bias: bool = True,
+    use_batch_norm: bool = False
 ) -> nn.Sequential:
     """Creates a multi-layer perceptron"""
     mlp = nn.Sequential()
@@ -23,6 +24,10 @@ def create_multi_mlp(
                 bias=bias,
             )
         ),
+
+        if use_batch_norm:
+            mlp.append(nn.BatchNorm1d(cur_n_units))
+
         if act_fn_str is not None:
             mlp.append(mlt.torch.get_act_fn_layer(act_fn_str))
 
