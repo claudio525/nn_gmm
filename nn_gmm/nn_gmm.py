@@ -217,7 +217,7 @@ class RunConfig:
             "rel_results_dir": str(self.rel_results_dir),
             "n_epochs": int(self.n_epochs),
         }
-        if self.scale_ims:
+        if self.scale_ims and self.im_scale_params is not None:
             config_dict["_im_scale_params"] = {
                 cur_key: cur_df.to_dict()
                 for cur_key, cur_df in self.im_scale_params.items()

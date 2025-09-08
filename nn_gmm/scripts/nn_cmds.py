@@ -1,7 +1,6 @@
 import logging
 import shutil
 from pathlib import Path
-import multiprocessing as mp
 
 import numpy as np
 import torch
