@@ -11,6 +11,7 @@ from .imdb import IMDB
 
 logger = logging.getLogger(__name__)
 
+
 def model_site_bias_res_std(model_dir: Path, results_ffp: Path, ims: list[str]):
     run_config = nn_gmm.RunConfig.from_yaml(model_dir / "run_config.yaml")
     pred_df = pd.read_parquet(results_ffp).sort_index()
@@ -19,18 +20,27 @@ def model_site_bias_res_std(model_dir: Path, results_ffp: Path, ims: list[str]):
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         record_info_df = imdb.get_record_info_df(record_int_ids=pred_df.index.values)
-        sim_df = imdb.get_im_data_tmp_table(
-            run_config.ims, record_int_ids
-        ).sort_index()
+        sim_df = imdb.get_im_data_tmp_table(run_config.ims, record_int_ids).sort_index()
 
     pred_df["site_int_id"] = record_info_df.loc[pred_df.index].site_int_id.values
     assert pred_df.index.equals(sim_df.index)
 
     return site_bias_res_std(pred_df, sim_df, site_df, ims, run_config)
 
-def site_bias_res_std(pred_df: pd.DataFrame, sim_df: pd.DataFrame, site_df: pd.DataFrame, ims: list[str], run_config: nn_gmm.RunConfig):
-    assert pred_df.index.equals(sim_df.index), "Prediction DataFrame and Simulation DataFrame must have the same index"
-    assert "site_int_id" in pred_df.columns, "Prediction DataFrame must contain 'site_int_id' column"
+
+def site_bias_res_std(
+    pred_df: pd.DataFrame,
+    sim_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    ims: list[str],
+    run_config: nn_gmm.RunConfig,
+):
+    assert pred_df.index.equals(
+        sim_df.index
+    ), "Prediction DataFrame and Simulation DataFrame must have the same index"
+    assert (
+        "site_int_id" in pred_df.columns
+    ), "Prediction DataFrame must contain 'site_int_id' column"
 
     # Compute residuals
     res_df = pd.DataFrame(
@@ -76,7 +86,14 @@ def site_bias_res_std(pred_df: pd.DataFrame, sim_df: pd.DataFrame, site_df: pd.D
                 MAP_FRAME_AXES="WSne",
             ),
         )
-        plotting.plot_grid(bias_fig, grid_bias, "polar", (-0.5, 0.5, 1.0 / 16), ("darkred", "darkblue"), reverse_cmap=True)
+        plotting.plot_grid(
+            bias_fig,
+            grid_bias,
+            "polar",
+            (-0.5, 0.5, 1.0 / 16),
+            ("darkred", "darkblue"),
+            reverse_cmap=True,
+        )
         bias_fig.plot(
             x=site_df.loc[pred_df.site_int_id, "lon"],
             y=site_df.loc[pred_df.site_int_id, "lat"],
@@ -106,7 +123,14 @@ def site_bias_res_std(pred_df: pd.DataFrame, sim_df: pd.DataFrame, site_df: pd.D
                 MAP_FRAME_AXES="WSne",
             ),
         )
-        plotting.plot_grid(res_std_fig, grid_res_std, "hot", (0, 1.0, 1.0 / 16), ("white", "black"), reverse_cmap=True)
+        plotting.plot_grid(
+            res_std_fig,
+            grid_res_std,
+            "hot",
+            (0, 1.0, 1.0 / 16),
+            ("white", "black"),
+            reverse_cmap=True,
+        )
         res_std_fig.plot(
             x=site_df.loc[pred_df.site_int_id, "lon"],
             y=site_df.loc[pred_df.site_int_id, "lat"],

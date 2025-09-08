@@ -166,17 +166,20 @@ MIN_MAX_PRE_PROCESS_CONFIG = {
 }
 
 # Sample weighting
-MAG_WEIGHTING_BINS = np.arange(5.5, 8.5, 0.25)
+# MAG_WEIGHTING_BINS = np.arange(5.5, 8.5, 0.25)
+MAG_WEIGHTING_BINS = np.array([5.5, 6.5, 7.25, 8.5])
 MAG_WEIGHTING_BIN_NAMES = [
     f"{MAG_WEIGHTING_BINS[i]:.2f}_{MAG_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(MAG_WEIGHTING_BINS) - 1)
 ]
-RRUP_WEIGHTING_BINS = np.linspace(0, 300, 25)
+# RRUP_WEIGHTING_BINS = np.linspace(0, 300, 25)
+RRUP_WEIGHTING_BINS = np.asarray([0, 30, 100, 300])
 RRUP_WEIGHTING_BIN_NAMES = [
     f"{RRUP_WEIGHTING_BINS[i]:.2f}_{RRUP_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(RRUP_WEIGHTING_BINS) - 1)
 ]
-VS30_WEIGHTING_BINS = np.logspace(np.log(100), np.log(1200), 10, base=np.e)
+# VS30_WEIGHTING_BINS = np.logspace(np.log(100), np.log(1200), 10, base=np.e)
+VS30_WEIGHTING_BINS = np.asarray([0, 180, 360, 760, 1500])
 VS30_WEIGHTING_BIN_NAMES = [
     f"{VS30_WEIGHTING_BINS[i]:.2f}_{VS30_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(VS30_WEIGHTING_BINS) - 1)
