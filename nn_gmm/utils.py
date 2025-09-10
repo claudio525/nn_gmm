@@ -264,7 +264,8 @@ def get_pSA_period(im: str):
 
 def add_basin_column(site_df: pd.DataFrame) -> pd.DataFrame:
     """Adds a basin column to the given site dataframe"""
-    basin_boundary_files = [constants.BASIN_BOUNDARIES_DIR / f for f in constants.BASIN_BOUNDARIES_DIR.iterdir() if f.endswith(".txt")]
+    basin_boundary_files = [constants.BASIN_BOUNDARIES_DIR / f for f in constants.BASIN_BOUNDARIES_DIR.iterdir() if f.name.endswith(".txt")]
+    assert len(basin_boundary_files) > 0, f"No basin boundary files found in {constants.BASIN_BOUNDARIES_DIR}"
     basin_boundaries = {f.stem.split("_", maxsplit=1)[0]: np.loadtxt(f) for f in basin_boundary_files}
 
     site_df["basin"] = None

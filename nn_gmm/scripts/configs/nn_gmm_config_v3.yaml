@@ -6,7 +6,7 @@ max_rrup: 300
 ignore_events: null
 
 im_set: pSA
-scale_ims: False
+scale_ims: True
 
 site_inputs: 
 - nztm_x

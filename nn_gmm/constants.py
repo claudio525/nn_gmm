@@ -189,5 +189,7 @@ VS30_WEIGHTING_BIN_NAMES = [
 # NZ bounding box
 NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
 
+COOK_STRAIT_REGION = [172.639, 176.35, -42.427, -40.475]
+WELLINGTON_REGION = [174.74, 175, -41.44, -41.18]
 
 BASIN_BOUNDARIES_DIR = Path(__file__).parent / "resources/basin_boundaries"

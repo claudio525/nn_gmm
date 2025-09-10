@@ -25,6 +25,7 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 def train_gmm(
     run_config_ffp: Path,
     n_epochs: int = None,
+    batch_size: int = None,
     id_suffix: str = None,
     n_sites: int = None,
 ):
@@ -36,6 +37,7 @@ def train_gmm(
         config_ffp=run_config_ffp,
         device=device,
         n_epochs=n_epochs,
+        batch_size=batch_size
     )
 
     logger.info(f"Using device: {device.upper()}")
@@ -99,6 +101,7 @@ def train_cv(
     n_event_folds: int,
     n_site_folds: int,
     n_epochs: int = None,
+    batch_size: int = None,
     id_suffix: str = None,
     n_sites: int = None,
     n_procs: int = 1,
@@ -109,6 +112,7 @@ def train_cv(
         config_ffp=run_config_ffp,
         device=device,
         n_epochs=n_epochs,
+        batch_size=batch_size
     )
 
     id_suffix = f"_{id_suffix}" if id_suffix is not None else ""

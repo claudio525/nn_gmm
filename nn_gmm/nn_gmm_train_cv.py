@@ -1,6 +1,7 @@
 """Module for running custom CV for NN-GMM models."""
 
 import time
+import copy
 import shutil
 import logging
 from pathlib import Path
@@ -44,14 +45,13 @@ def train_cv(
     # Drop test events
     events = events[~np.isin(events, run_config.test_events)]
 
+    np.random.seed(run_config.seed)
+
     # Only use a subset of sites for testing/debugging
     if n_sites is not None:
-        sites = sites[:n_sites]
+        sites = np.random.choice(sites, size=n_sites, replace=False)
 
-    np.random.seed(run_config.seed)
-    # np.random.shuffle(events)
-    # np.random.shuffle(sites)
-
+    # Create bins for stratified magnitude and vs30 sampling
     site_df["vs30_bin"] = pd.cut(site_df["vs30"], bins=[0, 180, 360, 760, 1500], labels=["vs30_0_180", "vs30_180_360", "vs30_360_760", "vs30_760_1500"])
     event_df["mag_bin"] = pd.cut(event_df["magnitude"], bins=[5.5, 6.25, 7.25, 8.5], labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_8p5"])
     
@@ -75,7 +75,7 @@ def train_cv(
         ):
             logging.info(f"Running CV iteration {cv_iter + 1}/{len(fold_combs)}")
             cur_out_dir = _run_helper(
-                run_config,
+                copy.deepcopy(run_config),
                 event_df,
                 site_df,
                 event_folds,

@@ -6,7 +6,7 @@ max_rrup: 300
 ignore_events: null
 
 im_set: pSA
-scale_ims: False
+scale_ims: True
 
 site_inputs: 
 - nztm_x
@@ -15,15 +15,15 @@ site_inputs:
 # - lon
 - vs30
 - z1p0
-# - z2p5
+- z2p5
 
 source_inputs:
 - "magnitude"
 - "tect_type"
-# - "rake" 
-# - "dip"
-# - "dtop"
-# - "dbottom"
+- "rake" 
+- "dip"
+- "dtop"
+- "dbottom"
 # - "hypo_depth"
 # - "hypo_lat"
 # - "hypo_lon"
@@ -32,15 +32,27 @@ source_to_site_inputs:
 - "rrup"
 - "rjb"
 - "rx"
-# - "ry"
+- "ry"
+
+
+# Sample weighting
+apply_mag_sample_weighting: True
+max_mag_weight: 2.5
+apply_rrup_sample_weighting: True
+max_rrup_weight: 2.5
+apply_vs30_sample_weighting: True
+max_vs30_weight: 2.5
+total_max_weight: 5.0
 
 n_epochs: 100
 batch_size: 1024
 
 
 model:
-  units: [32, 64]
+  units: [32, 32, 64]
+  use_batch_norm: True
   activation: relu
+  l2_reg: 0.0001
 
 
 rel_results_dir: nn_gmm/results

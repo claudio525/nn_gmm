@@ -6,6 +6,17 @@ import torch.nn as nn
 import ml_tools as mlt
 
 
+class ClipLayer(nn.Module):
+    """Layer that clips the layer input to a specified range."""
+    
+    def __init__(self, min_val: float = -5, max_val: float = 5):
+        super().__init__()
+        self.min_val = min_val
+        self.max_val = max_val
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.clamp(x, self.min_val, self.max_val)
+
 def create_multi_mlp(
     n_inputs: int,
     units: Sequence[int],
@@ -39,7 +50,13 @@ def create_multi_mlp(
         )
     )
 
+    mlp.append(ClipLayer())
+
     return mlp
+
+
+
+
 
 def get_n_params(model: nn.Module) -> int:
     """
