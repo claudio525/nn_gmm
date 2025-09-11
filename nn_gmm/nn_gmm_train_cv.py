@@ -29,14 +29,21 @@ def train_cv(
     n_sites: int = None,
     n_procs: int = 1,
     run_notebook: bool = True,
-    remove_cv_results: bool = False
+    remove_cv_results: bool = False,
 ):
     logger.info(f"Using device: {device.upper()}")
 
     # Get the data
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         event_df = imdb.get_event_df()
-        site_df = imdb.get_site_df(min_grid_level=0, max_grid_level=0, add_nztm=True)
+        site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
+
+    if run_config.extra_basin_sites:
+        # Take all level 0 sites and level 2 sites that are in a basin
+        site_df = utils.add_basin_column(site_df)
+        site_df = site_df.loc[(site_df.grid_level ==0) | ((~site_df["basin"].isnull()) & (site_df.grid_level == 2))]
+    else:
+        site_df = site_df.loc[site_df.grid_level == 0]
 
     events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
         str
@@ -61,9 +68,6 @@ def train_cv(
 
     vs30_split = StratifiedKFold(n_splits=n_site_folds, shuffle=True, random_state=run_config.seed)
     site_folds = [sites[ind[1]] for ind in vs30_split.split(site_df.loc[site_df.site_id.isin(sites)], site_df.loc[site_df.site_id.isin(sites), "vs30_bin"])]
-
-    # event_folds = np.array_split(events, n_event_folds)
-    # site_folds = np.array_split(sites, n_site_folds)
 
     fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
 

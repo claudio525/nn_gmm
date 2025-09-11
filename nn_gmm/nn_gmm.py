@@ -41,6 +41,9 @@ class RunConfig:
     ignore_events: list[str]
     """List of events to ignore."""
 
+    extra_basin_sites: bool
+    """Whether to include extra basin sites."""
+
     device: str
     """Device to use"""
 

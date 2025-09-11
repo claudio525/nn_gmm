@@ -95,7 +95,7 @@ def pre_process_event_site_features(
             pre_site_event_df[cur_key] = (
                 2 * (pre_site_event_df[cur_key] - 0) / (max_rrup - 0) - 1
             )
-        elif cur_key == "rx":
+        elif cur_key in ["rx", "ry"]:
             pre_site_event_df[cur_key] = (
                 2 * (pre_site_event_df[cur_key] - (-max_rrup)) / (max_rrup - (-max_rrup)) - 1
             )

@@ -180,6 +180,7 @@ class EmpiricalDB:
     def get_gm_params_tmp_table(
         self,
         record_int_ids: np.ndarray,
+        incl_std: bool = True,
     ):
         """
         Get GMM parameters for the specified records and IMs,
@@ -189,6 +190,8 @@ class EmpiricalDB:
         ----------
         record_int_ids : np.ndarray
             Record int ids to retrieve GMM parameters for.
+        incl_std : bool, optional
+            Whether to include standard deviation columns, by default True.
 
         Returns
         -------
@@ -209,17 +212,19 @@ class EmpiricalDB:
             f"Took: {time.time() - start:.3f}s to create temp table with {len(record_int_ids)} records."
         )
 
+        columns = constants.DB_GMM_PSA_MEAN_KEYS + constants.DB_GMM_PSA_TOTAL_STD_KEYS if incl_std else constants.DB_GMM_PSA_MEAN_KEYS
+
         # Query using a join instead of the IN clause
         start = time.time()
         im_df = pd.read_sql(
             f"""
-            SELECT g.record_int_id, {", ".join(constants.DB_GMM_PSA_MEAN_KEYS + constants.DB_GMM_PSA_TOTAL_STD_KEYS)}
+            SELECT g.record_int_id, {", ".join(columns)}
             FROM gm_params g
             JOIN temp_record_ids t ON g.record_int_id = t.record_int_id
             """,
             self._conn,
             index_col="record_int_id",
-            dtype={cur_key: "float32" for cur_key in constants.DB_GMM_PSA_MEAN_KEYS + constants.DB_GMM_PSA_TOTAL_STD_KEYS}
+            dtype={cur_key: "float32" for cur_key in columns}
         ).rename(columns=constants.DB_PSA_KEYS_TO_PSA)
         logger.info(
             f"Took: {time.time() - start:.3f}s to get IM data for {len(record_int_ids)} records."

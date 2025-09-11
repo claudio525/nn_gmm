@@ -1,3 +1,4 @@
+from pathlib import Path
 import tempfile
 
 import pygmt
@@ -218,16 +219,21 @@ def get_single_pSA_otherIMs_fig(
 
 
 def pygmt_side_by_side(
-    fig1: pygmt.Figure, fig2: pygmt.Figure, figsize: tuple[float, float] = (16, 10), title_1: str | None = None, title_2: str | None = None
+    fig1: pygmt.Figure | Path,
+    fig2: pygmt.Figure | Path,
+    figsize: tuple[float, float] = (16, 10),
+    title_1: str | None = None,
+    title_2: str | None = None,
+    dpi: int = None,
 ) -> plt.Figure:
     """
     Combine two PyGMT figures to be side by side using matplotlib.
 
     Parameters
     ----------
-    fig1 : pygmt.Figure
+    fig1 : pygmt.Figure | Path
         The first figure.
-    fig2 : pygmt.Figure
+    fig2 : pygmt.Figure | Path
         The second figure.
 
     Returns
@@ -235,25 +241,72 @@ def pygmt_side_by_side(
     plt.Figure
         A new figure with the two figures side by side.
     """
-    with tempfile.NamedTemporaryFile(
-        suffix=".png"
-    ) as tmp1, tempfile.NamedTemporaryFile(suffix=".png") as tmp2:
+    if isinstance(fig1, pygmt.Figure) and isinstance(fig2, pygmt.Figure):
+        with tempfile.NamedTemporaryFile(
+            suffix=".png"
+        ) as tmp1, tempfile.NamedTemporaryFile(suffix=".png") as tmp2:
 
-        fig1.savefig(tmp1.name, dpi=900, anti_alias=True)
-        fig2.savefig(tmp2.name, dpi=900, anti_alias=True)
+            fig1.savefig(tmp1.name, dpi=900, anti_alias=True)
+            fig2.savefig(tmp2.name, dpi=900, anti_alias=True)
 
-        fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=figsize)
+            fig = _side_by_side_figs(
+                Path(tmp1.name),
+                Path(tmp2.name),
+                figsize=figsize,
+                title_1=title_1,
+                title_2=title_2,
+                dpi=dpi,
+            )
+    elif isinstance(fig1, Path) and isinstance(fig2, Path):
+        fig = _side_by_side_figs(
+            fig1,
+            fig2,
+            figsize=figsize,
+            title_1=title_1,
+            title_2=title_2,
+            dpi=dpi,
+        )
+    else:
+        raise TypeError("fig1 and fig2 must both be of the same type.")
 
-        ax1.imshow(plt.imread(tmp1.name), aspect="equal")
-        ax1.axis("off")
-        if title_1 is not None:
-            ax1.set_title(title_1)
+    return fig
 
-        ax2.imshow(plt.imread(tmp2.name), aspect="equal")
-        ax2.axis("off")
-        if title_2 is not None:
-            ax2.set_title(title_2)
 
-        fig.tight_layout()
+def _side_by_side_figs(
+    fig_ffp_1: Path,
+    fig_ffp_2: Path,
+    figsize: tuple[float, float] = (16, 10),
+    title_1: str | None = None,
+    title_2: str | None = None,
+    dpi: int = None,
+) -> plt.Figure:
+    """
+    Combine two figure files to be side by side using matplotlib.
+
+    Parameters
+    ----------
+    fig_ffp_1 : Path
+        The first figure file path.
+    fig_ffp_2 : Path
+        The second figure file path.
+
+    Returns
+    -------
+    plt.Figure
+        A new figure with the two figures side by side.
+    """
+    fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=figsize, dpi=dpi)
+
+    ax1.imshow(plt.imread(fig_ffp_1), aspect="equal")
+    ax1.axis("off")
+    if title_1 is not None:
+        ax1.set_title(title_1)
+
+    ax2.imshow(plt.imread(fig_ffp_2), aspect="equal")
+    ax2.axis("off")
+    if title_2 is not None:
+        ax2.set_title(title_2)
+
+    fig.tight_layout()
 
     return fig

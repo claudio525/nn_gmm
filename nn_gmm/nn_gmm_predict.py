@@ -121,6 +121,7 @@ def get_rrup_input_df(
         "rrup": rrup_values,
         "rjb": rrup_values,  
         "rx": rrup_values,
+        "ry": rrup_values,
     })
 
     for k, v in kwargs.items():

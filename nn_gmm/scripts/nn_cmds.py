@@ -139,5 +139,11 @@ def train_cv(
     )
 
 
+@app.command("run-mera")
+def run_mera(result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4):
+    logger = nng.utils.setup_logging()
+    nng.analysis.run_nn_mera(result_dir, site_term=site_term, out_dir=out_dir, n_procs=n_procs)
+
+
 if __name__ == "__main__":
     app()

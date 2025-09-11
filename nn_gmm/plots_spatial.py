@@ -13,9 +13,11 @@ from pygmt_helper import plotting
 
 from . import nn_gmm
 from .imdb import IMDB
+from .empdb import EmpiricalDB
 from . import constants
 
 logger = logging.getLogger(__name__)
+
 
 
 def basin_site_map(
@@ -94,19 +96,57 @@ def nn_site_bias_res_std(
         sim_df,
         site_df,
         ims,
-        run_config,
+        "_pred",
         n_procs=n_procs,
         output_dir=output_dir,
         grid_spacing=grid_spacing,
     )
 
+def emp_gmm_bias_res_std(
+    nn_model_dir: Path,
+    empdb_ffp: Path,
+    ims: list[str],
+    output_dir: Path = None,
+    n_procs: int = 1,
+    grid_spacing: str = "500e/500e",
+):
+    """
+    Generate site bias and site residual standard deviation plots
+    using Empirical GMM results for specified IMs.
+    """
+    run_config = nn_gmm.RunConfig.from_yaml(nn_model_dir / "run_config.yaml")
+    nn_pred_df = pd.read_parquet(nn_model_dir / "val_results.parquet").sort_index()
+    record_int_ids = nn_pred_df.index.values.astype(int)
+
+    logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df()
+        record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
+        sim_df = imdb.get_im_data_tmp_table(run_config.ims, record_int_ids).sort_index()
+
+    with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
+        emp_pred_df = empdb.get_gm_params_tmp_table(record_int_ids, incl_std=False).sort_index()
+
+    emp_pred_df["site_int_id"] = record_info_df.loc[emp_pred_df.index].site_int_id.values
+    assert emp_pred_df.index.equals(sim_df.index)
+    logging.info(f"Generating site bias and residual std plots for IMs: {ims}")
+    site_bias_res_std(
+        emp_pred_df,
+        sim_df,
+        site_df,
+        ims,
+        "_mean",
+        n_procs=n_procs,
+        output_dir=output_dir,
+        grid_spacing=grid_spacing,
+    )
 
 def site_bias_res_std(
     pred_df: pd.DataFrame,
     sim_df: pd.DataFrame,
     site_df: pd.DataFrame,
     ims: list[str],
-    run_config: nn_gmm.RunConfig,
+    pred_column_suffix: str,
     n_procs: int = 1,
     output_dir: Path = None,
     grid_spacing: str = "500e/500e",
@@ -121,13 +161,15 @@ def site_bias_res_std(
     assert (
         "site_int_id" in pred_df.columns
     ), "Prediction DataFrame must contain 'site_int_id' column"
+    assert all([cur_im in sim_df.columns for cur_im in ims]), "Unsupported IM"
 
     # Compute residuals
+    pred_keys = [f"{cur_im}{pred_column_suffix}" for cur_im in ims]
     res_df = pd.DataFrame(
-        data=np.log(sim_df[run_config.ims].values)
-        - pred_df[run_config.pred_mean_keys].values,
+        data=np.log(sim_df[ims].values)
+        - pred_df[pred_keys].values,
         index=pred_df.index,
-        columns=run_config.ims,
+        columns=ims,
     )
 
     # Site bias
@@ -141,7 +183,6 @@ def site_bias_res_std(
     site_res_std["lon"] = site_df.loc[site_res_std.index, "lon"].values
     site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
 
-    assert all([cur_im in run_config.ims for cur_im in ims]), "Unsupported IM"
 
     if n_procs == 1 or len(ims) == 1:
         for im in tqdm(ims):
@@ -216,6 +257,7 @@ def _gen_im_bias_res_std_plot(
         ("darkred", "darkblue"),
         reverse_cmap=True,
         plot_contours=False,
+        cb_label=im
     )
 
     for cur_ffp in basin_files:
@@ -251,6 +293,7 @@ def _gen_im_bias_res_std_plot(
             ("darkred", "darkblue"),
             reverse_cmap=True,
             plot_contours=False,
+            cb_label=im
         )
 
         for cur_ffp in basin_files:
@@ -260,7 +303,7 @@ def _gen_im_bias_res_std_plot(
         bias_fig.plot(
             x=site_df.loc[pred_site_int_ids, "lon"].values,
             y=site_df.loc[pred_site_int_ids, "lat"].values,
-            style="p0.015c",
+            style="p0.075c",
             fill="black",
         )
 
@@ -311,9 +354,9 @@ def _gen_im_bias_res_std_plot(
         plotting.plot_grid(
             res_std_fig,
             grid_res_std,
-            "polar",
-            (-0.5, 0.5, 1.0 / 16),
-            ("darkred", "darkblue"),
+            "hot",
+            (0, 1.0, 1.0 / 16),
+            ("white", "black"),
             reverse_cmap=True,
             plot_contours=False,
         )
@@ -325,7 +368,7 @@ def _gen_im_bias_res_std_plot(
         res_std_fig.plot(
             x=site_df.loc[pred_site_int_ids, "lon"].values,
             y=site_df.loc[pred_site_int_ids, "lat"].values,
-            style="p0.015c",
+            style="p0.075c",
             fill="black",
         )
 
@@ -337,3 +380,42 @@ def _gen_im_bias_res_std_plot(
         )
     else:
         return bias_fig, res_std_fig
+
+
+def record_event_distribution_map(imdb_ffp: Path, output_ffp: Path):
+    """
+    Creates two NZ wide maps showing spatial distribution of:
+    1. Number of records 
+    2. Number of events 
+    """
+    with IMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(min_grid_level=0, max_grid_level=0, add_nztm=True)
+
+    fig = plotting.gen_region_fig(
+        plot_topo=True,
+        plot_highways=True,
+        config_options=dict(
+            MAP_FRAME_TYPE="plain",
+            FORMAT_GEO_MAP="ddd.xx",
+            MAP_GRID_PEN="0.5p,gray",
+            MAP_TICK_PEN_PRIMARY="1p,black",
+            MAP_FRAME_PEN="1p,black",
+            MAP_FRAME_AXES="wsne",
+        ),
+        plot_kwargs={
+            "topo_cmap_min": 0,
+            "topo_cmap_max": 3000,
+            "topo_cmap_inc": 10,
+            "highway_pen_width": 0.1,
+        },
+    )
+
+    # Plot basin boundaries
+    basin_files = list(constants.BASIN_BOUNDARIES_DIR.glob("*.txt"))
+    for cur_ffp in basin_files:
+        cur_basin = np.loadtxt(cur_ffp)
+        fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], pen="0.15p,red")
+
+    
+
+    

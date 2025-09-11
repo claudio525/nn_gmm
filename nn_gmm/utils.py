@@ -273,4 +273,5 @@ def add_basin_column(site_df: pd.DataFrame) -> pd.DataFrame:
         mask = pip.is_inside_postgis_parallel(site_df[["lon", "lat"]].values, boundary)
         site_df.loc[mask, "basin"] = basin_name
 
+    site_df = site_df.astype({"basin": "category"})
     return site_df

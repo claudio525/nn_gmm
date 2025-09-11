@@ -8,6 +8,7 @@ from . import data
 from . import plot_utils
 from . import plots_spatial
 from . import plots
+from . import analysis
 from .nn_gmm import RunConfig
 from . import nn_gmm_predict
 from .nn_gmm_train_cv import train_cv
@@ -27,4 +28,5 @@ __all__ = [
     "plots",
     "plots_spatial",  
     "train_cv",
+    "analysis",
 ]
