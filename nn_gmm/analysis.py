@@ -12,6 +12,7 @@ from .nn_gmm import RunConfig
 
 logger = logging.getLogger(__name__)
 
+
 def get_nn_residuals(
     model_dir: Path, record_info_df: pd.DataFrame = None
 ) -> pd.DataFrame:
@@ -44,29 +45,52 @@ def get_nn_residuals(
         columns=run_config.ims,
     )
 
-
     res_df["event_int_id"] = record_info_df.loc[res_df.index, "event_int_id"]
     res_df["site_int_id"] = record_info_df.loc[res_df.index, "site_int_id"]
-    res_df["event_id"] = record_info_df.loc[res_df.index, "event_id"]
-    res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]
 
     return res_df
 
 
-def run_nn_mera(result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4):
+def run_nn_mera(
+    result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4
+):
     run_config = RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
     res_df = get_nn_residuals(result_dir)
 
+    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)
+    res_df["rel_id"] = record_info_df.loc[res_df.index, "rel_id"]
+    res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]
+
+    mask = mera.mask_too_few_records(
+        res_df,
+        "rel_id",
+        "site_id",
+        min_num_records_per_event=5,
+        min_num_records_per_site=5,
+    )
+
     logging.info("Running MERA")
     start = time.time()
     mera_results = mera.run_mera(
-        res_df, run_config.ims, "event_id", "site_id", compute_site_term=site_term, n_procs=n_procs
+        res_df,
+        # run_config.ims[:4],
+        run_config.ims,
+        "rel_id",
+        "site_id",
+        mask=mask,
+        compute_site_term=site_term,
+        n_procs=n_procs,
     )
     logging.info(f"Took: {time.time() - start} to run MERA")
 
-    out_dir = result_dir / f"mera{'_site_term' if site_term else ''}" if out_dir is None else out_dir
+    out_dir = (
+        result_dir / f"mera{'_site_term' if site_term else ''}"
+        if out_dir is None
+        else out_dir
+    )
     out_dir.mkdir(exist_ok=True)
     mera_results.save(out_dir)
     logging.info(f"Wrote MERA results to: {out_dir}")

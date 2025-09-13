@@ -175,6 +175,59 @@ def get_bias_residual_fig(
     return fig, ax1, ax2, ax3, ax4
 
 
+def get_pSA_tau_phi_fig(
+    figsize: tuple[float, float] = (16, 6),
+    left: float = 0.05,
+    right: float = 0.98,
+    top: float = 0.98,
+    bottom: float = 0.1,
+    main_wspace: float = 0.1,
+    tau_y_axis_limits: tuple[float, float] = (0.0, 1.0),
+    phi_y_axis_limits: tuple[float, float] = (0.0, 1.0),
+):
+    """
+    Create a figure for between-event and within-event standard deviation plots.
+
+    Parameters
+    ----------
+    figsize : tuple of float, optional
+        Size of the figure.
+    tau_y_axis_limits : tuple of float, optional
+        Y-axis limits for the between-event std plot.
+    phi_y_axis_limits : tuple of float, optional
+        Y-axis limits for the within-event std plot.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The created figure.
+    ax1 : matplotlib.axes.Axes
+        Axis for the between-event std plot.
+    ax2 : matplotlib.axes.Axes
+        Axis for the within-event std plot.
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+
+    ax1.set_xlabel("Vibration Period, T(s)")
+    ax1.set_ylabel("Between-event standard deviation, $\\tau$")
+    ax1.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.set_xscale("log")
+    ax1.set_ylim(*tau_y_axis_limits)
+    ax1.set_xlim(0.01, 10.0)
+
+    ax2.set_xlabel("Vibration Period, T(s)")
+    ax2.set_ylabel("Within-event standard deviation, $\\phi$")
+    ax2.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.set_xscale("log")
+    ax2.set_ylim(*phi_y_axis_limits)
+    ax2.set_xlim(0.01, 10.0)
+
+    fig.subplots_adjust(
+        left=left, right=right, top=top, bottom=bottom, wspace=main_wspace
+    )
+    return fig, ax1, ax2
+
+
 def get_single_pSA_otherIMs_fig(
     figsize: tuple[float, float] = (16, 6), top: float = 1.0
 ):

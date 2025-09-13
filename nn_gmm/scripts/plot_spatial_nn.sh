@@ -11,4 +11,4 @@ model_dir=$1
 
 out_dir=$model_dir/plots
 mkdir -p $out_dir
-python plot_cmds.py nn-site-bias-res-std $model_dir pSA_0.01 pSA_0.1 pSA_0.5 pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 8 --grid-spacing 100e/100e
+python plot_cmds.py nn-site-bias-res-std $model_dir pSA_0.01 pSA_0.1 pSA_0.5 pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 4 --grid-spacing 100e/100e

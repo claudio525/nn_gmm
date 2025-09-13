@@ -257,6 +257,46 @@ class RunConfig:
     def from_yaml(cls, ffp: Path):
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
+    def _repr_html_(self):
+        """
+        Returns a nice HTML representation of the RunConfig class for Jupyter notebooks.
+        Excludes im_scale_params from the display.
+        """
+        html = "<div style='font-family: monospace; border: 1px solid #ddd; padding: 10px; margin: 5px;'>"
+        html += "<h3 style='margin-top: 0; color: #333;'>RunConfig</h3>"
+        html += "<table style='border-collapse: collapse; width: 100%;'>"
+        
+        # Get all attributes except im_scale_params
+        config_dict = self.to_dict()
+        config_dict.pop('_im_scale_params', None)  # Remove if present
+        
+        for key, value in config_dict.items():
+            # Format different types of values
+            if isinstance(value, (list, tuple)):
+                if len(value) > 5:
+                    display_value = f"[{', '.join(map(str, value[:3]))}, ... ({len(value)} items)]"
+                else:
+                    display_value = str(value)
+            elif isinstance(value, dict):
+                if key == 'model':
+                    # Special formatting for model config
+                    display_value = "<br>".join([f"&nbsp;&nbsp;{k}: {v}" for k, v in value.items()])
+                else:
+                    display_value = f"dict with {len(value)} keys"
+            elif isinstance(value, (int, float)):
+                display_value = f"{value:,}" if isinstance(value, int) and value > 1000 else str(value)
+            else:
+                display_value = str(value)
+            
+            # Add table row with fixed width for variable names
+            html += "<tr style='border-bottom: 1px solid #eee;'>"
+            html += f"<td style='padding: 5px; font-weight: bold; width: 400px; min-width: 400px; max-width: 400px; vertical-align: top; text-align: left;'>{key}</td>"
+            html += f"<td style='padding: 5px; word-break: break-word; text-align: left;'>{display_value}</td>"
+            html += "</tr>"
+        
+        html += "</table></div>"
+        return html
+
 
 @dataclass
 class ModelConfig:

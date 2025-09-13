@@ -160,7 +160,7 @@ def train_cv(
             Path(__file__).parent / "result_notebooks/cv_result_analysis.ipynb"
         )
         mlt.quarto.render_quarto(
-            "mamba activate nn-gmm",
+            "mamba activate nn-gmm-gmt",
             results_report_notebook_ffp,
             base_out_dir / "results_report.html",
             result_dir=str(base_out_dir),
