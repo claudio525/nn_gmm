@@ -23,7 +23,8 @@ def create_multi_mlp(
     n_outputs: int,
     act_fn_str: str | None,
     bias: bool = True,
-    use_batch_norm: bool = False
+    use_batch_norm: bool = False,
+    dropout_rate: float | None = None,
 ) -> nn.Sequential:
     """Creates a multi-layer perceptron"""
     mlp = nn.Sequential()
@@ -41,6 +42,9 @@ def create_multi_mlp(
 
         if act_fn_str is not None:
             mlp.append(mlt.torch.get_act_fn_layer(act_fn_str))
+
+        if dropout_rate is not None and dropout_rate > 0:
+            mlp.append(nn.Dropout(dropout_rate))
 
     mlp.append(
         nn.Linear(

@@ -13,13 +13,18 @@
 # python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4
 
 ## Render CV result analysis notebook 
-notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/result_notebooks
-cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
-quarto render $notebook_dir/cv_result_analysis.ipynb --execute --to html  -P result_dir:$cur_dir && \
-mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html
+# notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/result_notebooks
+# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
+# quarto render $notebook_dir/cv_result_analysis.ipynb --execute --to html  -P result_dir:$cur_dir && \
+# mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html
 
+
+python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0908_1938_cv_v5_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v5_25Epochs.log
+python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v1_25Epochs.log
 python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0911_0917_cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v2_25Epochs.log
 python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v3_25Epochs.log
+
+./plot_spatial.sh /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
 
 
 # Basin & site map

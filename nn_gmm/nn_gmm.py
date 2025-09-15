@@ -89,6 +89,9 @@ class RunConfig:
     batch_size: int
     """Batch size for training"""
 
+    learning_rate: float
+    """Learning rate for training"""
+
     model_config: "ModelConfig"
     """Model configuration"""
 
@@ -202,6 +205,7 @@ class RunConfig:
             "rel_test_events_ffp": str(self.rel_test_events_ffp),
             "max_rrup": float(self.max_rrup),
             "ignore_events": self.ignore_events,
+            "extra_basin_sites": bool(self.extra_basin_sites),
             "device": self.device,
             "im_set": str(self.im_set),
             "scale_ims": self.scale_ims,
@@ -216,6 +220,7 @@ class RunConfig:
             "max_vs30_weight": float(self.max_vs30_weight),
             "total_max_weight": float(self.total_max_weight),
             "batch_size": int(self.batch_size),
+            "learning_rate": float(self.learning_rate),
             "model": ModelConfig.to_dict(self.model_config),
             "rel_results_dir": str(self.rel_results_dir),
             "n_epochs": int(self.n_epochs),
@@ -265,35 +270,43 @@ class RunConfig:
         html = "<div style='font-family: monospace; border: 1px solid #ddd; padding: 10px; margin: 5px;'>"
         html += "<h3 style='margin-top: 0; color: #333;'>RunConfig</h3>"
         html += "<table style='border-collapse: collapse; width: 100%;'>"
-        
+
         # Get all attributes except im_scale_params
         config_dict = self.to_dict()
-        config_dict.pop('_im_scale_params', None)  # Remove if present
-        
+        config_dict.pop("_im_scale_params", None)  # Remove if present
+
         for key, value in config_dict.items():
             # Format different types of values
             if isinstance(value, (list, tuple)):
                 if len(value) > 5:
-                    display_value = f"[{', '.join(map(str, value[:3]))}, ... ({len(value)} items)]"
+                    display_value = (
+                        f"[{', '.join(map(str, value[:3]))}, ... ({len(value)} items)]"
+                    )
                 else:
                     display_value = str(value)
             elif isinstance(value, dict):
-                if key == 'model':
+                if key == "model":
                     # Special formatting for model config
-                    display_value = "<br>".join([f"&nbsp;&nbsp;{k}: {v}" for k, v in value.items()])
+                    display_value = "<br>".join(
+                        [f"&nbsp;&nbsp;{k}: {v}" for k, v in value.items()]
+                    )
                 else:
                     display_value = f"dict with {len(value)} keys"
             elif isinstance(value, (int, float)):
-                display_value = f"{value:,}" if isinstance(value, int) and value > 1000 else str(value)
+                display_value = (
+                    f"{value:,}"
+                    if isinstance(value, int) and value > 1000
+                    else str(value)
+                )
             else:
                 display_value = str(value)
-            
+
             # Add table row with fixed width for variable names
             html += "<tr style='border-bottom: 1px solid #eee;'>"
             html += f"<td style='padding: 5px; font-weight: bold; width: 400px; min-width: 400px; max-width: 400px; vertical-align: top; text-align: left;'>{key}</td>"
             html += f"<td style='padding: 5px; word-break: break-word; text-align: left;'>{display_value}</td>"
             html += "</tr>"
-        
+
         html += "</table></div>"
         return html
 
@@ -308,7 +321,9 @@ class ModelConfig:
     activation: str
     """Activation function to use in the model."""
 
-    l2_reg: float = 0.0
+    dropout_rate: float
+    """Dropout rate for the model."""
+    l2_reg: float
     """L2 regularization strength."""
 
     @classmethod
@@ -348,6 +363,7 @@ class ModelConfig:
             "use_batch_norm": model_config.use_batch_norm,
             "activation": str(model_config.activation),
             "l2_reg": float(model_config.l2_reg),
+            "dropout_rate": float(model_config.dropout_rate),
         }
 
 
@@ -560,12 +576,12 @@ def run_model_training(
 
     # Get predictions
     logging.info("Getting validation dataset predictions")
-    val_results_df = get_predictions(model, val_dataset, run_config)
+    val_results_df = get_predictions(model, val_dataset, run_config, verbose=verbose)
     val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
     if save_train_results:
         logging.info("Getting training dataset predictions")
-        train_results_df = get_predictions(model, train_dataset, run_config)
+        train_results_df = get_predictions(model, train_dataset, run_config, verbose=verbose)
         train_results_df.to_parquet(ouput_dir / "train_results.parquet")
 
     logging.info("Saving results")
@@ -591,7 +607,7 @@ def run_model_training(
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
 
 
-def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig):
+def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig, verbose: bool = True) -> pd.DataFrame:
     """
     Get predictions for the given model and dataset.
 
@@ -612,7 +628,7 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
     dataloader = data.CustomDataLoader(dataset, batch_size=100_000, shuffle=False)
 
     result_dfs = []
-    for cur_batch in tqdm(dataloader, desc="Predicting"):
+    for cur_batch in tqdm(dataloader, desc="Predicting", disable=not verbose):
         model.eval()
         with torch.no_grad():
             pred_mean, pred_ln_std = model(cur_batch.X).chunk(2, dim=-1)
@@ -666,7 +682,9 @@ def train(
 
     model = model.to(run_config.device)
     optimizer = torch.optim.Adam(
-        model.parameters(), weight_decay=run_config.model_config.l2_reg
+        model.parameters(),
+        weight_decay=run_config.model_config.l2_reg,
+        lr=run_config.learning_rate,
     )
 
     for cur_epoch_ix in range(run_config.n_epochs):
@@ -677,7 +695,11 @@ def train(
         grad_norms = []
         n_samples = 0
         model.train()
-        for cur_batch in tqdm(train_dataloader, disable=not verbose):
+        for cur_batch in tqdm(
+            train_dataloader,
+            disable=not verbose,
+            desc=f"Epoch {cur_epoch_ix + 1}/{run_config.n_epochs}",
+        ):
             optimizer.zero_grad()
 
             cur_bresult = _get_batch_result(cur_batch, model, run_config)
@@ -685,9 +707,15 @@ def train(
             cur_bresult.loss.backward()
             optimizer.step()
 
-            grad_norms.append(torch.nn.utils.get_total_norm(
-                [param.grad for param in model.parameters() if param.grad is not None]
-            ).numpy(force=True))
+            grad_norms.append(
+                torch.nn.utils.get_total_norm(
+                    [
+                        param.grad
+                        for param in model.parameters()
+                        if param.grad is not None
+                    ]
+                ).numpy(force=True)
+            )
 
             metrics = _save_metrics(
                 cur_bresult, metrics, run_config, cur_epoch_ix, "train"

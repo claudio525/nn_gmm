@@ -11,7 +11,8 @@ from . import plots
 from . import analysis
 from .nn_gmm import RunConfig
 from . import nn_gmm_predict
-from .nn_gmm_train_cv import train_cv
+from . import nn_hp_opt
+from .nn_gmm_cv import train_cv
 
 __all__ = [
     "constants",
@@ -23,6 +24,7 @@ __all__ = [
     "utils",
     "nn_gmm",
     "nn_gmm_predict",
+    "nn_hp_opt",
     "data",
     "plot_utils",
     "plots",

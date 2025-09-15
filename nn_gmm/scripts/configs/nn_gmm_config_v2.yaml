@@ -47,12 +47,14 @@ total_max_weight: 5.0
 
 n_epochs: 100
 batch_size: 1024
+learning_rate: 0.001
 
 
 model:
   units: [32, 32, 64]
   use_batch_norm: True
   activation: relu
+  dropout_rate: 0.0
   l2_reg: 0.0001
 
 

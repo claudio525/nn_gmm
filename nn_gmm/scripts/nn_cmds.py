@@ -108,6 +108,7 @@ def train_cv(
     run_notebook: bool = True,
     remove_cv_results: bool = False,
 ):
+    """Train and evaluate the GMM using cross-validation."""
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
         device=device,
@@ -141,8 +142,26 @@ def train_cv(
 
 @app.command("run-mera")
 def run_mera(result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4):
+    """Run mixed effects residual analysis (MERA) on the CV validation residuals."""
     logger = nng.utils.setup_logging()
     nng.analysis.run_nn_mera(result_dir, site_term=site_term, out_dir=out_dir, n_procs=n_procs)
+
+
+@app.command("run-hp-opt")
+def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int):
+    """Run hyperparameter optimization using Optuna."""
+    hp_config = nng.nn_hp_opt.HPOptConfig.from_config(hp_config_ffp, base_run_config_ffp, device)
+    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials)
+
+@app.command("continue-hp-opt")
+def continue_hp_opt(study_dir: Path, n_trials: int):
+    """Continue a previously started hyperparameter optimization study."""
+    nng.nn_hp_opt.continue_hp_opt(study_dir, n_trials)
+    
+
+
+    
+
 
 
 if __name__ == "__main__":

@@ -92,5 +92,5 @@ def run_nn_mera(
         else out_dir
     )
     out_dir.mkdir(exist_ok=True)
-    mera_results.save(out_dir)
+    mera_results.save_to_parquet(out_dir, save_fit=False)
     logging.info(f"Wrote MERA results to: {out_dir}")

@@ -41,7 +41,10 @@ def train_cv(
     if run_config.extra_basin_sites:
         # Take all level 0 sites and level 2 sites that are in a basin
         site_df = utils.add_basin_column(site_df)
-        site_df = site_df.loc[(site_df.grid_level ==0) | ((~site_df["basin"].isnull()) & (site_df.grid_level == 2))]
+        site_df = site_df.loc[
+            (site_df.grid_level == 0)
+            | ((~site_df["basin"].isnull()) & (site_df.grid_level == 2))
+        ]
     else:
         site_df = site_df.loc[site_df.grid_level == 0]
 
@@ -59,15 +62,39 @@ def train_cv(
         sites = np.random.choice(sites, size=n_sites, replace=False)
 
     # Create bins for stratified magnitude and vs30 sampling
-    site_df["vs30_bin"] = pd.cut(site_df["vs30"], bins=[0, 180, 360, 760, 1500], labels=["vs30_0_180", "vs30_180_360", "vs30_360_760", "vs30_760_1500"])
-    event_df["mag_bin"] = pd.cut(event_df["magnitude"], bins=[5.5, 6.25, 7.25, 8.5], labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_8p5"])
-    
-    # Ensure even sampling of events wrt. magnitude
-    mag_split = StratifiedKFold(n_splits=n_event_folds, shuffle=True, random_state=run_config.seed)
-    event_folds = [events[ind[1]] for ind in mag_split.split(event_df.loc[event_df.event_id.isin(events)], event_df.loc[event_df.event_id.isin(events), "mag_bin"])]
+    site_df["vs30_bin"] = pd.cut(
+        site_df["vs30"],
+        bins=[0, 180, 360, 760, 1500],
+        labels=["vs30_0_180", "vs30_180_360", "vs30_360_760", "vs30_760_1500"],
+    )
+    event_df["mag_bin"] = pd.cut(
+        event_df["magnitude"],
+        bins=[5.5, 6.25, 7.25, 8.5],
+        labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_8p5"],
+    )
 
-    vs30_split = StratifiedKFold(n_splits=n_site_folds, shuffle=True, random_state=run_config.seed)
-    site_folds = [sites[ind[1]] for ind in vs30_split.split(site_df.loc[site_df.site_id.isin(sites)], site_df.loc[site_df.site_id.isin(sites), "vs30_bin"])]
+    # Ensure even sampling of events wrt. magnitude
+    mag_split = StratifiedKFold(
+        n_splits=n_event_folds, shuffle=True, random_state=run_config.seed
+    )
+    event_folds = [
+        events[ind[1]]
+        for ind in mag_split.split(
+            event_df.loc[event_df.event_id.isin(events)],
+            event_df.loc[event_df.event_id.isin(events), "mag_bin"],
+        )
+    ]
+
+    vs30_split = StratifiedKFold(
+        n_splits=n_site_folds, shuffle=True, random_state=run_config.seed
+    )
+    site_folds = [
+        sites[ind[1]]
+        for ind in vs30_split.split(
+            site_df.loc[site_df.site_id.isin(sites)],
+            site_df.loc[site_df.site_id.isin(sites), "vs30_bin"],
+        )
+    ]
 
     fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
 
@@ -166,12 +193,13 @@ def train_cv(
             result_dir=str(base_out_dir),
         )
 
-    # Remove the train/validation result files 
+    # Remove the train/validation result files
     # for each CV directory
     if remove_cv_results:
         for cur_cv_dir in out_dirs:
             (cur_cv_dir / "val_results.parquet").unlink()
             (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
+
 
 def _run_helper(
     run_config: nn_gmm.RunConfig,
@@ -183,10 +211,10 @@ def _run_helper(
     train_folds_ind: list[tuple[int, int]],
     val_fold_ind: tuple[int, int],
     base_out_dir: Path,
-    p_ix: int = None
+    p_ix: int = None,
 ):
     (out_dir := base_out_dir / f"cv_{cv_iter:02d}").mkdir(parents=True)
-    
+
     # Set up logging
     log_ffp = out_dir / f"nn_cv_iter_{cv_iter:02d}.log"
     if p_ix is None:
@@ -196,8 +224,12 @@ def _run_helper(
         root_logger.addHandler(file_handler)
     else:
         logger = utils.setup_logging(log_ffp, enable_console=False)
-        logging.info(f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}.")
-        logging.info(f"Sleeping for {10 * p_ix} seconds to stagger process start times.")    
+        logging.info(
+            f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}."
+        )
+        logging.info(
+            f"Sleeping for {10 * p_ix} seconds to stagger process start times."
+        )
         time.sleep(10 * p_ix)
 
     val_events = event_folds[val_fold_ind[0]]
