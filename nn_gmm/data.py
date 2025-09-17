@@ -16,6 +16,7 @@ from . import utils
 
 if typing.TYPE_CHECKING:
     from . import nn_gmm
+    from . import nn_gmm_obs
 
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,10 @@ class BaseDataset(abc.ABC):
         pass
 
 
-class BatchData(BaseBatchData):
+class SimBatchData(BaseBatchData):
     """
-    Represents a single batch
+    Represents a single batch for
+    training/inference on simulation data
     """
 
     def __init__(
@@ -62,6 +64,36 @@ class BatchData(BaseBatchData):
     def __repr__(self):
         return (
             f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, "
+            f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
+        )
+
+
+class ObsBatchData(BaseBatchData):
+    """
+    Represents a single batch for
+    training/inference on observed data
+    """
+
+    def __init__(
+        self,
+        record_ids: np.ndarray,
+        X: torch.Tensor,
+        y: torch.Tensor,
+        sample_weights: torch.Tensor | None = None,
+    ):
+        self.y = y
+        self.X = X
+        self.sample_weights = sample_weights
+
+        self.record_ids = record_ids
+
+    @property
+    def n_samples(self) -> int:
+        return self.y.shape[0]
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(record_ids={self.record_ids.shape}, X={self.X.shape}, "
             f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
         )
 
@@ -92,7 +124,7 @@ class CustomDataLoader:
     def __len__(self) -> int:
         return self.n_batches
 
-    def __next__(self) -> BatchData:
+    def __next__(self) -> BaseBatchData:
         if self.i >= len(self.dataset):
             raise StopIteration
 
@@ -288,7 +320,7 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             dim=1,
         )
 
-        return BatchData(
+        return SimBatchData(
             self.record_int_ids[indices], X, y, self._sample_weight_tensor[indices]
         )
 
@@ -351,59 +383,94 @@ class IMDBDataset(BaseIMDBDataset):
             axis=1,
         )
 
-        return BatchData(
+        return SimBatchData(
             self.record_int_ids[indices],
             torch.from_numpy(X).to(dtype=torch.float32, device=self.run_config.device),
             torch.from_numpy(y).to(dtype=torch.float32, device=self.run_config.device),
         )
 
 
-def imdb_get_im_data_batched(
-    imdb: IMDB, record_int_ids: np.ndarray, ims: np.ndarray
-) -> pd.DataFrame:
-    """
-    Get IM data from the IMDB in batches
-    Most likely better to use the IMDB.get_im_data_tmp_table() method
+class ObservedDataset(BaseDataset):
 
-    Parameters
-    ----------
-    imdb : IMDB
-        The IMDB object, needs to be opened
-    record_int_ids : np.ndarray
-        The record ids to get the IM data for
-    ims : np.ndarray
-        The IMs to get the data for
+    def __init__(
+        self,
+        site_df: pd.DataFrame,
+        source_df: pd.DataFrame,
+        event_site_df: pd.DataFrame,
+        im_df: pd.DataFrame,
+        record_info_df: pd.DataFrame,
+        tune_config: "nn_gmm_obs.FineTuneConfig",
+    ):
+        super().__init__()
 
-    Returns
-    -------
-    pd.DataFrame
-        The IM data for the given record ids and IMs
-    """
-    batch_size = 100_000
-    n_batches = int(np.ceil(len(record_int_ids) / batch_size))
+        self.tune_config = tune_config
+        self.ims = self.tune_config.base_run_config.ims
+        assert np.all(np.isin(self.ims, im_df.columns))
 
-    im_data = []
-    logger.info(
-        f"Getting IM data for {len(record_int_ids)} records in {n_batches} batches"
-    )
-    start_time = time.time()
-    for i in range(n_batches):
-        start = i * batch_size
-        end = min((i + 1) * batch_size, len(record_int_ids))
-        cur_record_int_ids = record_int_ids[start:end]
+        self.site_df = site_df
+        self.source_df = source_df
+        self.event_site_df = event_site_df
+        self.record_info_df = record_info_df
+        self.im_df = im_df[self.ims].copy()
+        assert self.record_info_df.index.equals(self.im_df.index)
+        assert self.record_info_df.index.equals(self.event_site_df.index)
+        self._record_ids = self.record_info_df.index.values.astype(str)
 
-        if i % 10 == 0 and i > 0:
-            logger.info(f"Resetting IMDB connection, batch {i} of {n_batches}")
-            imdb.close()
-            imdb.open()
+        # Pre-process IM data
+        self.im_df = np.log(self.im_df)
+        im_scale_params = self.tune_config.base_run_config.im_scale_params
+        if im_scale_params is not None:
+            self.im_df = (self.im_df - im_scale_params["mean"]) / im_scale_params["std"]
 
-        cur_im_data = imdb.get_im_data(ims, record_int_ids=cur_record_int_ids)
-        im_data.append(cur_im_data)
-    logger.info(
-        f"Took {time.time() - start_time:.2f} seconds to get IM data for {len(record_int_ids)} records"
-    )
+        # Create lookup indices
+        self._index_to_site_ix = self.site_df.index.get_indexer(
+            self.record_info_df.site_id.values
+        )
+        self._index_to_event_ix = self.source_df.index.get_indexer(
+            self.record_info_df.event_id.values
+        )
 
-    return pd.concat(im_data, axis=0)
+        self._site_data_tensor = torch.tensor(
+            self.site_df.values, device=self.tune_config.device, dtype=torch.float32
+        )
+        self._source_data_tensor = torch.tensor(
+            self.source_df.values, device=self.tune_config.device, dtype=torch.float32
+        )
+        self._event_site_tensor = torch.tensor(
+            self.event_site_df.values,
+            device=self.tune_config.device,
+            dtype=torch.float32,
+        )
+        self._im_data_tensor = torch.tensor(
+            self.im_df.values, device=self.tune_config.device, dtype=torch.float32
+        )
+
+    def __len__(self) -> int:
+        return self.im_df.shape[0]
+
+    def get_batch(self, indices: np.ndarray) -> BaseBatchData:
+        """
+        Get a batch of data for the given indices.
+
+        indices: np.ndarray
+            GM record indices
+        """
+        y = self._im_data_tensor[indices, :]
+
+        site_data = self._site_data_tensor[self._index_to_site_ix[indices], :]
+        source_data = self._source_data_tensor[self._index_to_event_ix[indices], :]
+        event_site_data = self._event_site_tensor[indices, :]
+
+        X = torch.cat(
+            (site_data, source_data, event_site_data),
+            dim=1,
+        )
+
+        return ObsBatchData(
+            self._record_ids[indices],
+            X,
+            y,
+        )
 
 
 def get_similar_records(
@@ -516,3 +583,51 @@ def get_similar_records(
         record_info_df = record_info_df.loc[record_info_df.index.isin(record_int_ids)]
 
     return record_info_df.index.values
+
+
+# def imdb_get_im_data_batched(
+#     imdb: IMDB, record_int_ids: np.ndarray, ims: np.ndarray
+# ) -> pd.DataFrame:
+#     """
+#     Get IM data from the IMDB in batches
+#     Most likely better to use the IMDB.get_im_data_tmp_table() method
+
+#     Parameters
+#     ----------
+#     imdb : IMDB
+#         The IMDB object, needs to be opened
+#     record_int_ids : np.ndarray
+#         The record ids to get the IM data for
+#     ims : np.ndarray
+#         The IMs to get the data for
+
+#     Returns
+#     -------
+#     pd.DataFrame
+#         The IM data for the given record ids and IMs
+#     """
+#     batch_size = 100_000
+#     n_batches = int(np.ceil(len(record_int_ids) / batch_size))
+
+#     im_data = []
+#     logger.info(
+#         f"Getting IM data for {len(record_int_ids)} records in {n_batches} batches"
+#     )
+#     start_time = time.time()
+#     for i in range(n_batches):
+#         start = i * batch_size
+#         end = min((i + 1) * batch_size, len(record_int_ids))
+#         cur_record_int_ids = record_int_ids[start:end]
+
+#         if i % 10 == 0 and i > 0:
+#             logger.info(f"Resetting IMDB connection, batch {i} of {n_batches}")
+#             imdb.close()
+#             imdb.open()
+
+#         cur_im_data = imdb.get_im_data(ims, record_int_ids=cur_record_int_ids)
+#         im_data.append(cur_im_data)
+#     logger.info(
+#         f"Took {time.time() - start_time:.2f} seconds to get IM data for {len(record_int_ids)} records"
+#     )
+
+#     return pd.concat(im_data, axis=0)

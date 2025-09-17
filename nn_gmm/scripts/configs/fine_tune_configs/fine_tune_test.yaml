@@ -1,0 +1,7 @@
+seed: 42
+rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
+
+validation_split: 0.3
+batch_size: 512
+l2_reg: 0.0001
+learning_rate: 0.0001

@@ -4,8 +4,6 @@ import functools
 from pathlib import Path
 from dataclasses import dataclass
 
-import torch
-import pandas as pd
 import numpy as np
 import xarray as xr
 import optuna as opt

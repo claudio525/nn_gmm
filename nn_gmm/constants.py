@@ -1,8 +1,27 @@
+from enum import StrEnum
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
 import oq_wrapper as oqw
+
+class ObsDataSource(StrEnum):
+    NZGMDB = "NZGMDB"
+    NGAWest2 = "NGAWest2"
+    NGASubduction = "NGASubduction"
+
+class NZGMDBVersion(StrEnum):
+    v4p3_final = "v4.3_final"
+
+class TectonicType(StrEnum):
+    CRUSTAL = "crustal"
+    SUBDUCTION_INTERFACE = "subduction_interface"
+    SUBDUCTION_SLAB = "subduction_slab"
+    OUTER_RISE = "outer_rise"
+    MANTLE = "mantle"
+    UNKNOWN = "unknown"
+
+
 
 GMM_MAPPING = {
     oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
@@ -46,7 +65,7 @@ PSA_KEYS = [
     "pSA_0.8",
     "pSA_0.9",
     "pSA_1.0",
-    "pSA_1.25",
+    # "pSA_1.25",
     "pSA_1.5",
     "pSA_2.0",
     "pSA_2.5",
@@ -79,7 +98,7 @@ PSA_PERIODS = [
     0.8,
     0.9,
     1.0,
-    1.25,
+    # 1.25,
     1.5,
     2.0,
     2.5,

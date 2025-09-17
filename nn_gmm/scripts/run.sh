@@ -1,10 +1,5 @@
 #!/usr/bin/env zsh
 
-## Test
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v3.yaml 2 2 --n-epochs 10 --id-suffix cv_v3_10Epochs_2E2SFolds_1000Sites --n-procs 4 --remove-cv-results --n-sites 1000 && \
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v4.yaml 2 2 --n-epochs 10 --id-suffix cv_v4_10Epochs_2E2SFolds_1000Sites --n-procs 4 --remove-cv-results --n-sites 1000 && \
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v5.yaml 2 2 --n-epochs 10 --id-suffix cv_v5_10Epochs_2E2SFolds_1000Sites --n-procs 4 --remove-cv-results --n-sites 1000 && \
-
 # python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v5.yaml 2 2 --n-epochs 10 --id-suffix cv_v5_10Epochs_2E2Folds_512batchSize_1000Sites --n-procs 4 --n-sites 1000 --remove-cv-results --batch-size 512 && \
 # python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v1.yaml 3 4 --n-epochs 25 --id-suffix cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 && \
 # python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 25 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 
@@ -12,19 +7,24 @@
 # python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v3.yaml 3 4 --n-epochs 25 --id-suffix cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 
 # python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4
 
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 10 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 10 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize_1000Sites --n-procs 4 --remove-cv-results --batch-size 512 --n-sites 1000
+
+python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v3.yaml 3 4 --n-epochs 10 --id-suffix cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512
+
 ## Render CV result analysis notebook 
 # notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/result_notebooks
-# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
+# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0917_1111_cv_v2_25Epochs_3E4Folds_512batchSize
 # quarto render $notebook_dir/cv_result_analysis.ipynb --execute --to html  -P result_dir:$cur_dir && \
 # mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html
 
 
-python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0908_1938_cv_v5_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v5_25Epochs.log
-python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v1_25Epochs.log
-python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0911_0917_cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v2_25Epochs.log
-python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v3_25Epochs.log
+# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0908_1938_cv_v5_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v5_25Epochs.log
+# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v1_25Epochs.log
+# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0911_0917_cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v2_25Epochs.log
+# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v3_25Epochs.log
 
-./plot_spatial.sh /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
+# ./plot_spatial.sh /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
 
 
 # Basin & site map

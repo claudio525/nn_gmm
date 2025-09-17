@@ -5,12 +5,13 @@ from . import emp_gmm
 from . import utils
 from . import nn_gmm
 from . import data
+from . import obs_data
 from . import plot_utils
 from . import plots_spatial
 from . import plots
 from . import analysis
 from .nn_gmm import RunConfig
-from . import nn_gmm_predict
+from . import nn_gmm_obs
 from . import nn_hp_opt
 from .nn_gmm_cv import train_cv
 
@@ -23,8 +24,9 @@ __all__ = [
     "RunConfig",
     "utils",
     "nn_gmm",
-    "nn_gmm_predict",
+    "nn_gmm_obs",
     "nn_hp_opt",
+    "obs_data",
     "data",
     "plot_utils",
     "plots",

@@ -1,6 +1,7 @@
 seed: 42
 
 rel_imdb_ffp: nn_gmm/20250606_CS200m_imdb.db
+rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
@@ -10,8 +11,8 @@ im_set: pSA
 scale_ims: True
 
 site_inputs: 
-# - nztm_x
-# - nztm_y 
+- nztm_x
+- nztm_y 
 # - lat
 # - lon
 - vs30
@@ -38,12 +39,12 @@ source_to_site_inputs:
 
 # Sample weighting
 apply_mag_sample_weighting: True
-max_mag_weight: 2.5
+max_mag_weight: 5.0
 apply_rrup_sample_weighting: True
-max_rrup_weight: 2.5
+max_rrup_weight: 5.0
 apply_vs30_sample_weighting: True
-max_vs30_weight: 2.5
-total_max_weight: 5.0
+max_vs30_weight: 5.0
+total_max_weight: 10.0
 
 n_epochs: 100
 batch_size: 1024

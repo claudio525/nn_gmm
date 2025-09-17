@@ -9,7 +9,7 @@ import ml_tools as mlt
 
 from . import nn_gmm
 from . import emp_gmm
-from . import nn_gmm_predict
+from . import analysis
 from . import constants
 from . import data
 
@@ -55,7 +55,7 @@ def magnitude_trend_plot(
     run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     min_mag, max_mag = 5.25, 8.25
-    input_df = nn_gmm_predict.get_mag_input_df(
+    input_df = analysis.get_mag_input_df(
         mag_values=np.linspace(min_mag, max_mag, 250),
         run_config=run_config,
         **fixed_inputs,
@@ -65,7 +65,7 @@ def magnitude_trend_plot(
     if cv:
         cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
         pred_dfs = {
-            cur_dir.stem: nn_gmm_predict.run_predictions(
+            cur_dir.stem: nn_gmm.run_predictions_dir(
                 cur_dir, input_df, device=device
             )
             for cur_dir in cv_dirs
@@ -96,7 +96,7 @@ def magnitude_trend_plot(
         )
 
     else:
-        pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
+        pred_df = nn_gmm.run_predictions_dir(result_dir, input_df, device=device)
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
@@ -275,7 +275,7 @@ def rrup_trend_plot(
     run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     min_rrup, max_rrup = 0.1, 300
-    input_df = nn_gmm_predict.get_rrup_input_df(
+    input_df = analysis.get_rrup_input_df(
         rrup_values=np.linspace(0.1, 300, 250), run_config=run_config, **fixed_inputs
     )
 
@@ -283,7 +283,7 @@ def rrup_trend_plot(
     if cv:
         cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
         pred_dfs = {
-            cur_dir.stem: nn_gmm_predict.run_predictions(
+            cur_dir.stem: nn_gmm.run_predictions_dir(
                 cur_dir, input_df, device=device
             )
             for cur_dir in cv_dirs
@@ -313,7 +313,7 @@ def rrup_trend_plot(
             },
         )
     else:
-        pred_df = nn_gmm_predict.run_predictions(result_dir, input_df, device=device)
+        pred_df = nn_gmm.run_predictions_dir(result_dir, input_df, device=device)
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records

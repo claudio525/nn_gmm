@@ -8,7 +8,7 @@ import pandas as pd
 import mera
 
 from .imdb import IMDB
-from .nn_gmm import RunConfig
+from . import nn_gmm
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ def get_nn_residuals(
     model_dir: Path, record_info_df: pd.DataFrame = None
 ) -> pd.DataFrame:
     """Get the residuals of the validation results"""
-    run_config = RunConfig.from_yaml(model_dir / "run_config.yaml")
+    run_config = nn_gmm.RunConfig.from_yaml(model_dir / "run_config.yaml")
 
     val_pred_df = pd.read_parquet(model_dir / "val_results.parquet").sort_index()
     val_record_int_ids = val_pred_df.index.values.astype(int)
@@ -54,7 +54,7 @@ def get_nn_residuals(
 def run_nn_mera(
     result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4
 ):
-    run_config = RunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
     res_df = get_nn_residuals(result_dir)
@@ -94,3 +94,94 @@ def run_nn_mera(
     out_dir.mkdir(exist_ok=True)
     mera_results.save_to_parquet(out_dir, save_fit=False)
     logging.info(f"Wrote MERA results to: {out_dir}")
+
+
+def get_mag_input_df(
+    mag_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs
+) -> pd.DataFrame:
+    """
+    Create a DataFrame with the given magnitude values and additional parameters.
+
+    Parameters
+    ----------
+    mag_values : np.ndarray
+        Array of magnitude values.
+    run_config : nn_gmm.RunConfig
+        Run configuration of the model
+    **kwargs : dict
+        Additional parameters to include in the DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the magnitude values and additional parameters.
+    """
+    input_df = pd.DataFrame(
+        {
+            "magnitude": mag_values,
+        }
+    )
+
+    for k, v in kwargs.items():
+        input_df[k] = v
+
+    # Check inputs
+    if run_config is not None:
+        for key in run_config.site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required site input: {key}")
+        for key in run_config.source_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required source input: {key}")
+        for key in run_config.source_to_site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required event-site input: {key}")
+
+    return input_df
+
+
+def get_rrup_input_df(
+    rrup_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs
+) -> pd.DataFrame:
+    """
+    Create a DataFrame with the given rrup values and additional parameters.
+
+    Parameters
+    ----------
+    rrup_values : np.ndarray
+        Array of rrup values.
+    run_config : nn_gmm.RunConfig
+        Run configuration of the model
+    **kwargs : dict
+        Additional parameters to include in the DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the rrup values and additional parameters.
+    """
+    input_df = pd.DataFrame(
+        {
+            "rrup": rrup_values,
+            "rjb": rrup_values,
+            "rx": rrup_values,
+            "ry": rrup_values,
+        }
+    )
+
+    for k, v in kwargs.items():
+        input_df[k] = v
+
+    # Check inputs
+    if run_config is not None:
+        for key in run_config.site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required site input: {key}")
+        for key in run_config.source_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required source input: {key}")
+        for key in run_config.source_to_site_inputs:
+            if key not in input_df.columns:
+                raise ValueError(f"Missing required event-site input: {key}")
+
+    return input_df

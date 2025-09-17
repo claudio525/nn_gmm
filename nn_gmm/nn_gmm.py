@@ -8,6 +8,7 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import einops
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -17,6 +18,7 @@ import ml_tools as mlt
 from . import imdb
 from . import preprocessing
 from . import data
+from . import obs_data as obsd
 from . import constants
 from . import utils
 from . import nn_gmm_modules
@@ -31,6 +33,9 @@ class RunConfig:
 
     rel_imdb_ffp: str
     """Relative path to the IMDB file."""
+
+    rel_nzgmdb_ffp: str
+    """Relative path to the NZGMDB file."""
 
     rel_test_events_ffp: str
     """Relative path to the test events file."""
@@ -122,6 +127,11 @@ class RunConfig:
         return Path(os.environ["wdata"]) / self.rel_imdb_ffp
 
     @property
+    def nzgmdb_ffp(self) -> Path:
+        """Absolute path to the NZGMDB file."""
+        return Path(os.environ["wdata"]) / self.rel_nzgmdb_ffp
+
+    @property
     def results_dir(self) -> Path:
         """Absolute path to the results directory."""
         return Path(os.environ["wdata"]) / self.rel_results_dir
@@ -202,6 +212,7 @@ class RunConfig:
         config_dict = {
             "seed": int(self.seed),
             "rel_imdb_ffp": str(self.rel_imdb_ffp),
+            "rel_nzgmdb_ffp": str(self.rel_nzgmdb_ffp),
             "rel_test_events_ffp": str(self.rel_test_events_ffp),
             "max_rrup": float(self.max_rrup),
             "ignore_events": self.ignore_events,
@@ -368,7 +379,7 @@ class ModelConfig:
 
 
 class BatchResult(NamedTuple):
-    batch: data.BatchData
+    batch: data.SimBatchData
     """The batch data"""
 
     pred_mean: torch.Tensor
@@ -384,6 +395,9 @@ class BatchResult(NamedTuple):
     """The individual losses, this includes nan-values"""
     ind_w_loss: torch.Tensor
     """The individual weighted losses, this includes nan-values"""
+
+    nan_mask: torch.Tensor
+    """Mask for the nan values"""
 
 
 def run_model_training(
@@ -556,6 +570,7 @@ def run_model_training(
         run_config.model_config.activation,
         use_batch_norm=run_config.model_config.use_batch_norm,
     )
+    model.to(run_config.device)
 
     logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
     logger.info(
@@ -564,7 +579,14 @@ def run_model_training(
     )
 
     metrics, best_model_state, best_model_epoch = train(
-        run_config, model, train_dataloader, val_dataloader, verbose=verbose
+        model,
+        train_dataloader,
+        val_dataloader,
+        run_config.n_epochs,
+        l2_reg=run_config.model_config.l2_reg,
+        learning_rate=run_config.learning_rate,
+        use_sample_weights=run_config.use_sample_weights,
+        verbose=verbose,
     )
     metrics_df = pd.DataFrame(metrics)
 
@@ -574,15 +596,27 @@ def run_model_training(
     # Create output directory
     ouput_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get predictions
+    # Get simulation predictions
     logging.info("Getting validation dataset predictions")
-    val_results_df = get_predictions(model, val_dataset, run_config, verbose=verbose)
+    val_results_df = get_dataset_predictions(
+        model, val_dataset, run_config, verbose=verbose
+    )
     val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
     if save_train_results:
         logging.info("Getting training dataset predictions")
-        train_results_df = get_predictions(model, train_dataset, run_config, verbose=verbose)
+        train_results_df = get_dataset_predictions(
+            model, train_dataset, run_config, verbose=verbose
+        )
         train_results_df.to_parquet(ouput_dir / "train_results.parquet")
+
+    # Get observation predictions
+    logging.info("Getting observation predictions")
+    obs_data = obsd.load_obs_nzgmdb(run_config.nzgmdb_ffp)
+    obs_results_df = run_predictions(
+        model, run_config, obsd.get_input_df(obs_data, run_config), run_config.device
+    )
+    obs_results_df.to_parquet(ouput_dir / "obs_results.parquet")
 
     logging.info("Saving results")
     run_config.to_yaml(ouput_dir / "run_config.yaml")
@@ -607,7 +641,12 @@ def run_model_training(
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
 
 
-def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: RunConfig, verbose: bool = True) -> pd.DataFrame:
+def get_dataset_predictions(
+    model: nn.Module,
+    dataset: data.IMDBDataset,
+    run_config: RunConfig,
+    verbose: bool = True,
+) -> pd.DataFrame:
     """
     Get predictions for the given model and dataset.
 
@@ -649,7 +688,11 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
                 columns=np.concatenate(
                     (run_config.pred_mean_keys, run_config.pred_std_keys)
                 ),
-                index=cur_batch.record_int_ids,
+                index=(
+                    cur_batch.record_int_ids
+                    if isinstance(cur_batch, data.SimBatchData)
+                    else cur_batch.record_ids
+                ),
             )
 
             result_dfs.append(cur_result_df)
@@ -659,37 +702,42 @@ def get_predictions(model: nn.Module, dataset: data.IMDBDataset, run_config: Run
 
 
 def train(
-    run_config: RunConfig,
     model: nn.Module,
     train_dataloader: data.CustomDataLoader,
     val_dataloader: data.CustomDataLoader,
+    n_epochs: int,
+    l2_reg: float = 0.0,
+    learning_rate: float = 1e-3,
+    use_sample_weights: bool = False,
+    optimizer: torch.optim.Optimizer | None = None,
     verbose: bool = True,
 ):
+    """Function for training a model"""
     # Setup metrics to log
     metrics = {
-        "w_loss_hist_train": np.zeros(run_config.n_epochs),
-        "w_loss_hist_val": np.zeros(run_config.n_epochs),
-        "loss_hist_train": np.zeros(run_config.n_epochs),
-        "loss_hist_val": np.zeros(run_config.n_epochs),
-        "mse_hist_train": np.zeros(run_config.n_epochs),
-        "mse_hist_val": np.zeros(run_config.n_epochs),
-        "mean_sigma_hist_train": np.zeros(run_config.n_epochs),
-        "mean_sigma_hist_val": np.zeros(run_config.n_epochs),
+        "w_loss_hist_train": np.zeros(n_epochs),
+        "w_loss_hist_val": np.zeros(n_epochs),
+        "loss_hist_train": np.zeros(n_epochs),
+        "loss_hist_val": np.zeros(n_epochs),
+        "mse_hist_train": np.zeros(n_epochs),
+        "mse_hist_val": np.zeros(n_epochs),
+        "mean_sigma_hist_train": np.zeros(n_epochs),
+        "mean_sigma_hist_val": np.zeros(n_epochs),
     }
 
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
 
-    model = model.to(run_config.device)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        weight_decay=run_config.model_config.l2_reg,
-        lr=run_config.learning_rate,
-    )
+    if optimizer is None:
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            weight_decay=l2_reg,
+            lr=learning_rate,
+        )
 
-    for cur_epoch_ix in range(run_config.n_epochs):
+    for cur_epoch_ix in range(n_epochs):
         if verbose:
-            logging.debug(f"Epoch: {cur_epoch_ix + 1}/{run_config.n_epochs}")
+            logging.debug(f"Epoch: {cur_epoch_ix + 1}/{n_epochs}")
 
         ### Training
         grad_norms = []
@@ -698,11 +746,11 @@ def train(
         for cur_batch in tqdm(
             train_dataloader,
             disable=not verbose,
-            desc=f"Epoch {cur_epoch_ix + 1}/{run_config.n_epochs}",
+            desc=f"Epoch {cur_epoch_ix + 1}/{n_epochs}",
         ):
             optimizer.zero_grad()
 
-            cur_bresult = _get_batch_result(cur_batch, model, run_config)
+            cur_bresult = _get_batch_result(cur_batch, model, use_sample_weights)
 
             cur_bresult.loss.backward()
             optimizer.step()
@@ -718,7 +766,7 @@ def train(
             )
 
             metrics = _save_metrics(
-                cur_bresult, metrics, run_config, cur_epoch_ix, "train"
+                cur_bresult, metrics, use_sample_weights, cur_epoch_ix, "train"
             )
             n_samples += cur_batch.n_samples
 
@@ -738,10 +786,12 @@ def train(
             n_samples = 0
             with torch.no_grad():
                 for cur_batch in val_dataloader:
-                    cur_bresult = _get_batch_result(cur_batch, model, run_config)
+                    cur_bresult = _get_batch_result(
+                        cur_batch, model, use_sample_weights
+                    )
 
                     metrics = _save_metrics(
-                        cur_bresult, metrics, run_config, cur_epoch_ix, "val"
+                        cur_bresult, metrics, use_sample_weights, cur_epoch_ix, "val"
                     )
                     n_samples += cur_batch.n_samples
 
@@ -757,7 +807,7 @@ def train(
                 best_model_epoch = cur_epoch_ix
 
         if verbose:
-            logging.info(f"Epoch {cur_epoch_ix + 1}/{run_config.n_epochs} completed.")
+            logging.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
             logging.info(
                 f"Training\t"
                 f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
@@ -774,40 +824,46 @@ def train(
 
 
 def _get_batch_result(
-    batch: data.BatchData,
-    model: nn.Module,
-    run_config: RunConfig,
+    batch: data.BaseBatchData, model: nn.Module, use_sample_weights: bool
 ) -> BatchResult:
     X, y = batch.X, batch.y
+
+    nan_mask = torch.isnan(y)
 
     pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
     pred_std = torch.exp(pred_ln_std)
 
-    ind_loss = F.gaussian_nll_loss(
-        pred_mean,
-        y,
-        pred_std**2,
+    ind_loss = torch.full_like(y, torch.nan)
+    ind_loss_ravel = F.gaussian_nll_loss(
+        pred_mean[~nan_mask],
+        y[~nan_mask],
+        pred_std[~nan_mask] ** 2,
         reduction="none",
     )
-    if (nan_count := ind_loss.isnan().sum()) > 0:
+    ind_loss[~nan_mask] = ind_loss_ravel
+
+    if (nan_count := ind_loss_ravel.isnan().sum()) > 0:
         logger.warning(f"Loss has {nan_count} NaN values!!")
 
-    if run_config.use_sample_weights:
-        ind_w_loss = ind_loss * batch.sample_weights[:, None]
-        loss = ind_w_loss.mean()
+    if use_sample_weights:
+        sample_weights = einops.repeat(batch.sample_weights, "b -> b im", im=y.shape[1])
+        ind_w_loss = sample_weights * ind_loss
+        loss = (sample_weights[~nan_mask] * ind_loss_ravel).mean()
+        # loss = ind_w_loss.mean()
     else:
         ind_w_loss = None
-        loss = ind_loss.mean()
+        loss = ind_loss_ravel.mean()
+        # loss = ind_loss.mean()
 
     return BatchResult(
-        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss
+        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss, nan_mask
     )
 
 
 def _save_metrics(
     batch_result: BatchResult,
     metrics: dict[str, np.ndarray[float]],
-    run_config: RunConfig,
+    use_sample_weights: bool,
     epoch_ix: int,
     result_type: str,
 ):
@@ -818,24 +874,28 @@ def _save_metrics(
     mean_sigma_hist_key = f"mean_sigma_hist_{result_type}"
 
     # Save metrics
-    metrics[loss_hist_key][epoch_ix] += batch_result.ind_loss.mean(dim=1).sum().item()
+    # Note: This is saved per record, so need to divide by the number of records
+    # at the end of the epoch.
+    metrics[loss_hist_key][epoch_ix] += (
+        batch_result.ind_loss.nanmean(dim=1).sum().item()
+    )
     metrics[mse_hist_key][epoch_ix] += (
         F.mse_loss(
             batch_result.pred_mean,
-            batch_result.batch.y.to(run_config.device),
+            batch_result.batch.y,
             reduction="none",
         )
-        .mean(dim=1)
+        .nanmean(dim=1)
         .sum()
         .item()
     )
     metrics[mean_sigma_hist_key][epoch_ix] += (
-        batch_result.pred_std.mean(dim=1).sum().item()
+        batch_result.pred_std.nanmean(dim=1).sum().item()
     )
 
-    if run_config.use_sample_weights:
+    if use_sample_weights:
         metrics[w_loss_hist_key][epoch_ix] += (
-            batch_result.ind_w_loss.mean(dim=1).sum().item()
+            batch_result.ind_w_loss.nanmean(dim=1).sum().item()
         )
 
     return metrics
@@ -946,3 +1006,77 @@ def get_vs30_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFr
     ).astype(np.float16)
 
     return record_info_df
+
+
+def run_predictions_dir(
+    model_dir: Path, input_df: pd.DataFrame, device: str
+) -> pd.DataFrame:
+    """
+    Run predictions using the model stored in the given directory.
+
+    Parameters
+    ----------
+    model_dir : Path
+        Directory containing the model files.
+    input_df : pd.DataFrame
+        DataFrame containing the input features for the model.
+    device : str
+        Device to run the model on, e.g., 'cpu' or 'cuda'.
+    """
+    # Load the model and run config
+    run_config = RunConfig.from_yaml(model_dir / "run_config.yaml")
+    model = torch.load(
+        model_dir / "model.pt", weights_only=False, map_location=torch.device(device)
+    )
+    return run_predictions(model, run_config, input_df, device)
+
+
+def run_predictions(
+    model: torch.nn.Module,
+    run_config: RunConfig,
+    input_df: pd.DataFrame,
+    device: str,
+) -> pd.DataFrame:
+    """
+    Run predictions using the given model.
+
+    Parameters
+    ----------
+    model_dir : Path
+        Directory containing the model files.
+    input_df : pd.DataFrame
+        DataFrame containing the input features for the model.
+    device : str
+        Device to run the model on, e.g., 'cpu' or 'cuda'.
+    """
+    # Pre-process the input DataFrame
+    pre_site_df = preprocessing.pre_process_site_features(
+        input_df, run_config.site_inputs
+    )
+    pre_source_df = preprocessing.pre_process_source_features(
+        input_df, run_config.source_inputs
+    )
+    pre_source_site_df = preprocessing.pre_process_event_site_features(
+        input_df, run_config.source_to_site_inputs, run_config.max_rrup
+    )
+    pre_input_df = pd.concat([pre_site_df, pre_source_df, pre_source_site_df], axis=1)
+    X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
+
+    model.eval()
+    with torch.no_grad():
+        pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+        pred_std = torch.exp(pred_ln_std).cpu().numpy()
+        pred_mean = pred_mean.cpu().numpy()
+
+    if run_config.scale_ims:
+        pred_mean, pred_std = revert_im_scaling(pred_mean, run_config, pred_std)
+
+    pred_mean_df = pd.DataFrame(
+        data=pred_mean, columns=run_config.pred_mean_keys, index=input_df.index
+    )
+    pred_std_df = pd.DataFrame(
+        data=pred_std, columns=run_config.pred_std_keys, index=input_df.index
+    )
+    pred_df = pd.concat([input_df, pred_mean_df, pred_std_df], axis=1)
+
+    return pred_df

@@ -1,10 +1,10 @@
 seed: 42
 
 rel_imdb_ffp: nn_gmm/20250606_CS200m_imdb.db
+rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
-extra_basin_sites: False
 
 im_set: pSA
 scale_ims: True
@@ -47,13 +47,12 @@ total_max_weight: 5.0
 
 n_epochs: 100
 batch_size: 1024
-learning_rate: 0.001
+
 
 model:
   units: [32, 32, 64]
   use_batch_norm: True
   activation: relu
-  dropout_rate: 0.0
   l2_reg: 0.0001
 
 
