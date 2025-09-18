@@ -1,3 +1,4 @@
+import time
 import logging
 import shutil
 from pathlib import Path
@@ -124,9 +125,10 @@ def train_cv(
     base_out_dir.mkdir()
 
     log_ffp = base_out_dir / "nn_train_cv.log"
-    nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
+    logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
     print("Writing logs to:", log_ffp)
 
+    start = time.time()
     nng.train_cv(
         run_config,
         n_event_folds,
@@ -138,6 +140,7 @@ def train_cv(
         run_notebook=run_notebook,
         remove_cv_results=remove_cv_results,
     )
+    logger.info(f"Took: {time.time() - start} to complete CV model training.")
 
 
 @app.command("run-mera")

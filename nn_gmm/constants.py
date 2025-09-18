@@ -23,6 +23,7 @@ class TectonicType(StrEnum):
 
 
 
+
 GMM_MAPPING = {
     oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
     oqw.constants.TectType.VOLCANIC: oqw.constants.GMM.Br_13,

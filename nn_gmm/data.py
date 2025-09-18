@@ -132,7 +132,8 @@ class CustomDataLoader:
         self.i += self.batch_size
 
         # Get, convert and return batch
-        return self.dataset.get_batch(batch_ind)
+        batch = self.dataset.get_batch(batch_ind) 
+        return batch
 
 
 class BaseIMDBDataset(BaseDataset):
@@ -221,7 +222,7 @@ class BaseIMDBDataset(BaseDataset):
         self._im_data = np.log(self._im_data)
 
         if run_config.scale_ims:
-            logger.info("Scaling IM data, shape {self._im_data.shape}")
+            logger.info(f"Scaling IM data, shape {self._im_data.shape}")
             # Compute scale parameters
             if is_train:
                 logger.info("Calculating mean and std for IM data")

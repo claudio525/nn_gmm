@@ -750,7 +750,7 @@ def train(
         ):
             optimizer.zero_grad()
 
-            cur_bresult = _get_batch_result(cur_batch, model, use_sample_weights)
+            cur_bresult = _get_batch_result(cur_batch, model, use_sample_weights, has_nan=False)
 
             cur_bresult.loss.backward()
             optimizer.step()
@@ -770,7 +770,7 @@ def train(
             )
             n_samples += cur_batch.n_samples
 
-        logging.debug(
+        logger.debug(
             f"Gradient Norm: {np.mean(grad_norms):.4f} ± {np.std(grad_norms):.4f}, "
             f"Max: {np.max(grad_norms):.4f}, Min: {np.min(grad_norms):.4f}"
         )
@@ -787,7 +787,7 @@ def train(
             with torch.no_grad():
                 for cur_batch in val_dataloader:
                     cur_bresult = _get_batch_result(
-                        cur_batch, model, use_sample_weights
+                        cur_batch, model, use_sample_weights, has_nan=False
                     )
 
                     metrics = _save_metrics(
@@ -824,39 +824,69 @@ def train(
 
 
 def _get_batch_result(
-    batch: data.BaseBatchData, model: nn.Module, use_sample_weights: bool
+    batch: data.BaseBatchData, model: nn.Module, use_sample_weights: bool, has_nan: bool = False
 ) -> BatchResult:
-    X, y = batch.X, batch.y
+    """
+    Get the batch result for the given batch and model
 
-    nan_mask = torch.isnan(y)
+    Parameters
+    ----------
+    batch : data.BaseBatchData
+        The batch data
+    model : nn.Module
+        The model to use
+    use_sample_weights : bool
+        Whether to use sample weights or not
+    has_nan : bool, optional
+        Whether the batch has NaN values in the target variable
+    """
+    X, y = batch.X, batch.y
 
     pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
     pred_std = torch.exp(pred_ln_std)
 
-    ind_loss = torch.full_like(y, torch.nan)
-    ind_loss_ravel = F.gaussian_nll_loss(
-        pred_mean[~nan_mask],
-        y[~nan_mask],
-        pred_std[~nan_mask] ** 2,
-        reduction="none",
-    )
-    ind_loss[~nan_mask] = ind_loss_ravel
+    if has_nan:
+        nan_mask = torch.isnan(y)
 
-    if (nan_count := ind_loss_ravel.isnan().sum()) > 0:
-        logger.warning(f"Loss has {nan_count} NaN values!!")
 
-    if use_sample_weights:
-        sample_weights = einops.repeat(batch.sample_weights, "b -> b im", im=y.shape[1])
-        ind_w_loss = sample_weights * ind_loss
-        loss = (sample_weights[~nan_mask] * ind_loss_ravel).mean()
-        # loss = ind_w_loss.mean()
+        ind_loss = torch.full_like(y, torch.nan)
+        ind_loss_ravel = F.gaussian_nll_loss(
+            pred_mean[~nan_mask],
+            y[~nan_mask],
+            pred_std[~nan_mask] ** 2,
+            reduction="none",
+        )
+        ind_loss[~nan_mask] = ind_loss_ravel
+
+        if (nan_count := ind_loss_ravel.isnan().sum()) > 0:
+            logger.warning(f"Loss has {nan_count} NaN values!!")
+
+        if use_sample_weights:
+            sample_weights = einops.repeat(batch.sample_weights, "b -> b im", im=y.shape[1])
+            ind_w_loss = sample_weights * ind_loss
+            loss = (sample_weights[~nan_mask] * ind_loss_ravel).mean()
+        else:
+            ind_w_loss = None
+            loss = ind_loss_ravel.mean()
     else:
-        ind_w_loss = None
-        loss = ind_loss_ravel.mean()
-        # loss = ind_loss.mean()
+        ind_loss = F.gaussian_nll_loss(
+            pred_mean,
+            y,
+            pred_std**2,
+            reduction="none",
+        )
+        if (nan_count := ind_loss.isnan().sum()) > 0:
+            logger.warning(f"Loss has {nan_count} NaN values!!")
+
+        if use_sample_weights:
+            ind_w_loss = ind_loss * batch.sample_weights[:, None]
+            loss = ind_w_loss.mean()
+        else:
+            ind_w_loss = None
+            loss = ind_loss.mean()
 
     return BatchResult(
-        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss, nan_mask
+        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss, nan_mask if has_nan else None
     )
 
 

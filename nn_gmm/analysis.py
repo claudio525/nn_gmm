@@ -7,48 +7,77 @@ import pandas as pd
 
 import mera
 
+from . import constants
+from .empdb import EmpiricalDB
 from .imdb import IMDB
 from . import nn_gmm
 
 logger = logging.getLogger(__name__)
 
 
-def get_nn_residuals(
-    model_dir: Path, record_info_df: pd.DataFrame = None
+def get_nn_sim_residuals(
+    model_dir: Path,
+    pred_df: pd.DataFrame = None,
+    sim_df: pd.DataFrame = None,
+    record_info_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
-    """Get the residuals of the validation results"""
+    """
+    Get the residuals of the specified NN model validation results
+    """
     run_config = nn_gmm.RunConfig.from_yaml(model_dir / "run_config.yaml")
 
-    val_pred_df = pd.read_parquet(model_dir / "val_results.parquet").sort_index()
-    val_record_int_ids = val_pred_df.index.values.astype(int)
+    if pred_df is None:
+        pred_df = pd.read_parquet(model_dir / "val_results.parquet")
+    pred_df = pred_df.sort_index()
+    val_record_int_ids = pred_df.index.values.astype(int)
 
-    assert record_info_df is None or val_record_int_ids.index.equals(
-        record_info_df.index
-    )
+    assert record_info_df is None or np.all(val_record_int_ids == record_info_df.index.values)
+    assert sim_df is None or np.all(val_record_int_ids == sim_df.index.values)
 
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
-        val_sim_df = imdb.get_im_data_tmp_table(
-            run_config.ims, val_record_int_ids
-        ).sort_index()
-        record_info_df = (
-            imdb.get_record_info_df(record_int_ids=val_record_int_ids)
-            if record_info_df is None
-            else record_info_df
-        ).sort_index()
+        if sim_df is None:
+            sim_df = imdb.get_im_data_tmp_table(
+                run_config.ims, val_record_int_ids
+            )
+        if record_info_df is None:
+            record_info_df = imdb.get_record_info_df(
+                record_int_ids=val_record_int_ids
+            )
 
-    assert val_sim_df.index.equals(val_pred_df.index)
+    record_info_df = record_info_df.sort_index()
+    sim_df = sim_df.sort_index()
+    assert sim_df.index.equals(pred_df.index)
 
     res_df = pd.DataFrame(
-        data=np.log(val_sim_df[run_config.ims].values)
-        - val_pred_df[run_config.pred_mean_keys].values,
-        index=val_pred_df.index,
+        data=np.log(sim_df[run_config.ims].values)
+        - pred_df[run_config.pred_mean_keys].values,
+        index=pred_df.index,
         columns=run_config.ims,
     )
 
     res_df["event_int_id"] = record_info_df.loc[res_df.index, "event_int_id"]
     res_df["site_int_id"] = record_info_df.loc[res_df.index, "site_int_id"]
+    res_df["cv_iter"] = pred_df.loc[res_df.index, "cv_iter"]
 
-    return res_df
+    return res_df, pred_df, sim_df, record_info_df
+
+
+def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
+    """
+    Get the residuals of the empirical GMM with respect to
+    the specified simulation results.
+    """
+    with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
+        val_emp_df = empdb.get_gm_params_tmp_table(sim_df.index.values.astype(int))
+
+    emp_res_df = pd.DataFrame(
+        data=np.log(sim_df[constants.PSA_KEYS].values)
+        - val_emp_df[constants.GMM_PSA_MEAN_KEYS].values,
+        index=val_emp_df.index,
+        columns=constants.PSA_KEYS,
+    )
+
+    return emp_res_df
 
 
 def run_nn_mera(
@@ -57,7 +86,7 @@ def run_nn_mera(
     run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
-    res_df = get_nn_residuals(result_dir)
+    res_df, *_ = get_nn_sim_residuals(result_dir)
 
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)

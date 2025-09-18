@@ -15,6 +15,7 @@ def get_pSA_bias_residual_fig(
     main_wspace: float = 0.1,
     bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
+    dpi: int = None,
 ):
     """
     Create a figure for pSA bias and residual standard deviation plots.
@@ -37,7 +38,7 @@ def get_pSA_bias_residual_fig(
     ax2 : matplotlib.axes.Axes
         Axis for the residual standard deviation plot.
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
 
     ax1.set_xlabel("Vibration Period, T(s)")
     ax1.set_ylabel("Model bias")

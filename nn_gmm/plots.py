@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
+from typing import NamedTuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -12,6 +14,7 @@ from . import emp_gmm
 from . import analysis
 from . import constants
 from . import data
+from . import plot_utils
 
 
 logger = logging.getLogger(__name__)
@@ -65,9 +68,7 @@ def magnitude_trend_plot(
     if cv:
         cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
         pred_dfs = {
-            cur_dir.stem: nn_gmm.run_predictions_dir(
-                cur_dir, input_df, device=device
-            )
+            cur_dir.stem: nn_gmm.run_predictions_dir(cur_dir, input_df, device=device)
             for cur_dir in cv_dirs
         }
         mean_pred_values = np.stack(
@@ -283,9 +284,7 @@ def rrup_trend_plot(
     if cv:
         cv_dirs = [d for d in result_dir.glob("cv_*") if d.is_dir()]
         pred_dfs = {
-            cur_dir.stem: nn_gmm.run_predictions_dir(
-                cur_dir, input_df, device=device
-            )
+            cur_dir.stem: nn_gmm.run_predictions_dir(cur_dir, input_df, device=device)
             for cur_dir in cv_dirs
         }
         mean_pred_values = np.stack(
@@ -369,8 +368,10 @@ def rrup_trend_plot(
                 label="NN-GMM Average Mean",
                 linewidth=major_line_width,
             )
-        else: 
-            ax.plot(pred_df["rrup"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM")
+        else:
+            ax.plot(
+                pred_df["rrup"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM"
+            )
             ax.plot(
                 pred_df["rrup"],
                 np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
@@ -443,3 +444,215 @@ def rrup_trend_plot(
     fig.tight_layout()
 
     return fig, axs
+
+
+class BiasStdPlot:
+
+    def __init__(
+        self,
+        im_set: str = "pSA",
+        figsize: tuple = (16, 6),
+        bias_ylim: tuple = (-0.8, 0.8),
+        std_ylim: tuple = (0, 0.8),
+        dpi: int = 300,
+    ):
+        if im_set == "pSA":
+            self.fig, self.ax1, self.ax3 = plot_utils.get_pSA_bias_residual_fig(
+                figsize=figsize,
+                bias_y_axis_limits=bias_ylim,
+                std_y_axis_limits=std_ylim,
+                dpi=dpi,
+            )
+            self.ims = constants.PSA_KEYS
+        else:
+            raise NotImplementedError()
+
+    def add_results(self, res_df: pd.DataFrame, **plt_kwargs):
+        """Adds NN-GMM results to the plot"""
+        model_bias, res_std = res_df.mean(axis=0), res_df[self.ims].std(axis=0)
+
+        self.ax1.plot(
+            constants.PSA_PERIODS,
+            model_bias[constants.PSA_KEYS].values,
+            **plt_kwargs,
+        )
+        self.ax3.plot(
+            constants.PSA_PERIODS,
+            res_std[constants.PSA_KEYS].values,
+            **plt_kwargs,
+        )
+
+        return self
+
+    def add_nn_gmm_ind_cv_results(
+        self,
+        res_df: pd.DataFrame,
+        ims: np.ndarray,
+        **plt_kwargs,
+    ):
+        """Adds individual NN-GMM CV results to the plot"""
+        cv_bias_df = res_df.groupby("cv_iter")[ims].mean()
+
+        self.ax1.plot(
+            constants.PSA_PERIODS,
+            cv_bias_df[constants.PSA_KEYS].T.values,
+            **plt_kwargs,
+        )
+
+        cv_res_std_df = res_df.groupby("cv_iter")[ims].std()
+        self.ax3.plot(
+            constants.PSA_PERIODS,
+            cv_res_std_df[constants.PSA_KEYS].T.values,
+            **plt_kwargs,
+        )
+
+        return self
+
+    def add_nn_gmm_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
+        """Adds NN-GMM CV band to the plot"""
+        model_bias, res_std = res_df.mean(axis=0), res_df[self.ims].std(axis=0)
+
+        cv_bias_std = res_df.groupby("cv_iter")[self.ims].mean().std(axis=0)
+        self.ax1.fill_between(
+            constants.PSA_PERIODS,
+            model_bias[constants.PSA_KEYS].values
+            - cv_bias_std[constants.PSA_KEYS].values,
+            model_bias[constants.PSA_KEYS].values
+            + cv_bias_std[constants.PSA_KEYS].values,
+            **plt_kwargs,
+        )
+
+        cv_res_std_std = res_df.groupby("cv_iter")[self.ims].std().std(axis=0)
+        self.ax3.fill_between(
+            constants.PSA_PERIODS,
+            res_std[constants.PSA_KEYS].values
+            - cv_res_std_std[constants.PSA_KEYS].values,
+            res_std[constants.PSA_KEYS].values
+            + cv_res_std_std[constants.PSA_KEYS].values,
+            **plt_kwargs,
+        )
+
+        return self
+
+    # def add_emp_gmm_results(self, emp_res_df: pd.DataFrame, **plt_kwargs):
+    #     """Adds empirical GMM results to the plot"""
+    #     emp_bias, emp_std = emp_res_df[constants.PSA_KEYS].mean(axis=0), emp_res_df[
+    #         constants.PSA_KEYS
+    #     ].std(axis=0)
+
+    #     self.ax1.plot(constants.PSA_PERIODS, emp_bias.values, **plt_kwargs)
+    #     self.ax3.plot(constants.PSA_PERIODS, emp_std.values, **plt_kwargs)
+
+    #     return self
+
+    def add_legend(self, ax: plt.Axes = None):
+        if ax is None:
+            self.ax1.legend()
+        else:
+            ax.legend()
+        return self
+
+
+class GroupedBiasStdPlot(BiasStdPlot):
+
+    def __init__(
+        self,
+        group_key: str,
+        group_bin_edges: list[float],
+        group_labels: list[str],
+        group_colors: list,
+        im_set="pSA",
+        figsize=(16, 6),
+        bias_ylim=(-0.8, 0.8),
+        std_ylim=(0, 0.8),
+        dpi=300,
+    ):
+        super().__init__(im_set, figsize, bias_ylim, std_ylim, dpi)
+
+        self.group_key = group_key
+        self.group_bin_key = f"{group_key}_bin"
+        self.group_bin_edges = group_bin_edges
+        self.group_labels = group_labels
+        self.group_colors = group_colors
+
+    def add_grouped_results(self, res_df: pd.DataFrame, **plt_kwargs):
+        """Adds grouped NN-GMM results to the plot"""
+        res_df[self.group_bin_key] = pd.cut(
+            res_df[self.group_key],
+            bins=self.group_bin_edges,
+            labels=self.group_labels,
+            include_lowest=True,
+        )
+
+        # Bias
+        for i, cur_bin_label in enumerate(self.group_labels):
+            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
+            self.ax1.plot(
+                constants.PSA_PERIODS,
+                cur_model_bias[constants.PSA_KEYS].values,
+                c=self.group_colors[i],
+                **plt_kwargs,
+                label=f"{cur_bin_label}, N={len(cur_record_ids)}",
+            )
+
+        # Std
+        for i, cur_bin_label in enumerate(self.group_labels):
+            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
+            self.ax3.plot(
+                constants.PSA_PERIODS,
+                cur_res_std[constants.PSA_KEYS].values,
+                c=self.group_colors[i],
+                **plt_kwargs,
+            )
+
+        return self
+    
+    def add_nn_gmm_grouped_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
+        """Adds grouped NN-GMM CV band to the plot"""
+        res_df[self.group_bin_key] = pd.cut(
+            res_df[self.group_key],
+            bins=self.group_bin_edges,
+            labels=self.group_labels,
+            include_lowest=True,
+        )
+
+        # Bias
+        for i, cur_bin_label in enumerate(self.group_labels):
+            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
+            cur_cv_bias_std = res_df.loc[cur_record_ids].groupby("cv_iter")[
+                constants.PSA_KEYS
+            ].mean().std(axis=0)
+
+            self.ax1.fill_between(
+                constants.PSA_PERIODS,
+                cur_model_bias[constants.PSA_KEYS].values
+                - cur_cv_bias_std[constants.PSA_KEYS].values,
+                cur_model_bias[constants.PSA_KEYS].values
+                + cur_cv_bias_std[constants.PSA_KEYS].values,
+                color=self.group_colors[i],
+                **plt_kwargs,
+            )
+
+        # Std
+        for i, cur_bin_label in enumerate(self.group_labels):
+            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
+            cur_cv_res_std_std = res_df.loc[cur_record_ids].groupby("cv_iter")[
+                constants.PSA_KEYS
+            ].std().std(axis=0)
+
+            self.ax3.fill_between(
+                constants.PSA_PERIODS,
+                cur_res_std[constants.PSA_KEYS].values
+                - cur_cv_res_std_std[constants.PSA_KEYS].values,
+                cur_res_std[constants.PSA_KEYS].values
+                + cur_cv_res_std_std[constants.PSA_KEYS].values,
+                color=self.group_colors[i],
+                **plt_kwargs,
+            )
+
+        return self
+
