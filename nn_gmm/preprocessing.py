@@ -9,7 +9,7 @@ from . import constants
 
 logger = logging.getLogger(__name__)
 
-def pre_process_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str]):
+def preprocess_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str]):
     """
     Pre-process the site features in the site DataFrame.
     Does not modify the original DataFrame.
@@ -43,7 +43,7 @@ def pre_process_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence
     return pre_site_df
 
 
-def pre_process_source_features(
+def preprocess_source_features(
     source_df: pd.DataFrame, source_feature_keys: Sequence[str]
 ):
     """
@@ -84,7 +84,7 @@ def pre_process_source_features(
     return pre_source_df
 
 
-def pre_process_event_site_features(
+def preprocess_event_site_features(
     site_event_df: pd.DataFrame, event_site_feature_keys: Sequence[str], max_rrup: float
 ):
     pre_site_event_df = site_event_df.copy()

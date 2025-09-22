@@ -162,7 +162,7 @@ def run_fine_tune(
     # Pre-processing
     site_df = obs_data.site_df.copy()
     site_df[obsd.ObservedData.SiteColEnums.Z1P0] /= 1000
-    pre_site_df = pre.pre_process_site_features(site_df, tune_config.base_run_config.site_inputs)
+    pre_site_df = pre.preprocess_site_features(site_df, tune_config.base_run_config.site_inputs)
     event_df = obs_data.event_df.copy().rename(
         columns={
             obsd.ObservedData.EventColEnums.MAG: "magnitude",
@@ -170,8 +170,8 @@ def run_fine_tune(
             obsd.ObservedData.EventColEnums.ZBOR: "dbottom",
         }
     )
-    pre_source_df = pre.pre_process_source_features(event_df, tune_config.base_run_config.source_inputs)
-    pre_event_site_df = pre.pre_process_event_site_features(
+    pre_source_df = pre.preprocess_source_features(event_df, tune_config.base_run_config.source_inputs)
+    pre_event_site_df = pre.preprocess_event_site_features(
         obs_data.record_df, tune_config.base_run_config.source_to_site_inputs, tune_config.base_run_config.max_rrup
     )
 

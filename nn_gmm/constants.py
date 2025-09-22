@@ -1,3 +1,4 @@
+import os
 from enum import StrEnum
 from pathlib import Path
 import numpy as np
@@ -213,3 +214,6 @@ COOK_STRAIT_REGION = [172.639, 176.35, -42.427, -40.475]
 WELLINGTON_REGION = [174.74, 175, -41.44, -41.18]
 
 BASIN_BOUNDARIES_DIR = Path(__file__).parent / "resources/basin_boundaries"
+DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-land-districts-SHP/nz-land-districts.shp"
+AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
+NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"

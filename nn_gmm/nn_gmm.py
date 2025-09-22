@@ -506,15 +506,15 @@ def run_model_training(
         assert not record_info_df["sample_weight"].isna().any()
 
     # Run preprocessing
-    pre_site_df = preprocessing.pre_process_site_features(
+    pre_site_df = preprocessing.preprocess_site_features(
         site_df, run_config.site_inputs
     )
 
-    pre_source_df = preprocessing.pre_process_source_features(
+    pre_source_df = preprocessing.preprocess_source_features(
         source_df, run_config.source_inputs
     )
 
-    pre_site_event_df = preprocessing.pre_process_event_site_features(
+    pre_site_event_df = preprocessing.preprocess_event_site_features(
         site_event_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
 
@@ -737,7 +737,7 @@ def train(
 
     for cur_epoch_ix in range(n_epochs):
         if verbose:
-            logging.debug(f"Epoch: {cur_epoch_ix + 1}/{n_epochs}")
+            logger.debug(f"Epoch: {cur_epoch_ix + 1}/{n_epochs}")
 
         ### Training
         grad_norms = []
@@ -807,14 +807,14 @@ def train(
                 best_model_epoch = cur_epoch_ix
 
         if verbose:
-            logging.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
-            logging.info(
+            logger.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
+            logger.info(
                 f"Training\t"
                 f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
                 f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
             )
             if val_dataloader is not None:
-                logging.info(
+                logger.info(
                     f"Validation\t"
                     f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
                     f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
@@ -1080,13 +1080,13 @@ def run_predictions(
         Device to run the model on, e.g., 'cpu' or 'cuda'.
     """
     # Pre-process the input DataFrame
-    pre_site_df = preprocessing.pre_process_site_features(
+    pre_site_df = preprocessing.preprocess_site_features(
         input_df, run_config.site_inputs
     )
-    pre_source_df = preprocessing.pre_process_source_features(
+    pre_source_df = preprocessing.preprocess_source_features(
         input_df, run_config.source_inputs
     )
-    pre_source_site_df = preprocessing.pre_process_event_site_features(
+    pre_source_site_df = preprocessing.preprocess_event_site_features(
         input_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
     pre_input_df = pd.concat([pre_site_df, pre_source_df, pre_source_site_df], axis=1)

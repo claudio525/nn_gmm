@@ -59,19 +59,24 @@ def get_site_grid_level(site_ids: np.ndarray) -> int:
     return site_grid_level
 
 
-def setup_logging(log_file: Path = None, file_level=logging.DEBUG, enable_console: bool = True, console_level=logging.INFO):
+def setup_logging(
+    log_file: Path = None,
+    file_level=logging.DEBUG,
+    enable_console: bool = True,
+    console_level=logging.INFO,
+):
     # Create a logger
     logger = logging.getLogger()
     # Set logger to the lowest level of any handler
-    logger.setLevel(min(file_level, console_level))
+    logger.setLevel(logging.DEBUG)
 
     # Clear any existing handlers
     logger.handlers = []
 
     # Create file handler with its own level
     if log_file is not None:
-        file_handler = logging.FileHandler(log_file, mode='w')
-        file_handler.setLevel(file_level)  
+        file_handler = logging.FileHandler(log_file, mode="w")
+        file_handler.setLevel(file_level)
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
@@ -80,7 +85,7 @@ def setup_logging(log_file: Path = None, file_level=logging.DEBUG, enable_consol
     # Create console handler with its own level
     if enable_console:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(console_level)  
+        console_handler.setLevel(console_level)
         console_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
             # logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -184,9 +189,7 @@ def get_site_event_int_id(
     return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
 
 
-def get_fault(
-        nhm_flt_ffp: Path, fault_name: str
-) -> sources.Fault:
+def get_fault(nhm_flt_ffp: Path, fault_name: str) -> sources.Fault:
     """
     Get a fault object from the NHM fault definitions.
 
@@ -205,8 +208,9 @@ def get_fault(
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     if fault_name not in flt_definitions:
         raise ValueError(f"Fault '{fault_name}' not found in NHM definitions.")
-    
+
     return sha.nshm_2010.utils.get_fault_objects(flt_definitions[fault_name])
+
 
 def get_faults(nhm_flt_ffp: Path) -> dict[str, sources.Fault]:
     """
@@ -264,14 +268,33 @@ def get_pSA_period(im: str):
 
 def add_basin_column(site_df: pd.DataFrame) -> pd.DataFrame:
     """Adds a basin column to the given site dataframe"""
-    basin_boundary_files = [constants.BASIN_BOUNDARIES_DIR / f for f in constants.BASIN_BOUNDARIES_DIR.iterdir() if f.name.endswith(".txt")]
-    assert len(basin_boundary_files) > 0, f"No basin boundary files found in {constants.BASIN_BOUNDARIES_DIR}"
-    basin_boundaries = {f.stem.split("_", maxsplit=1)[0]: np.loadtxt(f) for f in basin_boundary_files}
+    basin_boundary_files = [
+        constants.BASIN_BOUNDARIES_DIR / f
+        for f in constants.BASIN_BOUNDARIES_DIR.iterdir()
+        if f.name.endswith(".txt")
+    ]
+    assert (
+        len(basin_boundary_files) > 0
+    ), f"No basin boundary files found in {constants.BASIN_BOUNDARIES_DIR}"
+    basin_boundaries = {
+        f.stem.split("_", maxsplit=1)[0]: np.loadtxt(f) for f in basin_boundary_files
+    }
 
     site_df["basin"] = None
     for basin_name, boundary in basin_boundaries.items():
         mask = pip.is_inside_postgis_parallel(site_df[["lon", "lat"]].values, boundary)
         site_df.loc[mask, "basin"] = basin_name
 
+    # Combine Banks Peninsula with Canterbury
+    site_df.loc[site_df["basin"] == "BanksPeninsulaVolcanics", "basin"] = "Canterbury"
+
+    # Replace None values with NiB (Not in Basin)
+    site_df["basin"] = site_df["basin"].fillna("NiB")
+
     site_df = site_df.astype({"basin": "category"})
     return site_df
+
+
+
+
+

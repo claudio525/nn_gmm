@@ -104,10 +104,13 @@ class CustomDataLoader:
     https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
     """
 
-    def __init__(self, dataset: BaseDataset, batch_size: int, shuffle: bool):
+    def __init__(self, dataset: BaseDataset, batch_size: int, shuffle: bool, use_torch: bool = True, device: torch.device = "cpu"):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
+
+        self.use_torch = use_torch 
+        self.device = device
 
         # Calculate number of batches
         self.n_samples = len(self.dataset)
@@ -115,9 +118,11 @@ class CustomDataLoader:
 
     def __iter__(self):
         if self.shuffle:
-            self.indices = np.random.permutation(self.n_samples)
+            # self.indices = np.random.permutation(self.n_samples)
+            self.indices = torch.randperm(self.n_samples, device=self.device) if self.use_torch else np.random.permutation(self.n_samples)
         else:
-            self.indices = np.arange(self.n_samples)
+            # self.indices = np.arange(self.n_samples)
+            self.indices = torch.arange(self.n_samples, device=self.device) if self.use_torch else np.arange(self.n_samples)
         self.i = 0
         return self
 
@@ -174,6 +179,7 @@ class BaseIMDBDataset(BaseDataset):
         super().__init__()
 
         self.ims = ims
+        self.run_config = run_config
         self.record_int_ids = np.sort(record_int_ids)
 
         # Check required memory
@@ -351,6 +357,8 @@ class IMDBDataset(BaseIMDBDataset):
             run_config,
             is_train,
         )
+
+
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """
