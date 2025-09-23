@@ -49,10 +49,12 @@ class SimBatchData(BaseBatchData):
         record_int_ids: np.ndarray,
         X: torch.Tensor,
         y: torch.Tensor,
+        X_loc: torch.Tensor | None = None,
         sample_weights: torch.Tensor | None = None,
     ):
         self.y = y
         self.X = X
+        self.X_loc = X_loc
         self.sample_weights = sample_weights
 
         self.record_int_ids = record_int_ids
@@ -64,7 +66,8 @@ class SimBatchData(BaseBatchData):
     def __repr__(self):
         return (
             f"{self.__class__.__name__}(record_int_ids={self.record_int_ids.shape}, X={self.X.shape}, "
-            f"y={self.y.shape}, sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
+            f"y={self.y.shape}, X_loc={self.X_loc.shape if self.X_loc is not None else None}, "
+            f"sample_weights={self.sample_weights.shape if self.sample_weights is not None else None})"
         )
 
 
@@ -104,12 +107,19 @@ class CustomDataLoader:
     https://discuss.pytorch.org/t/dataloader-much-slower-than-manual-batching/27014/6
     """
 
-    def __init__(self, dataset: BaseDataset, batch_size: int, shuffle: bool, use_torch: bool = True, device: torch.device = "cpu"):
+    def __init__(
+        self,
+        dataset: BaseDataset,
+        batch_size: int,
+        shuffle: bool,
+        use_torch: bool = True,
+        device: torch.device = "cpu",
+    ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
 
-        self.use_torch = use_torch 
+        self.use_torch = use_torch
         self.device = device
 
         # Calculate number of batches
@@ -119,10 +129,18 @@ class CustomDataLoader:
     def __iter__(self):
         if self.shuffle:
             # self.indices = np.random.permutation(self.n_samples)
-            self.indices = torch.randperm(self.n_samples, device=self.device) if self.use_torch else np.random.permutation(self.n_samples)
+            self.indices = (
+                torch.randperm(self.n_samples, device=self.device)
+                if self.use_torch
+                else np.random.permutation(self.n_samples)
+            )
         else:
             # self.indices = np.arange(self.n_samples)
-            self.indices = torch.arange(self.n_samples, device=self.device) if self.use_torch else np.arange(self.n_samples)
+            self.indices = (
+                torch.arange(self.n_samples, device=self.device)
+                if self.use_torch
+                else np.arange(self.n_samples)
+            )
         self.i = 0
         return self
 
@@ -137,7 +155,7 @@ class CustomDataLoader:
         self.i += self.batch_size
 
         # Get, convert and return batch
-        batch = self.dataset.get_batch(batch_ind) 
+        batch = self.dataset.get_batch(batch_ind)
         return batch
 
 
@@ -291,11 +309,20 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             self.source_df.values, device=run_config.device, dtype=torch.float32
         )
         self._site_data_tensor = torch.tensor(
-            self.site_df.values, device=run_config.device, dtype=torch.float32
+            self.site_df[self.run_config.site_inputs].values,
+            device=run_config.device,
+            dtype=torch.float32,
         )
         self._site_event_tensor = torch.tensor(
             self.site_event_df.values, device=run_config.device, dtype=torch.float32
         )
+
+        if self.run_config.using_loc_model:
+            self._loc_data_tensor = torch.tensor(
+                self.site_df[self.run_config.loc_model_inputs].values,
+                device=run_config.device,
+                dtype=torch.float32,
+            )
 
         self._sample_weight_tensor = torch.tensor(
             self.record_info_df["sample_weight"].values,
@@ -312,11 +339,9 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         """
         y = self._im_data_tensor[indices, :]
 
-        site_data = self._site_data_tensor[self._index_to_site_ix[indices], :]
-        source_data = self._source_data_tensor[self._index_to_source_ix[indices], :]
-        site_event_data = self._site_event_tensor[
-            self._index_to_site_event_ix[indices], :
-        ]
+        site_data = torch.atleast_2d(self._site_data_tensor[self._index_to_site_ix[indices], :])
+        source_data = torch.atleast_2d(self._source_data_tensor[self._index_to_source_ix[indices], :])
+        site_event_data = torch.atleast_2d(self._site_event_tensor[self._index_to_site_event_ix[indices], :])
 
         X = torch.cat(
             (
@@ -327,8 +352,16 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             dim=1,
         )
 
+        X_loc = None
+        if self.run_config.using_loc_model:
+            X_loc = torch.atleast_2d(self._loc_data_tensor[self._index_to_site_ix[indices], :])
+
         return SimBatchData(
-            self.record_int_ids[indices], X, y, self._sample_weight_tensor[indices]
+            self.record_int_ids[indices],
+            X,
+            y,
+            X_loc=X_loc,
+            sample_weights=self._sample_weight_tensor[indices],
         )
 
 
@@ -357,8 +390,6 @@ class IMDBDataset(BaseIMDBDataset):
             run_config,
             is_train,
         )
-
-
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """

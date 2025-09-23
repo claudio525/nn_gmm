@@ -1,3 +1,4 @@
+import functools
 import time
 import os
 import logging
@@ -67,6 +68,9 @@ class RunConfig:
     source_to_site_inputs: list[str]
     """Model source to site inputs"""
 
+    loc_model_inputs: list[str] | None
+    """Location model inputs"""
+
     apply_mag_sample_weighting: bool
     """Whether to apply magnitude-based sample weighting"""
 
@@ -99,6 +103,9 @@ class RunConfig:
 
     model_config: "ModelConfig"
     """Model configuration"""
+
+    rel_loc_model_dir: str | None
+    """Relative path to the location model file."""
 
     rel_results_dir: str
     """Relative path to the results directory."""
@@ -135,6 +142,18 @@ class RunConfig:
     def results_dir(self) -> Path:
         """Absolute path to the results directory."""
         return Path(os.environ["wdata"]) / self.rel_results_dir
+
+    @property
+    def loc_model_dir(self) -> Path | None:
+        """Absolute path to the location model file."""
+        if self.rel_loc_model_dir is not None:
+            return Path(os.environ["wdata"]) / self.rel_loc_model_dir
+        return None
+
+    @property
+    def using_loc_model(self) -> bool:
+        """Whether a location model is being used."""
+        return self.rel_loc_model_dir is not None
 
     @property
     def test_events(self) -> np.ndarray:
@@ -223,6 +242,11 @@ class RunConfig:
             "site_inputs": list(self.site_inputs),
             "source_inputs": list(self.source_inputs),
             "source_to_site_inputs": list(self.source_to_site_inputs),
+            "loc_model_inputs": (
+                list(self.loc_model_inputs)
+                if self.loc_model_inputs is not None
+                else None
+            ),
             "apply_mag_sample_weighting": self.apply_mag_sample_weighting,
             "max_mag_weight": float(self.max_mag_weight),
             "apply_rrup_sample_weighting": self.apply_rrup_sample_weighting,
@@ -233,6 +257,11 @@ class RunConfig:
             "batch_size": int(self.batch_size),
             "learning_rate": float(self.learning_rate),
             "model": ModelConfig.to_dict(self.model_config),
+            "rel_loc_model_dir": (
+                str(self.rel_loc_model_dir)
+                if self.rel_loc_model_dir is not None
+                else None
+            ),
             "rel_results_dir": str(self.rel_results_dir),
             "n_epochs": int(self.n_epochs),
         }
@@ -507,7 +536,9 @@ def run_model_training(
 
     # Run preprocessing
     pre_site_df = preprocessing.preprocess_site_features(
-        site_df, run_config.site_inputs
+        site_df,
+        run_config.site_inputs
+        + (run_config.loc_model_inputs if run_config.using_loc_model else []),
     )
 
     pre_source_df = preprocessing.preprocess_source_features(
@@ -563,13 +594,27 @@ def run_model_training(
         val_dataset, batch_size=run_config.batch_size, shuffle=False
     )
 
-    model = nn_gmm_modules.create_multi_mlp(
-        run_config.n_inputs,
-        run_config.model_config.units,
-        run_config.n_ims * 2,
-        run_config.model_config.activation,
+
+    model_fn = functools.partial(nn_gmm_modules.create_multi_mlp,
+        units=run_config.model_config.units,
+        n_outputs=run_config.n_ims * 2,
+        act_fn_str=run_config.model_config.activation,
         use_batch_norm=run_config.model_config.use_batch_norm,
     )
+
+    if run_config.using_loc_model:
+        loc_model = torch.load(
+            run_config.loc_model_dir / "loc_model.pt", weights_only=False, map_location=run_config.device
+        ).core_nn
+
+        core_model = model_fn(
+            n_inputs=run_config.n_inputs + loc_model[-1].out_features,
+        )
+
+        model = nn_gmm_modules.NNCombined(loc_model, core_model)
+    else:
+        model = model_fn(n_inputs=run_config.n_inputs)
+
     model.to(run_config.device)
 
     logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
@@ -670,7 +715,10 @@ def get_dataset_predictions(
     for cur_batch in tqdm(dataloader, desc="Predicting", disable=not verbose):
         model.eval()
         with torch.no_grad():
-            pred_mean, pred_ln_std = model(cur_batch.X).chunk(2, dim=-1)
+            if isinstance(model, nn_gmm_modules.NNCombined):
+                pred_mean, pred_ln_std = model(cur_batch.X, cur_batch.X_loc).chunk(2, dim=-1)
+            else:
+                pred_mean, pred_ln_std = model(cur_batch.X).chunk(2, dim=-1)
             pred_std = torch.exp(pred_ln_std).cpu().numpy(force=True)
             pred_mean = pred_mean.cpu().numpy(force=True)
 
@@ -750,7 +798,9 @@ def train(
         ):
             optimizer.zero_grad()
 
-            cur_bresult = _get_batch_result(cur_batch, model, use_sample_weights, has_nan=False)
+            cur_bresult = _get_batch_result(
+                cur_batch, model, use_sample_weights, has_nan=False
+            )
 
             cur_bresult.loss.backward()
             optimizer.step()
@@ -824,7 +874,10 @@ def train(
 
 
 def _get_batch_result(
-    batch: data.BaseBatchData, model: nn.Module, use_sample_weights: bool, has_nan: bool = False
+    batch: data.BaseBatchData,
+    model: nn.Module,
+    use_sample_weights: bool,
+    has_nan: bool = False,
 ) -> BatchResult:
     """
     Get the batch result for the given batch and model
@@ -840,19 +893,19 @@ def _get_batch_result(
     has_nan : bool, optional
         Whether the batch has NaN values in the target variable
     """
-    X, y = batch.X, batch.y
-
-    pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+    if isinstance(model, nn_gmm_modules.NNCombined):
+        pred_mean, pred_ln_std = model(batch.X, batch.X_loc).chunk(2, dim=-1)
+    else:
+        pred_mean, pred_ln_std = model(batch.X).chunk(2, dim=-1)  
     pred_std = torch.exp(pred_ln_std)
 
     if has_nan:
-        nan_mask = torch.isnan(y)
+        nan_mask = torch.isnan(batch.y)
 
-
-        ind_loss = torch.full_like(y, torch.nan)
+        ind_loss = torch.full_like(batch.y, torch.nan)
         ind_loss_ravel = F.gaussian_nll_loss(
             pred_mean[~nan_mask],
-            y[~nan_mask],
+            batch.y[~nan_mask],
             pred_std[~nan_mask] ** 2,
             reduction="none",
         )
@@ -862,7 +915,9 @@ def _get_batch_result(
             logger.warning(f"Loss has {nan_count} NaN values!!")
 
         if use_sample_weights:
-            sample_weights = einops.repeat(batch.sample_weights, "b -> b im", im=y.shape[1])
+            sample_weights = einops.repeat(
+                batch.sample_weights, "b -> b im", im=batch.y.shape[1]
+            )
             ind_w_loss = sample_weights * ind_loss
             loss = (sample_weights[~nan_mask] * ind_loss_ravel).mean()
         else:
@@ -871,7 +926,7 @@ def _get_batch_result(
     else:
         ind_loss = F.gaussian_nll_loss(
             pred_mean,
-            y,
+            batch.y,
             pred_std**2,
             reduction="none",
         )
@@ -886,7 +941,14 @@ def _get_batch_result(
             loss = ind_loss.mean()
 
     return BatchResult(
-        batch, pred_mean, pred_ln_std, pred_std, loss, ind_loss, ind_w_loss, nan_mask if has_nan else None
+        batch,
+        pred_mean,
+        pred_ln_std,
+        pred_std,
+        loss,
+        ind_loss,
+        ind_w_loss,
+        nan_mask if has_nan else None,
     )
 
 
@@ -1081,7 +1143,7 @@ def run_predictions(
     """
     # Pre-process the input DataFrame
     pre_site_df = preprocessing.preprocess_site_features(
-        input_df, run_config.site_inputs
+        input_df, run_config.site_inputs + (run_config.loc_model_inputs if run_config.using_loc_model else [])
     )
     pre_source_df = preprocessing.preprocess_source_features(
         input_df, run_config.source_inputs
@@ -1089,12 +1151,18 @@ def run_predictions(
     pre_source_site_df = preprocessing.preprocess_event_site_features(
         input_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
-    pre_input_df = pd.concat([pre_site_df, pre_source_df, pre_source_site_df], axis=1)
+    pre_input_df = pd.concat([pre_site_df[run_config.site_inputs], pre_source_df, pre_source_site_df], axis=1)
     X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
+
+    if run_config.using_loc_model:
+        X_loc = torch.from_numpy(pre_site_df[run_config.loc_model_inputs].values).to(dtype=torch.float32, device=device)
 
     model.eval()
     with torch.no_grad():
-        pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+        if isinstance(model, nn_gmm_modules.NNCombined):
+            pred_mean, pred_ln_std = model(X, X_loc).chunk(2, dim=-1)
+        else:
+            pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
         pred_std = torch.exp(pred_ln_std).cpu().numpy()
         pred_mean = pred_mean.cpu().numpy()
 

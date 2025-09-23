@@ -454,7 +454,7 @@ class BiasStdPlot:
         figsize: tuple = (16, 6),
         bias_ylim: tuple = (-0.8, 0.8),
         std_ylim: tuple = (0, 0.8),
-        dpi: int = 300,
+        dpi: int = 100,
     ):
         if im_set == "pSA":
             self.fig, self.ax1, self.ax3 = plot_utils.get_pSA_bias_residual_fig(
@@ -568,7 +568,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         figsize=(16, 6),
         bias_ylim=(-0.8, 0.8),
         std_ylim=(0, 0.8),
-        dpi=300,
+        dpi=100,
     ):
         super().__init__(im_set, figsize, bias_ylim, std_ylim, dpi)
 

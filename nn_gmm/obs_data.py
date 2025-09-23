@@ -720,6 +720,9 @@ def get_input_df(obs_data: ObservedData, run_config: "nn_gmm.RunConfig") -> pd.D
         DataFrame containing the input features for the model.
     """
     features = run_config.site_inputs + run_config.source_inputs + run_config.source_to_site_inputs
+    if run_config.using_loc_model:
+        features += run_config.loc_model_inputs
+
     input_df = obs_data.record_df.rename(
         columns={
             ObservedData.EventColEnums.MAG: "magnitude",

@@ -58,9 +58,18 @@ def create_multi_mlp(
 
     return mlp
 
+class NNCombined(nn.Module):
 
+    def __init__(self, loc_model: nn.Module, core_model: nn.Module):
+        super().__init__()
+        self.loc_model = loc_model
+        self.core_model = core_model
 
-
+    def forward(self, X: torch.Tensor, X_loc: torch.Tensor) -> torch.Tensor:
+        X_loc = self.loc_model(X_loc)
+        X = torch.cat([X, X_loc], dim=-1)
+        pred = self.core_model(X)
+        return pred
 
 def get_n_params(model: nn.Module) -> int:
     """

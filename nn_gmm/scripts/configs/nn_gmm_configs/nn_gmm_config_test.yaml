@@ -5,6 +5,7 @@ rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
+extra_basin_sites: False
 
 im_set: pSA
 scale_ims: True
@@ -12,28 +13,25 @@ scale_ims: True
 site_inputs: 
 - nztm_x
 - nztm_y 
-# - lat
-# - lon
 - vs30
 - z1p0
-# - z2p5
+- z2p5
 
 source_inputs:
-- "magnitude"
-- "tect_type"
-# - "rake" 
-# - "dip"
-# - "dtop"
-# - "dbottom"
-# - "hypo_depth"
-# - "hypo_lat"
-# - "hypo_lon"
+- magnitude
+- tect_type
+- rake 
+- dip
+- dtop
+- dbottom
 
 source_to_site_inputs:
-- "rrup"
-- "rjb"
-- "rx"
-# - "ry"
+- rrup
+- rjb
+- rx
+- ry
+
+loc_model_inputs: null
 
 
 # Sample weighting
@@ -46,14 +44,16 @@ max_vs30_weight: 2.5
 total_max_weight: 5.0
 
 n_epochs: 100
-batch_size: 1024
-
+batch_size: 512
+learning_rate: 0.001
 
 model:
   units: [32, 32, 64]
   use_batch_norm: True
   activation: relu
+  dropout_rate: 0.0
   l2_reg: 0.0001
 
+rel_loc_model_dir: null
 
 rel_results_dir: nn_gmm/results

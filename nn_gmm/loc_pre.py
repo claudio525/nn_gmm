@@ -98,6 +98,7 @@ class LocationNN(nn.Module):
         n_authority_classes: int,
         units: list[int],
         act_fn_str: str | None,
+        embedding_dim: int,
         use_batch_norm: bool = False,
         dropout_rate: float | None = None,
     ):
@@ -122,6 +123,7 @@ class LocationNN(nn.Module):
             if dropout_rate is not None and dropout_rate > 0:
                 core_nn.append(nn.Dropout(dropout_rate))
 
+        core_nn.append(nn.Linear(units[-1], embedding_dim))
         self.core_nn = core_nn
 
         self.basin_head = nn.Sequential(
@@ -288,6 +290,7 @@ def run_loc_model_training(
     l2_reg: float,
     batch_size: int,
     activation_fn: str,
+    embedding_dim: int,
     dropout_rate: float,
     use_batch_norm: bool,
     device: torch.device,
@@ -341,12 +344,13 @@ def run_loc_model_training(
 
     # Create the model
     model = LocationNN(
-        2,
-        len(basin_label_enc.classes_),
-        len(district_label_enc.classes_),
-        len(authority_label_enc.classes_),
-        units,
-        activation_fn,
+        n_inputs=2,
+        n_basin_classes=len(basin_label_enc.classes_),
+        n_district_classes=len(district_label_enc.classes_),
+        n_authority_classes=len(authority_label_enc.classes_),
+        units=units,
+        act_fn_str=activation_fn,
+        embedding_dim=embedding_dim,
         use_batch_norm=use_batch_norm,
         dropout_rate=dropout_rate,
     ).to(device)
@@ -521,8 +525,10 @@ def hp_objective(
     n_epochs: int,
     device: str,
 ) -> float:
-    """Objective function for hyperparameter optimization."""
-
+    """
+    Objective function for hyperparameter optimization using Optuna.
+    Should not be used for anything else.
+    """
     log_ffp = base_out_dir / f"trial_{trial.number:03d}.log"
     
     # Add file handler to logger

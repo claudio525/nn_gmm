@@ -181,6 +181,13 @@ def train_cv(
         },
     )
     metrics_da.to_netcdf(base_out_dir / "metrics.nc")
+    
+    # Remove the train/validation result files
+    # for each CV directory
+    if remove_cv_results:
+        for cur_cv_dir in out_dirs:
+            (cur_cv_dir / "val_results.parquet").unlink()
+            (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
 
     if run_notebook:
         results_report_notebook_ffp = (
@@ -193,12 +200,6 @@ def train_cv(
             result_dir=str(base_out_dir),
         )
 
-    # Remove the train/validation result files
-    # for each CV directory
-    if remove_cv_results:
-        for cur_cv_dir in out_dirs:
-            (cur_cv_dir / "val_results.parquet").unlink()
-            (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
 
 
 def _run_helper(

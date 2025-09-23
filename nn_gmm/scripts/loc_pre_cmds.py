@@ -30,6 +30,7 @@ def train_loc_model(
     l2_reg: float,
     batch_size: int,
     activation_fn: str,
+    embedding_dim: int,
     dropout_rate: float,
     use_batch_norm: bool,
     base_out_dir: Path,
@@ -51,21 +52,23 @@ def train_loc_model(
     logger.info(f"  l2_reg: {l2_reg}")
     logger.info(f"  batch_size: {batch_size}")
     logger.info(f"  activation_fn: {activation_fn}")
+    logger.info(f"  embedding_dim: {embedding_dim}")
     logger.info(f"  dropout_rate: {dropout_rate}")
     logger.info(f"  use_batch_norm: {use_batch_norm}")
 
     out_dir = nng.loc_pre.run_loc_model_training(
-        n_train_sites,
-        n_val_sites,
-        n_epochs,
-        units,
-        l2_reg,
-        batch_size,
-        activation_fn,
-        dropout_rate,
-        use_batch_norm,
-        device,
-        base_out_dir,
+        n_train_sites=n_train_sites,
+        n_val_sites=n_val_sites,
+        n_epochs=n_epochs,
+        units=units,
+        l2_reg=l2_reg,
+        batch_size=batch_size,
+        activation_fn=activation_fn,
+        dropout_rate=dropout_rate,
+        embedding_dim=embedding_dim,
+        use_batch_norm=use_batch_norm,
+        device=device,
+        base_out_dir=base_out_dir,
         suffix=suffix,
     )
 
