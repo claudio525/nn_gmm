@@ -23,12 +23,11 @@ class TectonicType(StrEnum):
     UNKNOWN = "unknown"
 
 
-
-
 GMM_MAPPING = {
     oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
     oqw.constants.TectType.VOLCANIC: oqw.constants.GMM.Br_13,
     oqw.constants.TectType.SUBDUCTION_INTERFACE: oqw.constants.GMM.K_20,
+    oqw.constants.TectType.SUBDUCTION_SLAB: oqw.constants.GMM.K_20,
 }
 
 TECT_TYPES = [
@@ -217,3 +216,54 @@ BASIN_BOUNDARIES_DIR = Path(__file__).parent / "resources/basin_boundaries"
 DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-land-districts-SHP/nz-land-districts.shp"
 AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
+
+
+
+MW_RRUP_LIMITS = np.array([
+    [3.5, 96.001584],
+    [3.6, 95.9631833664],
+    [3.7, 98.0],
+    [3.8, 102.0],
+    [3.9, 108.026902688],
+    [4.0, 114.868566765],
+    [4.1, 123.445238634],
+    [4.2, 128.689599653],
+    [4.3, 134.586833832],
+    [4.4, 145.681117253],
+    [4.5, 157.689926419],
+    [4.6, 170.688647664],
+    [4.7, 188.45405921],
+    [4.8, 192.223140394],
+    [4.9, 203.988734372],
+    [5.0, 216.474476825],
+    [5.1, 233.196675756],
+    [5.2, 248.661128941],
+    [5.3, 258.190038239],
+    [5.4, 268.728407146],
+    [5.5, 280.032818545],
+    [5.6, 297.173067302],
+    [5.7, 315.362436406],
+    [5.8, 334.665140413],
+    [5.9, 361.817781899],
+    [6.0, 384.425050255],
+    [6.1, 407.954938731],
+    [6.2, 439.468601405],
+    [6.3, 468.049881681],
+    [6.4, 497.294793922],
+    [6.5, 517.385503596],
+    [6.6, 538.287877942],
+    [6.7, 560.03470821],
+    [6.8, 589.576829967],
+    [6.9, 615.854723363],
+    [7.0, 643.04652117],
+    [7.1, 669.293317953],
+    [7.2, 696.332767998],
+    [7.3, 724.464611825],
+    [7.4, 753.732982143],
+    [7.5, 793.492788462],
+    [7.6, 845.098386021],
+    [7.7, 897.18404165],
+    [7.8, 949.816128972],
+    [7.9, 994.534662958],
+    [8.0, 1055.40814061]
+])

@@ -107,6 +107,9 @@ class RunConfig:
     rel_loc_model_dir: str | None
     """Relative path to the location model file."""
 
+    loc_model_base_lr: float | None
+    """Base learning rate for the location model if using one."""
+
     rel_results_dir: str
     """Relative path to the results directory."""
 
@@ -260,6 +263,11 @@ class RunConfig:
             "rel_loc_model_dir": (
                 str(self.rel_loc_model_dir)
                 if self.rel_loc_model_dir is not None
+                else None
+            ),
+            "loc_model_base_lr": (
+                float(self.loc_model_base_lr)
+                if self.loc_model_base_lr is not None
                 else None
             ),
             "rel_results_dir": str(self.rel_results_dir),
@@ -594,7 +602,6 @@ def run_model_training(
         val_dataset, batch_size=run_config.batch_size, shuffle=False
     )
 
-
     model_fn = functools.partial(nn_gmm_modules.create_multi_mlp,
         units=run_config.model_config.units,
         n_outputs=run_config.n_ims * 2,
@@ -602,6 +609,7 @@ def run_model_training(
         use_batch_norm=run_config.model_config.use_batch_norm,
     )
 
+    # Create the model
     if run_config.using_loc_model:
         loc_model = torch.load(
             run_config.loc_model_dir / "loc_model.pt", weights_only=False, map_location=run_config.device
@@ -612,8 +620,32 @@ def run_model_training(
         )
 
         model = nn_gmm_modules.NNCombined(loc_model, core_model)
+
+        # Custom optimizer to handle different learning rates
+        opt_config = [
+            {"params": model.core_model.parameters(), "lr": run_config.learning_rate}
+        ]
+        lr = run_config.loc_model_base_lr
+        for cur_layer in model.loc_model[::-1]:
+            if isinstance(cur_layer, nn.Linear):
+                opt_config.append({"params": cur_layer.parameters(), "lr": lr})
+                lr *= 0.9
+        optimizer = torch.optim.Adam(opt_config, weight_decay=run_config.model_config.l2_reg)
+        
+        # Log parameter groups and learning rates
+        logger.info("Optimizer configuration with custom learning rates:")
+        total_params = 0
+        for i, group in enumerate(optimizer.param_groups):
+            n_params = sum(p.numel() for p in group['params'])
+            total_params += n_params
+            if i == 0:
+                logger.info(f"  Group {i}: Core model - {n_params:,} params, lr={group['lr']:.2e}")
+            else:
+                logger.info(f"  Group {i}: Location model layer {i} - {n_params:,} params, lr={group['lr']:.2e}")
+        logger.info(f"  Total parameters: {total_params:,}")
     else:
-        model = model_fn(n_inputs=run_config.n_inputs)
+        model = nn_gmm_modules.BaseNNModel(model_fn(n_inputs=run_config.n_inputs))
+        optimizer = None
 
     model.to(run_config.device)
 
@@ -631,6 +663,7 @@ def run_model_training(
         l2_reg=run_config.model_config.l2_reg,
         learning_rate=run_config.learning_rate,
         use_sample_weights=run_config.use_sample_weights,
+        optimizer=optimizer,
         verbose=verbose,
     )
     metrics_df = pd.DataFrame(metrics)
@@ -642,14 +675,14 @@ def run_model_training(
     ouput_dir.mkdir(parents=True, exist_ok=True)
 
     # Get simulation predictions
-    logging.info("Getting validation dataset predictions")
+    logger.info("Getting validation dataset predictions")
     val_results_df = get_dataset_predictions(
         model, val_dataset, run_config, verbose=verbose
     )
     val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
     if save_train_results:
-        logging.info("Getting training dataset predictions")
+        logger.info("Getting training dataset predictions")
         train_results_df = get_dataset_predictions(
             model, train_dataset, run_config, verbose=verbose
         )
@@ -750,7 +783,7 @@ def get_dataset_predictions(
 
 
 def train(
-    model: nn.Module,
+    model: nn_gmm_modules.BaseNNModel,
     train_dataloader: data.CustomDataLoader,
     val_dataloader: data.CustomDataLoader,
     n_epochs: int,
@@ -788,7 +821,6 @@ def train(
             logger.debug(f"Epoch: {cur_epoch_ix + 1}/{n_epochs}")
 
         ### Training
-        grad_norms = []
         n_samples = 0
         model.train()
         for cur_batch in tqdm(
@@ -805,25 +837,14 @@ def train(
             cur_bresult.loss.backward()
             optimizer.step()
 
-            grad_norms.append(
-                torch.nn.utils.get_total_norm(
-                    [
-                        param.grad
-                        for param in model.parameters()
-                        if param.grad is not None
-                    ]
-                ).numpy(force=True)
-            )
+            model.update_grad_norms()
 
             metrics = _save_metrics(
                 cur_bresult, metrics, use_sample_weights, cur_epoch_ix, "train"
             )
             n_samples += cur_batch.n_samples
 
-        logger.debug(
-            f"Gradient Norm: {np.mean(grad_norms):.4f} ± {np.std(grad_norms):.4f}, "
-            f"Max: {np.max(grad_norms):.4f}, Min: {np.min(grad_norms):.4f}"
-        )
+        logger.debug(f"\n{model.grad_norm_log_msg()}")
 
         metrics["w_loss_hist_train"][cur_epoch_ix] /= n_samples
         metrics["loss_hist_train"][cur_epoch_ix] /= n_samples
@@ -856,19 +877,21 @@ def train(
                 best_model_state = model.state_dict()
                 best_model_epoch = cur_epoch_ix
 
-        if verbose:
-            logger.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
+        logger.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
+        logger.info(
+            f"Training\t"
+            f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
+            f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
+        )
+        if val_dataloader is not None:
             logger.info(
-                f"Training\t"
-                f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
-                f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
+                f"Validation\t"
+                f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
+                f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
-            if val_dataloader is not None:
-                logger.info(
-                    f"Validation\t"
-                    f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
-                    f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
-                )
+
+    logger.info(f"Training completed. Best model at epoch "
+                f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}")
 
     return metrics, best_model_state, best_model_epoch
 

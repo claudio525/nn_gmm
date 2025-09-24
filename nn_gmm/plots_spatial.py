@@ -15,55 +15,123 @@ from . import nn_gmm
 from .imdb import IMDB
 from .empdb import EmpiricalDB
 from . import constants
+from . import utils
 
 logger = logging.getLogger(__name__)
 
 
+class SpatialPlot:
 
-def basin_site_map(
-    imdb_ffp: Path, output_ffp: Path, site_level: int = None, basin_dir: Path = None
-):
-    """Create a NZ wide map showing basin boundaries and site locations."""
-    fig = plotting.gen_region_fig(
-        plot_topo=True,
-        plot_highways=True,
-        config_options=dict(
-            MAP_FRAME_TYPE="plain",
-            FORMAT_GEO_MAP="ddd.xx",
-            MAP_GRID_PEN="0.5p,gray",
-            MAP_TICK_PEN_PRIMARY="1p,black",
-            MAP_FRAME_PEN="1p,black",
-            MAP_FRAME_AXES="wsne",
-        ),
-        plot_kwargs={
-            "topo_cmap_min": 0,
-            "topo_cmap_max": 3000,
-            "topo_cmap_inc": 10,
-            "highway_pen_width": 0.1,
-        },
+    DEFAULT_PLT_KWARGS = {
+        "topo_cmap_min": 0,
+        "topo_cmap_max": 3000,
+        "topo_cmap_inc": 10,
+        "highway_pen_width": 0.1,
+    }
+
+    DEFAULT_CONFIG_OPTIONS = dict(
+        MAP_FRAME_TYPE="plain",
+        FORMAT_GEO_MAP="ddd.xx",
+        MAP_GRID_PEN="0.5p,gray",
+        MAP_TICK_PEN_PRIMARY="1p,black",
+        MAP_FRAME_PEN="1p,black",
+        MAP_FRAME_AXES="wsne",
     )
 
-    # Plot basin boundaries
-    if basin_dir is not None:
+    def __init__(
+        self, plot_kwargs: dict = None, config_options: dict = None, **fig_kwargs
+    ):
+        plot_kwargs = (
+            self.DEFAULT_PLT_KWARGS
+            if plot_kwargs is None
+            else self.DEFAULT_PLT_KWARGS | plot_kwargs
+        )
+        config_options = (
+            self.DEFAULT_CONFIG_OPTIONS
+            if config_options is None
+            else self.DEFAULT_CONFIG_OPTIONS | config_options
+        )
+
+        self.fig = plotting.gen_region_fig(
+            **fig_kwargs,
+            config_options=config_options,
+            plot_kwargs=plot_kwargs,
+        )
+
+    def plot_sites(self, site_df: pd.DataFrame, **plot_kwargs):
+        """Adds the specified sites to the existing figure."""
+        plot_kwargs = {"style": "p0.035c", "fill": "black"} | plot_kwargs
+
+        self.fig.plot(
+            x=site_df["lon"].values,
+            y=site_df["lat"].values,
+            **plot_kwargs,
+        )
+
+        return self
+
+    def plot_basin_boundaries(self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs):
+        """Adds basin boundaries to the existing figure."""
+        plot_kwargs = {"pen": "0.15p,red"} | plot_kwargs
+
         basin_files = list(basin_dir.glob("*.txt"))
         for cur_ffp in basin_files:
             cur_basin = np.loadtxt(cur_ffp)
-            fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], pen="0.15p,red")
+            self.fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], **plot_kwargs)
+
+        return self
+
+    def save(self, output_ffp: Path, dpi: int = 900):
+        self.fig.savefig(output_ffp, dpi=dpi, anti_alias=True)
+
+
+def basin_site_map(
+    imdb_ffp: Path, output_ffp: Path, site_levels: tuple[int] = (0,), basin_site_levels: tuple[int] | None = None
+):
+    """Create a NZ wide map showing basin boundaries and site locations."""
+    with IMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df().set_index("site_id")
+
+    site_df = utils.add_basin_column(site_df)
+
+    mask = site_df.grid_level.isin(site_levels)
+    if basin_site_levels is not None:
+        mask |= (site_df["basin"] != "NiB") & (site_df.grid_level.isin(basin_site_levels))
+    site_df = site_df.loc[mask]
+    
+    plot = SpatialPlot().plot_basin_boundaries()
+
+    logger.info(f"Number of level 0 sites: {len(site_df.loc[site_df.grid_level == 0])}")
+    logger.info(f"Number of level 1 sites: {len(site_df.loc[site_df.grid_level == 1])}")
+    logger.info(f"Number of level 2 sites: {len(site_df.loc[site_df.grid_level == 2])}")
+    logger.info(f"Number of level 3 sites: {len(site_df.loc[site_df.grid_level == 3])}")
+
+    logger.info(f"Number of level 0 basin sites: {len(site_df.loc[site_df.grid_level == 0])}")
+    logger.info(f"Number of level 1 basin sites: {len(site_df.loc[site_df.grid_level == 1])}")
+    logger.info(f"Number of level 2 basin sites: {len(site_df.loc[site_df.grid_level == 2])}")
+    logger.info(f"Number of level 3 basin sites: {len(site_df.loc[site_df.grid_level == 3])}")
+    logger.info(f"Total number of sites: {len(site_df)}")
+
 
     # Plot site locations
-    if site_level is not None:
-        with IMDB(imdb_ffp, readonly=True) as imdb:
-            site_df = imdb.get_site_df(
-                min_grid_level=site_level, max_grid_level=site_level
-            )
-            fig.plot(
-                x=site_df["lon"].values,
-                y=site_df["lat"].values,
-                style="t0.03c",
-                fill="blue",
-            )
+    if site_df.loc[site_df.grid_level == 0].shape[0] > 0:
+        plot.plot_sites(
+            site_df.loc[site_df.grid_level == 0], style="p0.035c", fill="black"
+        )
+    if site_df.loc[site_df.grid_level == 1].shape[0] > 0:
+        plot.plot_sites(
+            site_df.loc[site_df.grid_level == 1], style="d0.035c", fill="green"
+        )
+    if site_df.loc[site_df.grid_level == 2].shape[0] > 0:
+        plot.plot_sites(
+            site_df.loc[site_df.grid_level == 2], style="t0.035c", fill="red"
+        )
+    if site_df.loc[site_df.grid_level == 3].shape[0] > 0:
+        plot.plot_sites(
+            site_df.loc[site_df.grid_level == 3], style="i0.035c", fill="blue"
+        )
 
-    fig.savefig(output_ffp, dpi=900, anti_alias=True)
+    plot.save(output_ffp)
 
 
 def nn_site_bias_res_std(
@@ -102,6 +170,7 @@ def nn_site_bias_res_std(
         grid_spacing=grid_spacing,
     )
 
+
 def emp_gmm_bias_res_std(
     nn_model_dir: Path,
     empdb_ffp: Path,
@@ -125,9 +194,13 @@ def emp_gmm_bias_res_std(
         sim_df = imdb.get_im_data_tmp_table(run_config.ims, record_int_ids).sort_index()
 
     with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
-        emp_pred_df = empdb.get_gm_params_tmp_table(record_int_ids, incl_std=False).sort_index()
+        emp_pred_df = empdb.get_gm_params_tmp_table(
+            record_int_ids, incl_std=False
+        ).sort_index()
 
-    emp_pred_df["site_int_id"] = record_info_df.loc[emp_pred_df.index].site_int_id.values
+    emp_pred_df["site_int_id"] = record_info_df.loc[
+        emp_pred_df.index
+    ].site_int_id.values
     assert emp_pred_df.index.equals(sim_df.index)
     logging.info(f"Generating site bias and residual std plots for IMs: {ims}")
     site_bias_res_std(
@@ -140,6 +213,7 @@ def emp_gmm_bias_res_std(
         output_dir=output_dir,
         grid_spacing=grid_spacing,
     )
+
 
 def site_bias_res_std(
     pred_df: pd.DataFrame,
@@ -166,8 +240,7 @@ def site_bias_res_std(
     # Compute residuals
     pred_keys = [f"{cur_im}{pred_column_suffix}" for cur_im in ims]
     res_df = pd.DataFrame(
-        data=np.log(sim_df[ims].values)
-        - pred_df[pred_keys].values,
+        data=np.log(sim_df[ims].values) - pred_df[pred_keys].values,
         index=pred_df.index,
         columns=ims,
     )
@@ -182,7 +255,6 @@ def site_bias_res_std(
     site_res_std = res_df.groupby("site_int_id").std()
     site_res_std["lon"] = site_df.loc[site_res_std.index, "lon"].values
     site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
-
 
     if n_procs == 1 or len(ims) == 1:
         for im in tqdm(ims):
@@ -257,7 +329,7 @@ def _gen_im_bias_res_std_plot(
         ("darkred", "darkblue"),
         reverse_cmap=True,
         plot_contours=False,
-        cb_label=im
+        cb_label=im,
     )
 
     for cur_ffp in basin_files:
@@ -281,8 +353,10 @@ def _gen_im_bias_res_std_plot(
         box="+p1p,black",
     ):
         bias_fig = plotting.gen_region_fig(
-            region=constants.WELLINGTON_REGION, plot_topo=False, fig=bias_fig,
-            plot_highways=False
+            region=constants.WELLINGTON_REGION,
+            plot_topo=False,
+            fig=bias_fig,
+            plot_highways=False,
         )
 
         plotting.plot_grid(
@@ -293,7 +367,7 @@ def _gen_im_bias_res_std_plot(
             ("darkred", "darkblue"),
             reverse_cmap=True,
             plot_contours=False,
-            cb_label=im
+            cb_label=im,
         )
 
         for cur_ffp in basin_files:
@@ -337,7 +411,7 @@ def _gen_im_bias_res_std_plot(
         fill="black",
     )
 
-        # Create the inset
+    # Create the inset
     with res_std_fig.inset(
         position="jTL",  # +o0.2c",
         region=constants.WELLINGTON_REGION,
@@ -347,8 +421,10 @@ def _gen_im_bias_res_std_plot(
         box="+p1p,black",
     ):
         res_std_fig = plotting.gen_region_fig(
-            region=constants.WELLINGTON_REGION, plot_topo=False, fig=res_std_fig,
-            plot_highways=False
+            region=constants.WELLINGTON_REGION,
+            plot_topo=False,
+            fig=res_std_fig,
+            plot_highways=False,
         )
 
         plotting.plot_grid(
@@ -372,7 +448,6 @@ def _gen_im_bias_res_std_plot(
             fill="black",
         )
 
-
     if output_dir is not None:
         bias_fig.savefig(output_dir / f"{im}_site_bias.png", dpi=900, anti_alias=True)
         res_std_fig.savefig(
@@ -385,8 +460,8 @@ def _gen_im_bias_res_std_plot(
 def record_event_distribution_map(imdb_ffp: Path, output_ffp: Path):
     """
     Creates two NZ wide maps showing spatial distribution of:
-    1. Number of records 
-    2. Number of events 
+    1. Number of records
+    2. Number of events
     """
     with IMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(min_grid_level=0, max_grid_level=0, add_nztm=True)
@@ -415,7 +490,3 @@ def record_event_distribution_map(imdb_ffp: Path, output_ffp: Path):
     for cur_ffp in basin_files:
         cur_basin = np.loadtxt(cur_ffp)
         fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], pen="0.15p,red")
-
-    
-
-    

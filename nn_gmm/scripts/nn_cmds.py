@@ -110,6 +110,8 @@ def train_cv(
     remove_cv_results: bool = False,
 ):
     """Train and evaluate the GMM using cross-validation."""
+
+
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
         device=device,
@@ -140,7 +142,7 @@ def train_cv(
         run_notebook=run_notebook,
         remove_cv_results=remove_cv_results,
     )
-    logger.info(f"Took: {time.time() - start} to complete CV model training.")
+    logger.info(f"Took: {(time.time() - start) / 60} minutes to complete CV model training.")
 
 
 @app.command("run-mera")

@@ -92,6 +92,10 @@ def setup_logging(
         )
         logger.addHandler(console_handler)
 
+    # Suppress numba & matplotlib logging
+    logging.getLogger('numba').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+
     return logger
 
 

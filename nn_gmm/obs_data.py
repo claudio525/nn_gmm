@@ -1,3 +1,4 @@
+import logging
 from typing import Sequence, Optional, TYPE_CHECKING
 from pathlib import Path
 from enum import StrEnum
@@ -9,9 +10,11 @@ import ml_tools as mlt
 from qcore import coordinates
 
 from . import constants
+
 if TYPE_CHECKING:
     from . import nn_gmm
 
+logger = logging.getLogger(__name__)
 
 
 class ObservedData:
@@ -216,8 +219,12 @@ class ObservedData:
 
     def add_site_nztm(self):
         """Adds NZTM coordinates to the site dataframe."""
-        self.record_df[[self.SiteColEnums.SITE_NZTM_Y, self.SiteColEnums.SITE_NZTM_X]] = coordinates.wgs_depth_to_nztm(
-            self.record_df[[self.SiteColEnums.SITE_LAT, self.SiteColEnums.SITE_LON]].values
+        self.record_df[
+            [self.SiteColEnums.SITE_NZTM_Y, self.SiteColEnums.SITE_NZTM_X]
+        ] = coordinates.wgs_depth_to_nztm(
+            self.record_df[
+                [self.SiteColEnums.SITE_LAT, self.SiteColEnums.SITE_LON]
+            ].values
         )
         self.__reset_cache()
         return self
@@ -282,18 +289,39 @@ class ObservedData:
             E.g. {"mag": (5.0, 6.0), "rrup": (0.0, 10.0),
             "is_ground_level": True}
         """
+        initial_count = len(self.record_df)
+        logger.info(f"Starting metadata filtering with {initial_count} records")
+
         for cur_key, cur_filter in filter_dict.items():
+            records_before = len(self.record_df)
+
             if isinstance(cur_filter, tuple):
+                logger.info(
+                    f"Applying range filter: {cur_key} in [{cur_filter[0]}, {cur_filter[1]}]"
+                )
                 self.record_df = self.record_df[
                     (self.record_df[cur_key] >= cur_filter[0])
                     & (self.record_df[cur_key] <= cur_filter[1])
                 ]
             elif isinstance(cur_filter, bool):
+                logger.info(f"Applying boolean filter: {cur_key} == {cur_filter}")
                 self.record_df = self.record_df.loc[
                     self.record_df[cur_key] == cur_filter
                 ]
             else:
                 raise ValueError(f"Unknown filter type: {type(cur_filter)}")
+
+            records_after = len(self.record_df)
+            logger.info(
+                f"Filter '{cur_key}' removed {records_before - records_after}"
+                f" records ({records_after} remaining)"
+            )
+
+        final_count = len(self.record_df)
+        logger.info(
+            f"Metadata filtering complete: {initial_count - final_count} "
+            f"records filtered out, {final_count} records remaining"
+        )
 
         self.__reset_cache()
         return self
@@ -630,7 +658,9 @@ class ObservedData:
         )
 
 
-def load_obs_nzgmdb(nzgmdb_ffp: Path):
+def load_obs_nzgmdb(
+    nzgmdb_ffp: Path, apply_mag_distance_filter: bool = True, min_mag: float = None
+) -> ObservedData:
     """
     Load the observed data from NZGMDB and performs the
     necessary preparation steps, depending
@@ -640,6 +670,11 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     ----------
     nzgmdb_ffp: Path
         Path to the NZGMDB flat file
+    apply_mag_distance_filter: bool
+        Whether to apply the mag-distance filter
+        as per Lee et al. (2024)
+    min_mag: float
+        Minimum magnitude to include.
 
     Returns
     -------
@@ -655,7 +690,13 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     obs_data = (
         obs_data.drop_nan()
         .add_site_nztm()
-        .metadata_filter(dict(rrup=(0, 500), is_ground_level=True))
+        .metadata_filter(
+            dict(
+                rrup=(0, 500),
+                is_ground_level=True,
+                mag=(min_mag, 10) if min_mag else (0, 10),
+            )
+        )
     )
 
     # Crustal, Mag >= 3.5 and rrup <= 300
@@ -666,9 +707,13 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
             & (obs_data.record_df.rrup <= 300)
         ].index.values.astype(str)
     )
+    logger.info(
+        f"Crustal records to keep: {len(records_to_keep)} "
+        f"with mag >= 3.5 and rrup <= 300 km"
+    )
 
     # Subduction Interface, Mag >= 4.5 and rrup <= 500
-    records_to_keep += list(
+    sub_interface_records_to_keep = list(
         obs_data.record_df.loc[
             (
                 obs_data.record_df.tect_type
@@ -677,14 +722,44 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
             & (obs_data.record_df.mag >= 4.5)
         ].index.values.astype(str)
     )
+    records_to_keep += sub_interface_records_to_keep
+    logger.info(
+        f"Subduction Interface records to keep: {len(sub_interface_records_to_keep)} "
+        f"with mag >= 4.5 and rrup <= 500 km"
+    )
 
     # Subduction Slab, Mag >= 4.5 and rrup <= 500
-    records_to_keep += list(
+    sub_slabs_records_to_keep = list(
         obs_data.record_df.loc[
             (obs_data.record_df.tect_type == constants.TectonicType.SUBDUCTION_SLAB)
             & (obs_data.record_df.mag >= 4.5)
         ].index.values.astype(str)
     )
+    records_to_keep += sub_slabs_records_to_keep
+    logger.info(
+        f"Subduction Slab records to keep: {len(sub_slabs_records_to_keep)} "
+        f"with mag >= 4.5 and rrup <= 500 km"
+    )
+
+    logger.info(f"Total records to keep before mag-rrup filter: {len(records_to_keep)}")
+
+    if apply_mag_distance_filter:
+        logger.info("Applying mag-rrup filter")
+        # Load magnitude-distance scaling relationship
+        mag_values = constants.MW_RRUP_LIMITS[:, 0]
+        rrup_values = constants.MW_RRUP_LIMITS[:, 1]
+
+        # Compute valid records
+        record_rrup_limits = np.interp(
+            obs_data.record_df.loc[records_to_keep, "mag"].values,
+            mag_values,
+            rrup_values,
+        )
+        mask = (
+            obs_data.record_df.loc[records_to_keep, "rrup"].values < record_rrup_limits
+        )
+        records_to_keep = np.array(records_to_keep)[mask]
+        logger.info(f"Records to keep after mag-rrup filter: {len(records_to_keep)}")
 
     obs_data.filter_record_ids(records_to_keep)
 
@@ -705,7 +780,9 @@ def load_obs_nzgmdb(nzgmdb_ffp: Path):
     return obs_data
 
 
-def get_input_df(obs_data: ObservedData, run_config: "nn_gmm.RunConfig") -> pd.DataFrame:
+def get_input_df(
+    obs_data: ObservedData, run_config: "nn_gmm.RunConfig"
+) -> pd.DataFrame:
     """
     Gets the input dataframe for the observed data.
 
@@ -719,7 +796,11 @@ def get_input_df(obs_data: ObservedData, run_config: "nn_gmm.RunConfig") -> pd.D
     input_df: pd.DataFrame
         DataFrame containing the input features for the model.
     """
-    features = run_config.site_inputs + run_config.source_inputs + run_config.source_to_site_inputs
+    features = (
+        run_config.site_inputs
+        + run_config.source_inputs
+        + run_config.source_to_site_inputs
+    )
     if run_config.using_loc_model:
         features += run_config.loc_model_inputs
 

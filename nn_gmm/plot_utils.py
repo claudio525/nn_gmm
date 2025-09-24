@@ -48,6 +48,25 @@ def get_pSA_bias_residual_fig(
     ax1.set_ylim(*bias_y_axis_limits)
     ax1.set_xlim(0.01, 10.0)
 
+    ax1.text(
+        0.03,
+        0.03,
+        "Overprediction",
+        transform=ax1.transAxes,
+        # fontsize=sr.constants.FIG_FONT_SIZE,
+        va="bottom",
+        ha="left",
+    )
+    ax1.text(
+        0.03,
+        0.97,
+        "Underprediction",
+        transform=ax1.transAxes,
+        # fontsize=sr.constants.FIG_FONT_SIZE,
+        va="top",
+        ha="left",
+    )
+
     ax2.set_xlabel("Vibration Period, T(s)")
     ax2.set_ylabel("Residual standard deviation")
     ax2.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")

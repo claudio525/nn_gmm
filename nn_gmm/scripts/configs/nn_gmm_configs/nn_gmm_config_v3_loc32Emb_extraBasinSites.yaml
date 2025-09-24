@@ -5,7 +5,7 @@ rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
-extra_basin_sites: False
+extra_basin_sites: True
 
 im_set: pSA
 scale_ims: True

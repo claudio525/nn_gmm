@@ -492,7 +492,7 @@ class BiasStdPlot:
         **plt_kwargs,
     ):
         """Adds individual NN-GMM CV results to the plot"""
-        cv_bias_df = res_df.groupby("cv_iter")[self.ims].mean()
+        cv_bias_df = res_df.groupby("cv_iter", observed=True)[self.ims].mean()
 
         self.ax1.plot(
             constants.PSA_PERIODS,
@@ -500,7 +500,7 @@ class BiasStdPlot:
             **plt_kwargs,
         )
 
-        cv_res_std_df = res_df.groupby("cv_iter")[self.ims].std()
+        cv_res_std_df = res_df.groupby("cv_iter", observed=True)[self.ims].std()
         self.ax3.plot(
             constants.PSA_PERIODS,
             cv_res_std_df[constants.PSA_KEYS].T.values,
@@ -515,7 +515,7 @@ class BiasStdPlot:
             axis=0
         )
 
-        cv_bias_std = res_df.groupby("cv_iter")[self.ims].mean().std(axis=0)
+        cv_bias_std = res_df.groupby("cv_iter", observed=True)[self.ims].mean().std(axis=0)
         self.ax1.fill_between(
             constants.PSA_PERIODS,
             model_bias[constants.PSA_KEYS].values
@@ -525,7 +525,7 @@ class BiasStdPlot:
             **plt_kwargs,
         )
 
-        cv_res_std_std = res_df.groupby("cv_iter")[self.ims].std().std(axis=0)
+        cv_res_std_std = res_df.groupby("cv_iter", observed=True)[self.ims].std().std(axis=0)
         self.ax3.fill_between(
             constants.PSA_PERIODS,
             res_std[constants.PSA_KEYS].values
@@ -666,7 +666,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
             cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
             cur_cv_bias_std = (
                 res_df.loc[cur_record_ids]
-                .groupby("cv_iter")[constants.PSA_KEYS]
+                .groupby("cv_iter", observed=True)[constants.PSA_KEYS]
                 .mean()
                 .std(axis=0)
             )
@@ -687,7 +687,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
             cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
             cur_cv_res_std_std = (
                 res_df.loc[cur_record_ids]
-                .groupby("cv_iter")[constants.PSA_KEYS]
+                .groupby("cv_iter", observed=True)[constants.PSA_KEYS]
                 .std()
                 .std(axis=0)
             )

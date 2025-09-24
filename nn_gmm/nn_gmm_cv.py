@@ -39,11 +39,11 @@ def train_cv(
         site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
 
     if run_config.extra_basin_sites:
-        # Take all level 0 sites and level 2 sites that are in a basin
+        # Take all level 0 sites and level 2 & 3 sites that are in a basin
         site_df = utils.add_basin_column(site_df)
         site_df = site_df.loc[
             (site_df.grid_level == 0)
-            | ((~site_df["basin"].isnull()) & (site_df.grid_level == 2))
+            | ((site_df["basin"] != "NiB") & (site_df.grid_level == 2))
         ]
     else:
         site_df = site_df.loc[site_df.grid_level == 0]

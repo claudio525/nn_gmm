@@ -27,7 +27,7 @@ from . import preprocessing as pre
 logger = logging.getLogger(__name__)
 
 
-class LocationBatchData(data.BaseBatchData):
+class LocationRegionBatchData(data.BaseBatchData):
 
     def __init__(
         self,
@@ -57,7 +57,7 @@ class LocationBatchData(data.BaseBatchData):
         )
 
 
-class LocationDataset(data.BaseDataset):
+class LocationRegionDataset(data.BaseDataset):
 
     def __init__(self, loc_df: pd.DataFrame, device: torch.device):
         super().__init__()
@@ -79,8 +79,8 @@ class LocationDataset(data.BaseDataset):
     def __len__(self):
         return self.loc_df.shape[0]
 
-    def get_batch(self, indices: np.ndarray | torch.Tensor) -> LocationBatchData:
-        return LocationBatchData(
+    def get_batch(self, indices: np.ndarray | torch.Tensor) -> LocationRegionBatchData:
+        return LocationRegionBatchData(
             X=self.X_values[indices],
             basin=self.basin_values[indices],
             district=self.district_values[indices],
@@ -88,7 +88,7 @@ class LocationDataset(data.BaseDataset):
         )
 
 
-class LocationNN(nn.Module):
+class LocationRegionNN(nn.Module):
 
     def __init__(
         self,
@@ -127,15 +127,15 @@ class LocationNN(nn.Module):
         self.core_nn = core_nn
 
         self.basin_head = nn.Sequential(
-            nn.Linear(units[-1], n_basin_classes),
+            nn.Linear(embedding_dim, n_basin_classes),
         )
 
         self.district_head = nn.Sequential(
-            nn.Linear(units[-1], n_district_classes),
+            nn.Linear(embedding_dim, n_district_classes),
         )
 
         self.authority_head = nn.Sequential(
-            nn.Linear(units[-1], n_authority_classes),
+            nn.Linear(embedding_dim, n_authority_classes),
         )
 
     def forward(self, X: torch.Tensor):
@@ -146,7 +146,7 @@ class LocationNN(nn.Module):
         return basin_out, district_out, authority_out
 
 
-def get_random_sites(n_sites: int):
+def get_random_sites(n_sites: int, add_nztm: bool = False) -> np.ndarray:
     """Get random sites within New Zealand land area."""
     land_df = gpd.read_file(constants.NZ_LAND_SHAPEFILE)
 
@@ -233,7 +233,7 @@ def add_authority_column(site_df: pd.DataFrame) -> pd.DataFrame:
     return site_df
 
 
-def get_rand_site_df(
+def get_rand_region_site_df(
     n_sites: int,
     district_label_enc: LabelEncoder,
     authority_label_enc: LabelEncoder,
@@ -322,9 +322,9 @@ def run_loc_model_training(
         train_site_df,
         train_pre_site_df,
         basin_label_enc,
-    ) = get_rand_site_df(n_train_sites, district_label_enc, authority_label_enc)
+    ) = get_rand_region_site_df(n_train_sites, district_label_enc, authority_label_enc)
     logger.info(f"Generating {n_val_sites} validation sites")
-    val_site_df, val_pre_site_df, *_ = get_rand_site_df(
+    val_site_df, val_pre_site_df, *_ = get_rand_region_site_df(
         n_val_sites,
         district_label_enc,
         authority_label_enc,
@@ -332,8 +332,8 @@ def run_loc_model_training(
     )
 
     # Datasets and Dataloaders
-    train_dataset = LocationDataset(train_pre_site_df, device=device)
-    val_dataset = LocationDataset(val_pre_site_df, device=device)
+    train_dataset = LocationRegionDataset(train_pre_site_df, device=device)
+    val_dataset = LocationRegionDataset(val_pre_site_df, device=device)
 
     train_dataloader = data.CustomDataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, use_torch=True, device=device
@@ -343,7 +343,7 @@ def run_loc_model_training(
     )
 
     # Create the model
-    model = LocationNN(
+    model = LocationRegionNN(
         n_inputs=2,
         n_basin_classes=len(basin_label_enc.classes_),
         n_district_classes=len(district_label_enc.classes_),
