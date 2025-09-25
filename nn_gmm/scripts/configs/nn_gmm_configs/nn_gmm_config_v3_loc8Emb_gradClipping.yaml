@@ -18,10 +18,11 @@ site_inputs:
 source_inputs:
 - magnitude
 - tect_type
-- rake 
+- rake
 - dip
 - dtop
 - dbottom
+
 
 source_to_site_inputs:
 - rrup
@@ -29,7 +30,9 @@ source_to_site_inputs:
 - rx
 - ry
 
-loc_model_inputs: null
+loc_model_inputs: 
+- nztm_x
+- nztm_y 
 
 # Sample weighting
 apply_mag_sample_weighting: True
@@ -48,8 +51,8 @@ n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
 
-loc_max_grad_norm: null
-core_max_grad_norm: null
+loc_max_grad_norm: 5.0
+core_max_grad_norm: 10.0
 
 model:
   units: [32, 32, 64]
@@ -58,7 +61,7 @@ model:
   dropout_rate: 0.0
   l2_reg: 0.0001
 
-rel_loc_model_dir: null
-loc_model_base_lr: null
+rel_loc_model_dir: nn_gmm/results/loc_models/0925_1441_optimized_10Epochs_emb8
+loc_model_base_lr: 0.0001
 
 rel_results_dir: nn_gmm/results

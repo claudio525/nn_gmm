@@ -33,7 +33,6 @@ source_to_site_inputs:
 
 loc_model_inputs: null
 
-
 # Sample weighting
 apply_mag_sample_weighting: True
 max_mag_weight: 2.5
@@ -43,9 +42,16 @@ apply_vs30_sample_weighting: True
 max_vs30_weight: 2.5
 total_max_weight: 5.0
 
+# IM weighting
+apply_im_weighting: False
+im_weights: null
+
 n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
+
+loc_max_grad_norm: null
+core_max_grad_norm: 10.0
 
 model:
   units: [32, 32, 64]

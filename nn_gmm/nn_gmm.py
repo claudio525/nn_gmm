@@ -92,6 +92,12 @@ class RunConfig:
     total_max_weight: float
     """Maximum total weight allowed for any sample"""
 
+    apply_im_weighting: bool
+    """Whether to apply IM-based sample weighting"""
+
+    im_weights: dict[str, float] | None
+    """Weights for each IM"""
+
     n_epochs: int
     """Number of epochs to train the model"""
 
@@ -100,6 +106,12 @@ class RunConfig:
 
     learning_rate: float
     """Learning rate for training"""
+
+    loc_max_grad_norm: float | None
+    """Maximum gradient norm for location model if using one."""
+
+    core_max_grad_norm: float | None
+    """Maximum gradient norm for core model"""
 
     model_config: "ModelConfig"
     """Model configuration"""
@@ -167,7 +179,7 @@ class RunConfig:
     def ims(self) -> np.ndarray:
         """IMs to use for the model."""
         return np.array(constants.IM_SET_MAPPING[self.im_set])
-    
+
     @property
     def ind_loss_keys(self) -> np.ndarray:
         """Individual loss keys."""
@@ -262,8 +274,20 @@ class RunConfig:
             "apply_vs30_sample_weighting": self.apply_vs30_sample_weighting,
             "max_vs30_weight": float(self.max_vs30_weight),
             "total_max_weight": float(self.total_max_weight),
+            "apply_im_weighting": bool(self.apply_im_weighting),
+            "im_weights": self.im_weights,
             "batch_size": int(self.batch_size),
             "learning_rate": float(self.learning_rate),
+            "loc_max_grad_norm": (
+                float(self.loc_max_grad_norm)
+                if self.loc_max_grad_norm is not None
+                else None
+            ),
+            "core_max_grad_norm": (
+                float(self.core_max_grad_norm)
+                if self.core_max_grad_norm is not None
+                else None
+            ),
             "model": ModelConfig.to_dict(self.model_config),
             "rel_loc_model_dir": (
                 str(self.rel_loc_model_dir)
@@ -628,7 +652,10 @@ def run_model_training(
         )
 
         model = nn_gmm_modules.NNCombined(
-            loc_model, core_model, max_loc_norm=5.0, max_core_norm=10.0
+            loc_model,
+            core_model,
+            max_loc_grad_norm=run_config.loc_max_grad_norm,
+            max_core_grad_norm=run_config.core_max_grad_norm,
         )
 
         # Custom optimizer to handle different learning rates
@@ -660,7 +687,10 @@ def run_model_training(
                 )
         logger.info(f"  Total parameters: {total_params:,}")
     else:
-        model = nn_gmm_modules.BaseNNModel(model_fn(n_inputs=run_config.n_inputs))
+        model = nn_gmm_modules.BaseNNModel(
+            model_fn(n_inputs=run_config.n_inputs),
+            max_norm=run_config.core_max_grad_norm,
+        )
         optimizer = None
 
     model.to(run_config.device)
@@ -791,7 +821,11 @@ def get_dataset_predictions(
                     axis=1,
                 ),
                 columns=np.concatenate(
-                    (run_config.pred_mean_keys, run_config.pred_std_keys, run_config.ind_loss_keys)
+                    (
+                        run_config.pred_mean_keys,
+                        run_config.pred_std_keys,
+                        run_config.ind_loss_keys,
+                    )
                 ),
                 index=(
                     cur_batch.record_int_ids
@@ -950,6 +984,11 @@ def _get_batch_result(
         pred_mean, pred_ln_std = model(batch.X).chunk(2, dim=-1)
     pred_std = torch.exp(pred_ln_std)
 
+    sample_weights = (
+        batch.sample_weights
+        if len(batch.sample_weights.shape) == 2
+        else einops.repeat(batch.sample_weights, "b -> b im", im=batch.y.shape[1])
+    )
     if has_nan:
         nan_mask = torch.isnan(batch.y)
 
@@ -966,9 +1005,6 @@ def _get_batch_result(
             logger.warning(f"Loss has {nan_count} NaN values!!")
 
         if use_sample_weights:
-            sample_weights = einops.repeat(
-                batch.sample_weights, "b -> b im", im=batch.y.shape[1]
-            )
             ind_w_loss = sample_weights * ind_loss
             loss = (sample_weights[~nan_mask] * ind_loss_ravel).mean()
         else:
@@ -985,7 +1021,7 @@ def _get_batch_result(
             logger.warning(f"Loss has {nan_count} NaN values!!")
 
         if use_sample_weights:
-            ind_w_loss = ind_loss * batch.sample_weights[:, None]
+            ind_w_loss = ind_loss * sample_weights
             loss = ind_w_loss.mean()
         else:
             ind_w_loss = None

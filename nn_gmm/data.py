@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 import typing
 
+import einops
 import psutil
 import pandas as pd
 import numpy as np
@@ -325,10 +326,21 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             )
 
         self._sample_weight_tensor = torch.tensor(
-            self.record_info_df["sample_weight"].values,
-            device=run_config.device,
-            dtype=torch.float32,
-        )
+                self.record_info_df["sample_weight"].values,
+                device=run_config.device,
+                dtype=torch.float32,
+            )
+        if run_config.apply_im_weighting:
+            im_weights = np.ones(run_config.ims.size, dtype=float)
+            for cur_im, w in run_config.im_weights.items():
+                im_ix = np.flatnonzero(self.ims == cur_im)
+                if im_ix.size == 0:
+                    logger.warning(f"IM {cur_im} not found in dataset IMs")
+                else:
+                    im_weights[im_ix] = w
+
+            self._sample_weight_tensor = einops.repeat(self._sample_weight_tensor, "n -> n im", im=run_config.n_ims).clone()
+            self._sample_weight_tensor *= torch.tensor(im_weights, device=run_config.device, dtype=torch.float32)
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """
@@ -390,6 +402,9 @@ class IMDBDataset(BaseIMDBDataset):
             run_config,
             is_train,
         )
+
+        if run_config.apply_im_weighting:
+            raise NotImplementedError("IM-based weighting not implemented for this dataset")
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """

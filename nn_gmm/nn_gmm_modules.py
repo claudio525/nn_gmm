@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 
 import torch
@@ -5,6 +6,7 @@ import torch.nn as nn
 
 import ml_tools as mlt
 
+logger = logging.getLogger(__name__)
 
 class ClipLayer(nn.Module):
     """Layer that clips the layer input to a specified range."""
@@ -75,7 +77,8 @@ class BaseNNModel(nn.Module):
 
     def apply_grad_clipping(self) -> None:
         """Apply gradient clipping to the model parameters."""
-        pass
+        if self.max_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.parameters(), self.max_norm)
 
     def reset_logged_grad_norms(self) -> None:
         """Reset the logged gradient norms."""
@@ -110,15 +113,15 @@ class NNCombined(BaseNNModel):
         self,
         loc_model: nn.Module,
         core_model: nn.Module,
-        max_loc_norm: float | None = None,
-        max_core_norm: float | None = None,
+        max_loc_grad_norm: float | None = None,
+        max_core_grad_norm: float | None = None,
     ):
         nn.Module.__init__(self)
         self.loc_model = loc_model
         self.core_model = core_model
 
-        self.max_loc_norm = max_loc_norm
-        self.max_core_norm = max_core_norm
+        self.max_loc_norm = max_loc_grad_norm
+        self.max_core_norm = max_core_grad_norm
 
         self._grad_norms = []
         self._loc_grad_norms = []

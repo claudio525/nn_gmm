@@ -22,6 +22,9 @@ source_inputs:
 - dip
 - dtop
 - dbottom
+# - "hypo_depth"
+# - "hypo_lat"
+# - "hypo_lon"
 
 source_to_site_inputs:
 - rrup
@@ -49,7 +52,7 @@ batch_size: 512
 learning_rate: 0.001
 
 loc_max_grad_norm: null
-core_max_grad_norm: null
+core_max_grad_norm: 10.0
 
 model:
   units: [32, 32, 64]
