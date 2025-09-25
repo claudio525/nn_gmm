@@ -167,6 +167,11 @@ class RunConfig:
     def ims(self) -> np.ndarray:
         """IMs to use for the model."""
         return np.array(constants.IM_SET_MAPPING[self.im_set])
+    
+    @property
+    def ind_loss_keys(self) -> np.ndarray:
+        """Individual loss keys."""
+        return np.array([f"{cur_im}_loss" for cur_im in self.ims])
 
     @property
     def pred_mean_keys(self) -> np.ndarray:
@@ -602,7 +607,8 @@ def run_model_training(
         val_dataset, batch_size=run_config.batch_size, shuffle=False
     )
 
-    model_fn = functools.partial(nn_gmm_modules.create_multi_mlp,
+    model_fn = functools.partial(
+        nn_gmm_modules.create_multi_mlp,
         units=run_config.model_config.units,
         n_outputs=run_config.n_ims * 2,
         act_fn_str=run_config.model_config.activation,
@@ -612,14 +618,18 @@ def run_model_training(
     # Create the model
     if run_config.using_loc_model:
         loc_model = torch.load(
-            run_config.loc_model_dir / "loc_model.pt", weights_only=False, map_location=run_config.device
+            run_config.loc_model_dir / "loc_model.pt",
+            weights_only=False,
+            map_location=run_config.device,
         ).core_nn
 
         core_model = model_fn(
             n_inputs=run_config.n_inputs + loc_model[-1].out_features,
         )
 
-        model = nn_gmm_modules.NNCombined(loc_model, core_model)
+        model = nn_gmm_modules.NNCombined(
+            loc_model, core_model, max_loc_norm=5.0, max_core_norm=10.0
+        )
 
         # Custom optimizer to handle different learning rates
         opt_config = [
@@ -630,18 +640,24 @@ def run_model_training(
             if isinstance(cur_layer, nn.Linear):
                 opt_config.append({"params": cur_layer.parameters(), "lr": lr})
                 lr *= 0.9
-        optimizer = torch.optim.Adam(opt_config, weight_decay=run_config.model_config.l2_reg)
-        
+        optimizer = torch.optim.Adam(
+            opt_config, weight_decay=run_config.model_config.l2_reg
+        )
+
         # Log parameter groups and learning rates
         logger.info("Optimizer configuration with custom learning rates:")
         total_params = 0
         for i, group in enumerate(optimizer.param_groups):
-            n_params = sum(p.numel() for p in group['params'])
+            n_params = sum(p.numel() for p in group["params"])
             total_params += n_params
             if i == 0:
-                logger.info(f"  Group {i}: Core model - {n_params:,} params, lr={group['lr']:.2e}")
+                logger.info(
+                    f"  Group {i}: Core model - {n_params:,} params, lr={group['lr']:.2e}"
+                )
             else:
-                logger.info(f"  Group {i}: Location model layer {i} - {n_params:,} params, lr={group['lr']:.2e}")
+                logger.info(
+                    f"  Group {i}: Location model layer {i} - {n_params:,} params, lr={group['lr']:.2e}"
+                )
         logger.info(f"  Total parameters: {total_params:,}")
     else:
         model = nn_gmm_modules.BaseNNModel(model_fn(n_inputs=run_config.n_inputs))
@@ -748,33 +764,41 @@ def get_dataset_predictions(
     for cur_batch in tqdm(dataloader, desc="Predicting", disable=not verbose):
         model.eval()
         with torch.no_grad():
-            if isinstance(model, nn_gmm_modules.NNCombined):
-                pred_mean, pred_ln_std = model(cur_batch.X, cur_batch.X_loc).chunk(2, dim=-1)
-            else:
-                pred_mean, pred_ln_std = model(cur_batch.X).chunk(2, dim=-1)
-            pred_std = torch.exp(pred_ln_std).cpu().numpy(force=True)
-            pred_mean = pred_mean.cpu().numpy(force=True)
+            batch_result = _get_batch_result(
+                cur_batch, model, run_config.use_sample_weights, has_nan=False
+            )
+
+            ind_loss = (
+                batch_result.ind_w_loss.numpy(force=True).astype(np.float16)
+                if run_config.use_sample_weights
+                else batch_result.ind_loss.numpy(force=True).astype(np.float16)
+            )
 
             if run_config.scale_ims:
-                pred_mean, pred_std = revert_im_scaling(pred_mean, run_config, pred_std)
+                pred_mean, pred_std = revert_im_scaling(
+                    batch_result.pred_mean.numpy(force=True),
+                    run_config,
+                    batch_result.pred_std.numpy(force=True),
+                )
 
             cur_result_df = pd.DataFrame(
                 data=np.concatenate(
                     [
                         pred_mean,
                         pred_std,
+                        ind_loss,
                     ],
                     axis=1,
                 ),
                 columns=np.concatenate(
-                    (run_config.pred_mean_keys, run_config.pred_std_keys)
+                    (run_config.pred_mean_keys, run_config.pred_std_keys, run_config.ind_loss_keys)
                 ),
                 index=(
                     cur_batch.record_int_ids
                     if isinstance(cur_batch, data.SimBatchData)
                     else cur_batch.record_ids
                 ),
-            )
+            ).astype({col: np.float16 for col in run_config.ind_loss_keys})
 
             result_dfs.append(cur_result_df)
 
@@ -837,7 +861,9 @@ def train(
             cur_bresult.loss.backward()
             optimizer.step()
 
-            model.update_grad_norms()
+            model.apply_grad_clipping()
+
+            model.update_logged_grad_norms()
 
             metrics = _save_metrics(
                 cur_bresult, metrics, use_sample_weights, cur_epoch_ix, "train"
@@ -890,8 +916,10 @@ def train(
                 f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
 
-    logger.info(f"Training completed. Best model at epoch "
-                f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}")
+    logger.info(
+        f"Training completed. Best model at epoch "
+        f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}"
+    )
 
     return metrics, best_model_state, best_model_epoch
 
@@ -919,7 +947,7 @@ def _get_batch_result(
     if isinstance(model, nn_gmm_modules.NNCombined):
         pred_mean, pred_ln_std = model(batch.X, batch.X_loc).chunk(2, dim=-1)
     else:
-        pred_mean, pred_ln_std = model(batch.X).chunk(2, dim=-1)  
+        pred_mean, pred_ln_std = model(batch.X).chunk(2, dim=-1)
     pred_std = torch.exp(pred_ln_std)
 
     if has_nan:
@@ -1166,7 +1194,9 @@ def run_predictions(
     """
     # Pre-process the input DataFrame
     pre_site_df = preprocessing.preprocess_site_features(
-        input_df, run_config.site_inputs + (run_config.loc_model_inputs if run_config.using_loc_model else [])
+        input_df,
+        run_config.site_inputs
+        + (run_config.loc_model_inputs if run_config.using_loc_model else []),
     )
     pre_source_df = preprocessing.preprocess_source_features(
         input_df, run_config.source_inputs
@@ -1174,11 +1204,15 @@ def run_predictions(
     pre_source_site_df = preprocessing.preprocess_event_site_features(
         input_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
-    pre_input_df = pd.concat([pre_site_df[run_config.site_inputs], pre_source_df, pre_source_site_df], axis=1)
+    pre_input_df = pd.concat(
+        [pre_site_df[run_config.site_inputs], pre_source_df, pre_source_site_df], axis=1
+    )
     X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
 
     if run_config.using_loc_model:
-        X_loc = torch.from_numpy(pre_site_df[run_config.loc_model_inputs].values).to(dtype=torch.float32, device=device)
+        X_loc = torch.from_numpy(pre_site_df[run_config.loc_model_inputs].values).to(
+            dtype=torch.float32, device=device
+        )
 
     model.eval()
     with torch.no_grad():

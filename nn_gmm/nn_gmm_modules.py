@@ -63,21 +63,26 @@ def create_multi_mlp(
 class BaseNNModel(nn.Module):
     """Base class for neural network models."""
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, max_norm: float | None = None):
         super().__init__()
         self.model = model
+        self.max_norm = max_norm
 
         self._grad_norms = []
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.model(X)
 
-    def reset_grad_norms(self) -> None:
-        """Reset the gradient norms."""
+    def apply_grad_clipping(self) -> None:
+        """Apply gradient clipping to the model parameters."""
+        pass
+
+    def reset_logged_grad_norms(self) -> None:
+        """Reset the logged gradient norms."""
         self._grad_norms = []
 
-    def update_grad_norms(self) -> None:
-        """Update the gradient norms."""
+    def update_logged_grad_norms(self) -> None:
+        """Add current grad norm to logged grad norms."""
         self._grad_norms.append(
             torch.nn.utils.get_total_norm(
                 [param.grad for param in self.parameters() if param.grad is not None]
@@ -91,7 +96,7 @@ class BaseNNModel(nn.Module):
 
         grad_norms = torch.tensor(self._grad_norms)
         if reset:
-            self.reset_grad_norms()
+            self.reset_logged_grad_norms()
 
         return (
             f"Gradient Norm: {torch.mean(grad_norms):.4f} ± {torch.std(grad_norms):.4f}, "
@@ -101,14 +106,35 @@ class BaseNNModel(nn.Module):
 
 class NNCombined(BaseNNModel):
 
-    def __init__(self, loc_model: nn.Module, core_model: nn.Module):
+    def __init__(
+        self,
+        loc_model: nn.Module,
+        core_model: nn.Module,
+        max_loc_norm: float | None = None,
+        max_core_norm: float | None = None,
+    ):
         nn.Module.__init__(self)
         self.loc_model = loc_model
         self.core_model = core_model
 
+        self.max_loc_norm = max_loc_norm
+        self.max_core_norm = max_core_norm
+
         self._grad_norms = []
         self._loc_grad_norms = []
         self._core_grad_norms = []
+
+    def apply_grad_clipping(self) -> None:
+        """Apply gradient clipping to the model parameters."""
+        if self.max_loc_norm is not None:
+            torch.nn.utils.clip_grad_norm_(
+                self.loc_model.parameters(), self.max_loc_norm
+            )
+
+        if self.max_core_norm is not None:
+            torch.nn.utils.clip_grad_norm_(
+                self.core_model.parameters(), self.max_core_norm
+            )
 
     def forward(self, X: torch.Tensor, X_loc: torch.Tensor) -> torch.Tensor:
         X_loc = self.loc_model(X_loc)
@@ -116,13 +142,13 @@ class NNCombined(BaseNNModel):
         pred = self.core_model(X)
         return pred
 
-    def reset_grad_norms(self) -> None:
+    def reset_logged_grad_norms(self) -> None:
         """Reset the gradient norms."""
         self._grad_norms = []
         self._loc_grad_norms = []
         self._core_grad_norms = []
 
-    def update_grad_norms(self) -> None:
+    def update_logged_grad_norms(self) -> None:
         """Update the gradient norms."""
         self._grad_norms.append(
             torch.nn.utils.get_total_norm(
@@ -159,7 +185,7 @@ class NNCombined(BaseNNModel):
         loc_grad_norms = torch.tensor(self._loc_grad_norms)
         core_grad_norms = torch.tensor(self._core_grad_norms)
         if reset:
-            self.reset_grad_norms()
+            self.reset_logged_grad_norms()
 
         return (
             f"Gradient Norm: {torch.mean(grad_norms):.2f} ± {torch.std(grad_norms):.2f}, "
