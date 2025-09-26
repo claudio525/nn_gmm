@@ -11,6 +11,8 @@ im_set: pSA
 scale_ims: True
 
 site_inputs: 
+- nztm_x
+- nztm_y 
 - vs30
 - z1p0
 - z2p5
@@ -18,11 +20,10 @@ site_inputs:
 source_inputs:
 - magnitude
 - tect_type
-- rake
+- rake 
 - dip
 - dtop
 - dbottom
-
 
 source_to_site_inputs:
 - rrup
@@ -30,9 +31,7 @@ source_to_site_inputs:
 - rx
 - ry
 
-loc_model_inputs: 
-- nztm_x
-- nztm_y 
+loc_model_inputs: null
 
 # Sample weighting
 apply_mag_sample_weighting: True
@@ -44,15 +43,23 @@ max_vs30_weight: 2.5
 total_max_weight: 5.0
 
 # IM weighting
-apply_im_weighting: False
-im_weights: null
+apply_im_weighting: True
+im_weights: 
+  pSA_2.0: 1.5
+  pSA_2.5: 2
+  pSA_3.0: 2
+  pSA_4.0: 2
+  pSA_5.0: 2
+  pSA_6.0: 2
+  pSA_7.5: 2
+  pSA_10.0: 2
 
 n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
 
-loc_max_grad_norm: 5.0
-core_max_grad_norm: 10.0
+loc_max_grad_norm: null
+core_max_grad_norm: null
 
 model:
   units: [32, 32, 64]
@@ -61,7 +68,7 @@ model:
   dropout_rate: 0.0
   l2_reg: 0.0001
 
-rel_loc_model_dir: nn_gmm/results/loc_models/0925_1157_optimized_10Epochs_emb32
-loc_model_base_lr: 0.0001
+rel_loc_model_dir: null
+loc_model_base_lr: null
 
 rel_results_dir: nn_gmm/results

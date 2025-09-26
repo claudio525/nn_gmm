@@ -14,6 +14,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 import optuna as opt
+import sklearn.neighbors as skn
 
 from qcore import coordinates
 import ml_tools as mlt
@@ -21,6 +22,8 @@ import ml_tools as mlt
 from . import data
 from . import constants
 from . import utils
+from . import preprocessing as pre
+from .imdb import IMDB
 from . import preprocessing as pre
 
 
@@ -57,6 +60,36 @@ class LocationRegionBatchData(data.BaseBatchData):
         )
 
 
+class LocationSiteCondBatchData(data.BaseBatchData):
+
+    def __init__(
+        self,
+        X: torch.Tensor,
+        vs30: torch.Tensor,
+        z1p0: torch.Tensor,
+        z2p5: torch.Tensor,
+    ):
+        super().__init__()
+        self.X = X
+        self.vs30 = vs30
+        self.z1p0 = z1p0
+        self.z2p5 = z2p5
+
+    @property
+    def n_samples(self):
+        return self.X.shape[0]
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}("
+            f"n_samples={self.n_samples.shape}, "
+            f"X_shape={self.X.shape}, "
+            f"vs30_shape={self.vs30.shape}, "
+            f"z1p0_shape={self.z1p0.shape}, "
+            f"z2p5_shape={self.z2p5.shape})"
+        )
+
+
 class LocationRegionDataset(data.BaseDataset):
 
     def __init__(self, loc_df: pd.DataFrame, device: torch.device):
@@ -88,14 +121,43 @@ class LocationRegionDataset(data.BaseDataset):
         )
 
 
-class LocationRegionNN(nn.Module):
+class LocationSiteCondDataset(data.BaseDataset):
 
+    def __init__(self, loc_df: pd.DataFrame, device: torch.device):
+        super().__init__()
+        self.loc_df = loc_df
+
+        self.X_values = torch.from_numpy(self.loc_df[["nztm_x", "nztm_y"]].values).to(
+            device, dtype=torch.float32
+        )
+        self.vs30_values = torch.from_numpy(self.loc_df["vs30"].values).to(
+            device, dtype=torch.float32
+        )
+        self.z1p0_values = torch.from_numpy(self.loc_df["z1p0"].values).to(
+            device, dtype=torch.float32
+        )
+        self.z2p5_values = torch.from_numpy(self.loc_df["z2p5"].values).to(
+            device, dtype=torch.float32
+        )
+
+    def __len__(self):
+        return self.loc_df.shape[0]
+
+    def get_batch(
+        self, indices: np.ndarray | torch.Tensor
+    ) -> LocationSiteCondBatchData:
+        return LocationSiteCondBatchData(
+            X=self.X_values[indices],
+            vs30=self.vs30_values[indices],
+            z1p0=self.z1p0_values[indices],
+            z2p5=self.z2p5_values[indices],
+        )
+
+
+class LocationEmbeddingNN(nn.Module):
     def __init__(
         self,
         n_inputs: int,
-        n_basin_classes: int,
-        n_district_classes: int,
-        n_authority_classes: int,
         units: list[int],
         act_fn_str: str | None,
         embedding_dim: int,
@@ -103,6 +165,7 @@ class LocationRegionNN(nn.Module):
         dropout_rate: float | None = None,
     ):
         super().__init__()
+        self.embedding_dim = embedding_dim
 
         core_nn = nn.Sequential()
         for ix, cur_n_units in enumerate(units):
@@ -126,20 +189,59 @@ class LocationRegionNN(nn.Module):
         core_nn.append(nn.Linear(units[-1], embedding_dim))
         self.core_nn = core_nn
 
-        self.basin_head = nn.Sequential(
-            nn.Linear(embedding_dim, n_basin_classes),
-        )
+    def forward(self, X: torch.Tensor):
+        emb_vector = self.core_nn(X)
+        return emb_vector
 
-        self.district_head = nn.Sequential(
-            nn.Linear(embedding_dim, n_district_classes),
-        )
 
-        self.authority_head = nn.Sequential(
-            nn.Linear(embedding_dim, n_authority_classes),
+class LocationSiteCondNN(nn.Module):
+    def __init__(
+        self,
+        embedding_model: LocationEmbeddingNN,
+        n_outputs: int = 3,
+    ):
+        super().__init__()
+
+        self.embedding_model = embedding_model
+
+        self.site_cond_head = nn.Sequential(
+            nn.Linear(embedding_model.embedding_dim, n_outputs),
         )
 
     def forward(self, X: torch.Tensor):
-        features = self.core_nn(X)
+        features = self.embedding_model(X)
+        results = self.site_cond_head(features)
+        vs30, z1p0, z2p5 = results[:, 0], results[:, 1], results[:, 2]
+        return vs30, z1p0, z2p5
+
+
+class LocationRegionNN(nn.Module):
+
+    def __init__(
+        self,
+        embedding_model: LocationEmbeddingNN,
+        n_basin_classes: int,
+        n_district_classes: int,
+        n_authority_classes: int,
+    ):
+        super().__init__()
+
+        self.embedding_model = embedding_model
+
+        self.basin_head = nn.Sequential(
+            nn.Linear(embedding_model.embedding_dim, n_basin_classes),
+        )
+
+        self.district_head = nn.Sequential(
+            nn.Linear(embedding_model.embedding_dim, n_district_classes),
+        )
+
+        self.authority_head = nn.Sequential(
+            nn.Linear(embedding_model.embedding_dim, n_authority_classes),
+        )
+
+    def forward(self, X: torch.Tensor):
+        features = self.embedding_model(X)
         basin_out = self.basin_head(features)
         district_out = self.district_head(features)
         authority_out = self.authority_head(features)
@@ -161,10 +263,10 @@ def get_random_sites(n_sites: int, add_nztm: bool = False) -> np.ndarray:
     site_locs, ctr = [], 0
     while ctr < n_sites:
         cur_lon_values = np.random.uniform(
-            constants.NZ_BOUNDING_BOX[0], constants.NZ_BOUNDING_BOX[1], 1000
+            constants.NZ_BOUNDING_BOX[0], constants.NZ_BOUNDING_BOX[1], 100000
         )
         cur_lat_values = np.random.uniform(
-            constants.NZ_BOUNDING_BOX[2], constants.NZ_BOUNDING_BOX[3], 1000
+            constants.NZ_BOUNDING_BOX[2], constants.NZ_BOUNDING_BOX[3], 100000
         )
 
         mask = shapely.contains_xy(land_polygon, cur_lon_values, cur_lat_values)
@@ -270,9 +372,7 @@ def get_rand_region_site_df(
         basin_label_enc = LabelEncoder()
         basin_label_enc.fit(site_df["basin"])
     pre_site_df["basin"] = basin_label_enc.transform(site_df["basin"])
-
     pre_site_df["district"] = district_label_enc.transform(site_df["district"])
-
     pre_site_df["authority"] = authority_label_enc.transform(site_df["authority"])
 
     return (
@@ -282,7 +382,39 @@ def get_rand_region_site_df(
     )
 
 
-def run_loc_model_training(
+def get_rand_site_cond_site_df(imdb_ffp: Path, n_sites: int) -> pd.DataFrame:
+    """
+    Get random sites with vs30, z1p0, z2p5 values
+    computed using nearest neighbour interpolation.
+    """
+    with IMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
+
+    rand_site_df = pd.DataFrame(data=get_random_sites(10_000), columns=["lon", "lat"])
+    rand_site_df[["nztm_y", "nztm_x"]] = coordinates.wgs_depth_to_nztm(
+        rand_site_df[["lat", "lon"]].values
+    )
+
+    site_nn = skn.RadiusNeighborsRegressor(radius=8100, weights="distance")
+    site_nn.fit(site_df[["nztm_x", "nztm_y"]], site_df[["vs30", "z1p0", "z2p5"]])
+
+    rand_site_df[["vs30", "z1p0", "z2p5"]] = site_nn.predict(
+        rand_site_df[["nztm_x", "nztm_y"]]
+    )
+
+    mask = rand_site_df.isna().any(axis=1)
+    logger.info(f"Dropping {mask.sum()} random sites with NaN vs30/z1p0/z2p5 values")
+    rand_site_df = rand_site_df.loc[~mask]
+
+    # Run site pre-processing
+    pre_rand_site_df = pre.preprocess_site_features(
+        rand_site_df, ["nztm_x", "nztm_y", "vs30", "z1p0", "z2p5"]
+    )
+
+    return rand_site_df, pre_rand_site_df
+
+
+def run_region_model_training(
     n_train_sites: int,
     n_val_sites: int,
     n_epochs: int,
@@ -336,23 +468,30 @@ def run_loc_model_training(
     val_dataset = LocationRegionDataset(val_pre_site_df, device=device)
 
     train_dataloader = data.CustomDataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, use_torch=True, device=device
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        use_torch=True,
+        device=device,
     )
     val_dataloader = data.CustomDataLoader(
         val_dataset, batch_size=1024, shuffle=False, use_torch=True, device=device
     )
 
     # Create the model
-    model = LocationRegionNN(
+    emb_model = LocationEmbeddingNN(
         n_inputs=2,
-        n_basin_classes=len(basin_label_enc.classes_),
-        n_district_classes=len(district_label_enc.classes_),
-        n_authority_classes=len(authority_label_enc.classes_),
         units=units,
         act_fn_str=activation_fn,
         embedding_dim=embedding_dim,
         use_batch_norm=use_batch_norm,
         dropout_rate=dropout_rate,
+    )
+    model = LocationRegionNN(
+        embedding_model=emb_model,
+        n_basin_classes=len(basin_label_enc.classes_),
+        n_district_classes=len(district_label_enc.classes_),
+        n_authority_classes=len(authority_label_enc.classes_),
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=l2_reg)
@@ -405,7 +544,6 @@ def run_loc_model_training(
         ## Validation
         model.eval()
         n_samples = 0
-
         with torch.no_grad():
             for cur_batch in tqdm(val_dataloader, disable=not verbose):
                 basin_logits, district_logits, authority_logits = model(cur_batch.X)
@@ -498,14 +636,14 @@ def run_loc_model_training(
         "best_model_epoch": int(best_model_epoch),
         "best_val_loss": float(best_val_loss),
     }
-    mlt.utils.write_to_yaml(
-        metadata, outdir / "metadata.yaml")
-    
+    mlt.utils.write_to_yaml(metadata, outdir / "metadata.yaml")
+
     metrics_df = pd.DataFrame(metrics)
     metrics_df.to_parquet(outdir / "metrics.parquet")
 
     # Save the model
-    torch.save(model, outdir / "loc_model.pt")
+    torch.save(model, outdir / "model.pt")
+    torch.save(emb_model, outdir / "emb_model.pt")
 
     metrics_keys = ["total_loss", "basin_loss", "district_loss", "authority_loss"]
     for cur_metric in metrics_keys:
@@ -517,24 +655,208 @@ def run_loc_model_training(
     return outdir
 
 
+def run_site_cond_model_training(
+    imdb_ffp: Path,
+    n_train_sites: int,
+    n_val_sites: int,
+    n_epochs: int,
+    units: list[int],
+    l2_reg: float,
+    batch_size: int,
+    activation_fn: str,
+    embedding_dim: int,
+    dropout_rate: float,
+    use_batch_norm: bool,
+    device: torch.device,
+    base_out_dir: Path,
+    suffix: str = "",
+    seed: int = 42,
+    verbose: bool = True,
+):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # Generate training and validation sites
+    logger.info(f"Generating {n_train_sites} training sites")
+    train_site_df, train_pre_site_df = get_rand_site_cond_site_df(
+        imdb_ffp, n_train_sites
+    )
+    logger.info(f"Generating {n_val_sites} validation sites")
+    val_site_df, val_pre_site_df = get_rand_site_cond_site_df(imdb_ffp, n_val_sites)
+
+    # Datasets and Dataloaders
+    train_dataset = LocationSiteCondDataset(train_pre_site_df, device=device)
+    val_dataset = LocationSiteCondDataset(val_pre_site_df, device=device)
+
+    train_dataloader = data.CustomDataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        use_torch=True,
+        device=device,
+    )
+    val_dataloader = data.CustomDataLoader(
+        val_dataset, batch_size=1024, shuffle=False, use_torch=True, device=device
+    )
+
+    # Create the model
+    emb_model = LocationEmbeddingNN(
+        n_inputs=2,
+        units=units,
+        act_fn_str=activation_fn,
+        embedding_dim=embedding_dim,
+        use_batch_norm=use_batch_norm,
+        dropout_rate=dropout_rate,
+    )
+    model = LocationSiteCondNN(
+        embedding_model=emb_model,
+        n_outputs=3,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=l2_reg)
+
+    metrics = {
+        "vs30_loss_train": np.zeros(n_epochs),
+        "vs30_loss_val": np.zeros(n_epochs),
+        "z1p0_loss_train": np.zeros(n_epochs),
+        "z1p0_loss_val": np.zeros(n_epochs),
+        "z2p5_loss_train": np.zeros(n_epochs),
+        "z2p5_loss_val": np.zeros(n_epochs),
+        "total_loss_train": np.zeros(n_epochs),
+        "total_loss_val": np.zeros(n_epochs),
+    }
+    best_val_loss = np.inf
+    best_model_epoch, best_model_state = None, None
+
+    # Training loop
+    for i in range(n_epochs):
+        logger.debug(f"Epoch: {i + 1}/{n_epochs}")
+
+        # Training
+        n_samples = 0
+        model.train()
+        for cur_batch in tqdm(train_dataloader, disable=not verbose):
+            optimizer.zero_grad()
+
+            vs30_pred, z1p0_pred, z2p5_pred = model(cur_batch.X)
+
+            vs30_loss = F.mse_loss(vs30_pred.squeeze(), cur_batch.vs30)
+            z1p0_loss = F.mse_loss(z1p0_pred.squeeze(), cur_batch.z1p0)
+            z2p5_loss = F.mse_loss(z2p5_pred.squeeze(), cur_batch.z2p5)
+
+            loss = vs30_loss + z1p0_loss + z2p5_loss
+            loss.backward()
+            optimizer.step()
+
+            n_samples += cur_batch.n_samples
+
+            metrics["vs30_loss_train"][i] += vs30_loss.item()
+            metrics["z1p0_loss_train"][i] += z1p0_loss.item()
+            metrics["z2p5_loss_train"][i] += z2p5_loss.item()
+            metrics["total_loss_train"][i] += loss.item()
+
+        metrics["vs30_loss_train"][i] /= n_samples
+        metrics["z1p0_loss_train"][i] /= n_samples
+        metrics["z2p5_loss_train"][i] /= n_samples
+        metrics["total_loss_train"][i] /= n_samples
+
+        ## Validation
+        model.eval()
+        n_samples = 0
+        with torch.no_grad():
+            for cur_batch in tqdm(val_dataloader, disable=not verbose):
+                vs30_pred, z1p0_pred, z2p5_pred = model(cur_batch.X)
+
+                vs30_loss = F.mse_loss(vs30_pred.squeeze(), cur_batch.vs30)
+                z1p0_loss = F.mse_loss(z1p0_pred.squeeze(), cur_batch.z1p0)
+                z2p5_loss = F.mse_loss(z2p5_pred.squeeze(), cur_batch.z2p5)
+
+                loss = vs30_loss + z1p0_loss + z2p5_loss
+
+                n_samples += cur_batch.n_samples
+
+                metrics["vs30_loss_val"][i] += vs30_loss.item()
+                metrics["z1p0_loss_val"][i] += z1p0_loss.item()
+                metrics["z2p5_loss_val"][i] += z2p5_loss.item()
+                metrics["total_loss_val"][i] += loss.item()
+
+        metrics["vs30_loss_val"][i] /= n_samples
+        metrics["z1p0_loss_val"][i] /= n_samples
+        metrics["z2p5_loss_val"][i] /= n_samples
+        metrics["total_loss_val"][i] /= n_samples
+
+        # Keep track of the best model
+        if metrics["total_loss_val"][i] < best_val_loss:
+            best_model_epoch = i
+            best_val_loss = metrics["total_loss_val"][i]
+            best_model_state = model.state_dict()
+
+        logger.info(f"Epoch {i + 1}/{n_epochs} completed.")
+        logger.info(
+            f"\n{'Training':<20} {'Validation':<20}\n"
+            f"{'Loss:':<12} {metrics['total_loss_train'][i]:<12.6f} {'Loss:':<12} {metrics['total_loss_val'][i]:<12.6f}\n"
+            f"{'  Vs30:':<12} {metrics['vs30_loss_train'][i]:<12.6f} {'  Vs30:':<12} {metrics['vs30_loss_val'][i]:<12.6f}\n"
+            f"{'  Z1p0:':<12} {metrics['z1p0_loss_train'][i]:<12.6f} {'  Z1p0:':<12} {metrics['z1p0_loss_val'][i]:<12.6f}\n"
+            f"{'  Z2p5:':<12} {metrics['z2p5_loss_train'][i]:<12.6f} {'  Z2p5:':<12} {metrics['z2p5_loss_val'][i]:<12.6f}"
+        )
+
+    logger.info(
+        f"Best model at epoch {best_model_epoch + 1} with validation loss {best_val_loss:.6f}"
+    )
+
+    # Load the best model
+    model.load_state_dict(best_model_state)
+
+    # Create output directory
+    (outdir := base_out_dir / mlt.utils.create_run_name(suffix=suffix)).mkdir(
+        parents=False, exist_ok=False
+    )
+
+    metadata = {
+        "best_model_epoch": int(best_model_epoch),
+        "best_val_loss": float(best_val_loss),
+    }
+    mlt.utils.write_to_yaml(metadata, outdir / "metadata.yaml")
+
+    metrics_df = pd.DataFrame(metrics)
+    metrics_df.to_parquet(outdir / "metrics.parquet")
+
+    # Save the model
+    torch.save(model, outdir / "model.pt")
+    torch.save(emb_model, outdir / "emb_model.pt")
+
+    metrics_keys = ["total_loss", "vs30_loss", "z1p0_loss", "z2p5_loss"]
+    for cur_metric in metrics_keys:
+        fig = mlt.plotting.plot_metrics(metrics, [cur_metric])
+
+        fig.savefig(outdir / f"{cur_metric}_loc_nn.png", dpi=300)
+        plt.close(fig)
+
+    return outdir
+
+
 def hp_objective(
     trial: opt.Trial,
+    model_type: str,
     base_out_dir: Path,
     n_train_sites: int,
     n_val_sites: int,
     n_epochs: int,
     device: str,
+    imdb_ffp: Path | None = None,
 ) -> float:
     """
     Objective function for hyperparameter optimization using Optuna.
     Should not be used for anything else.
     """
     log_ffp = base_out_dir / f"trial_{trial.number:03d}.log"
-    
+
     # Add file handler to logger
     file_handler = logging.FileHandler(log_ffp)
     file_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
@@ -543,6 +865,9 @@ def hp_objective(
     n_layers = trial.suggest_int("n_layers", 1, 4)
     unit_size = trial.suggest_categorical("unit_size", [16, 32, 64, 128])
     units = [unit_size] * n_layers
+    embedding_dim = trial.suggest_categorical(
+        "embedding_dim", [8, 16, 32, 64, 128, 256]
+    )
 
     l2_reg = trial.suggest_categorical(
         "l2_reg", [1e-2, 5e-3, 1e-3, 5e-4, 1e-4, 5e-5, 1e-5]
@@ -556,21 +881,44 @@ def hp_objective(
     )
     use_batch_norm = trial.suggest_categorical("use_batch_norm", [True, False])
 
-    out_dir = run_loc_model_training(
-        n_train_sites,
-        n_val_sites,
-        n_epochs,
-        units,
-        l2_reg,
-        batch_size,
-        activation_fn,
-        dropout_rate,
-        use_batch_norm,
-        device,
-        base_out_dir,
-        suffix=f"trial_{trial.number:03d}",
-        verbose=False,
-    )
+    if model_type == "region":
+        out_dir = run_region_model_training(
+            n_train_sites,
+            n_val_sites,
+            n_epochs,
+            units,
+            l2_reg,
+            batch_size,
+            activation_fn,
+            embedding_dim,
+            dropout_rate,
+            use_batch_norm,
+            device,
+            base_out_dir,
+            suffix=f"trial_{trial.number:03d}",
+            verbose=False,
+        )
+    elif model_type == "site_cond":
+        assert imdb_ffp is not None, "imdb_ffp must be provided for site_cond type"
+        out_dir = run_site_cond_model_training(
+            imdb_ffp,
+            n_train_sites,
+            n_val_sites,
+            n_epochs,
+            units,
+            l2_reg,
+            batch_size,
+            activation_fn,
+            embedding_dim,
+            dropout_rate,
+            use_batch_norm,
+            device,
+            base_out_dir,
+            suffix=f"trial_{trial.number:03d}",
+            verbose=False,
+        )
+    else:
+        raise ValueError(f"Invalid type: {model_type}. Must be 'region' or 'site_cond'.")
 
     # Remove file handler from logger
     logger.removeHandler(file_handler)

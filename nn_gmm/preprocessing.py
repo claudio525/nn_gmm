@@ -9,7 +9,7 @@ from . import constants
 
 logger = logging.getLogger(__name__)
 
-def preprocess_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str]):
+def preprocess_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str], keep_other_cols: bool = False):
     """
     Pre-process the site features in the site DataFrame.
     Does not modify the original DataFrame.
@@ -27,7 +27,8 @@ def preprocess_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[
         DataFrame containing the pre-processed site features.
     """
     pre_site_df = site_df.copy()
-    pre_site_df = pre_site_df.loc[:, site_feature_keys]
+    if not keep_other_cols:
+        pre_site_df = pre_site_df.loc[:, site_feature_keys]
 
     for cur_feature in site_feature_keys:
         # Standard min-max pre-processing

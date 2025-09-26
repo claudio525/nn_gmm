@@ -16,6 +16,8 @@ torch.multiprocessing.set_start_method("spawn", force=True)
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
+if torch.mps.is_available():
+    device = "mps"
 
 print(f"Using device: {device.upper()}")
 

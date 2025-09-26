@@ -23,6 +23,7 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 
 @app.command("train-loc-model")
 def train_loc_model(
+    model_type: str,
     n_train_sites: int,
     n_val_sites: int,
     n_epochs: int,
@@ -35,6 +36,7 @@ def train_loc_model(
     use_batch_norm: bool,
     base_out_dir: Path,
     suffix: str = "",
+    imdb_ffp: Path | None = None,
 ):
     """Train a location model."""
     log_ffp = Path(__file__).parent / "nn_cmds.log"
@@ -56,27 +58,51 @@ def train_loc_model(
     logger.info(f"  dropout_rate: {dropout_rate}")
     logger.info(f"  use_batch_norm: {use_batch_norm}")
 
-    out_dir = nng.loc_pre.run_loc_model_training(
-        n_train_sites=n_train_sites,
-        n_val_sites=n_val_sites,
-        n_epochs=n_epochs,
-        units=units,
-        l2_reg=l2_reg,
-        batch_size=batch_size,
-        activation_fn=activation_fn,
-        dropout_rate=dropout_rate,
-        embedding_dim=embedding_dim,
-        use_batch_norm=use_batch_norm,
-        device=device,
-        base_out_dir=base_out_dir,
-        suffix=suffix,
-    )
+    if model_type == "region":
+        out_dir = nng.loc_pre.run_region_model_training(
+            n_train_sites=n_train_sites,
+            n_val_sites=n_val_sites,
+            n_epochs=n_epochs,
+            units=units,
+            l2_reg=l2_reg,
+            batch_size=batch_size,
+            activation_fn=activation_fn,
+            dropout_rate=dropout_rate,
+            embedding_dim=embedding_dim,
+            use_batch_norm=use_batch_norm,
+            device=device,
+            base_out_dir=base_out_dir,
+            suffix=suffix,
+        )
+    elif model_type == "site_cond":
+        if imdb_ffp is None:
+            raise ValueError("imdb_ffp must be provided for site_cond model training")
+
+        out_dir = nng.loc_pre.run_site_cond_model_training(
+            imdb_ffp=imdb_ffp,
+            n_train_sites=n_train_sites,
+            n_val_sites=n_val_sites,
+            n_epochs=n_epochs,
+            units=units,
+            l2_reg=l2_reg,
+            batch_size=batch_size,
+            activation_fn=activation_fn,
+            dropout_rate=dropout_rate,
+            embedding_dim=embedding_dim,
+            use_batch_norm=use_batch_norm,
+            device=device,
+            base_out_dir=base_out_dir,
+            suffix=suffix,
+        )
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
 
     shutil.move(log_ffp, out_dir / log_ffp.name)
 
 
 @app.command("opt-loc-model")
 def opt_loc_model(
+    model_type: str,
     base_out_dir: Path,
     n_train_sites: int,
     n_val_sites: int,
@@ -84,6 +110,7 @@ def opt_loc_model(
     n_trials: int,
     suffix: str = "",
     n_procs: int = 1,
+    imdb_ffp: Path | None = None,
 ):
     """Run hyperparameter optimization for location model."""
     (study_dir := base_out_dir / mlt.utils.create_run_name(suffix=suffix)).mkdir(
@@ -106,11 +133,13 @@ def opt_loc_model(
     study.optimize(
         functools.partial(
             nng.loc_pre.hp_objective,
+            model_type=model_type,
             base_out_dir=study_dir,
             n_train_sites=n_train_sites,
             n_val_sites=n_val_sites,
             n_epochs=n_epochs,
             device=device,
+            imdb_ffp=imdb_ffp,
         ),
         n_trials=n_trials,
     )
