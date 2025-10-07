@@ -103,21 +103,21 @@ def train_cv(
     run_config_ffp: Path,
     n_event_folds: int,
     n_site_folds: int,
-    n_epochs: int = None,
-    batch_size: int = None,
-    id_suffix: str = None,
-    n_sites: int = None,
+    n_epochs: int | None = None,
+    seed: int | None = None,
+    batch_size: int | None = None,
+    id_suffix: str | None = None,
+    n_sites: int | None = None,
     n_procs: int = 1,
     run_notebook: bool = True,
     remove_cv_results: bool = False,
 ):
     """Train and evaluate the GMM using cross-validation."""
-
-
     run_config = nng.RunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
         device=device,
         n_epochs=n_epochs,
+        seed=seed,
         batch_size=batch_size,
     )
 

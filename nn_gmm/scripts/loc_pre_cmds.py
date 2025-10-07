@@ -1,3 +1,4 @@
+import multiprocessing as mp
 import logging
 import functools
 import shutil
@@ -15,6 +16,7 @@ torch.multiprocessing.set_start_method("spawn", force=True)
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
+
 
 print(f"Using device: {device.upper()}")
 
@@ -111,38 +113,60 @@ def opt_loc_model(
     suffix: str = "",
     n_procs: int = 1,
     imdb_ffp: Path | None = None,
+    study_dir: Path | None  = None
 ):
     """Run hyperparameter optimization for location model."""
-    (study_dir := base_out_dir / mlt.utils.create_run_name(suffix=suffix)).mkdir(
-        parents=False, exist_ok=False
-    )
+    if study_dir is None:
+        (study_dir := base_out_dir / mlt.utils.create_run_name(suffix=suffix)).mkdir(
+            parents=False, exist_ok=False
+        )
+        # Create the study first
+        study = opt.create_study(
+            direction="minimize",
+            study_name=study_dir.name,
+            storage="sqlite:///{}.db".format(study_dir / study_dir.name),
+            load_if_exists=True,
+        )
 
     log_ffp = study_dir / "study.log"
     logger = nng.utils.setup_logging(
         log_ffp,
         file_level=logging.WARNING if n_procs > 1 else logging.INFO,
         console_level=logging.WARNING if n_procs > 1 else logging.INFO,
+        file_append=True
     )
     print("Writing logs to:", log_ffp)
 
-    study = opt.create_study(
-        direction="minimize",
-        study_name=study_dir.name,
-        storage="sqlite:///{}.db".format(study_dir / study_dir.name),
-    )
-    study.optimize(
-        functools.partial(
-            nng.loc_pre.hp_objective,
-            model_type=model_type,
-            base_out_dir=study_dir,
-            n_train_sites=n_train_sites,
-            n_val_sites=n_val_sites,
-            n_epochs=n_epochs,
-            device=device,
+    if n_procs == 1:
+        nng.loc_pre.run_hp_study(
+            study_dir,
+            model_type,
+            n_train_sites,
+            n_val_sites,
+            n_epochs,
+            n_trials,
+            device,
             imdb_ffp=imdb_ffp,
-        ),
-        n_trials=n_trials,
-    )
+        )
+    else:
+        with mp.Pool(n_procs) as pool:
+            pool.starmap(
+                nng.loc_pre.run_hp_study,
+                [
+                    (
+                        study_dir,
+                        model_type,
+                        n_train_sites,
+                        n_val_sites,
+                        n_epochs,
+                        n_trials,
+                        device,
+                        imdb_ffp,
+                        True
+                    )
+                for _ in range(n_procs)],
+            )
+
 
 
 if __name__ == "__main__":

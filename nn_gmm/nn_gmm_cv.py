@@ -54,6 +54,7 @@ def train_cv(
 
     # Drop test events
     events = events[~np.isin(events, run_config.test_events)]
+    event_df = event_df.loc[event_df.event_id.isin(events)]
 
     np.random.seed(run_config.seed)
 
@@ -69,8 +70,8 @@ def train_cv(
     )
     event_df["mag_bin"] = pd.cut(
         event_df["magnitude"],
-        bins=[5.5, 6.25, 7.25, 8.5],
-        labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_8p5"],
+        bins=[5.5, 6.25, 7.25, 7.75, 8.5],
+        labels=["mag_5p5_6p25", "mag_6p25_7p25", "mag_7p25_7p75", "mag_7p75_8p5"],
     )
 
     # Ensure even sampling of events wrt. magnitude
@@ -80,8 +81,8 @@ def train_cv(
     event_folds = [
         events[ind[1]]
         for ind in mag_split.split(
-            event_df.loc[event_df.event_id.isin(events)],
-            event_df.loc[event_df.event_id.isin(events), "mag_bin"],
+            event_df,
+            event_df["mag_bin"],
         )
     ]
 

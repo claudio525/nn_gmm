@@ -64,6 +64,7 @@ def setup_logging(
     file_level=logging.DEBUG,
     enable_console: bool = True,
     console_level=logging.INFO,
+    file_append: bool = False,
 ):
     # Create a logger
     logger = logging.getLogger()
@@ -75,7 +76,7 @@ def setup_logging(
 
     # Create file handler with its own level
     if log_file is not None:
-        file_handler = logging.FileHandler(log_file, mode="w")
+        file_handler = logging.FileHandler(log_file, mode="a" if file_append else "w")
         file_handler.setLevel(file_level)
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")

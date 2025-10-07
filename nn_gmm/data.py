@@ -213,7 +213,7 @@ class BaseIMDBDataset(BaseDataset):
         logger.info(
             f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
         )
-        with IMDB(imdb_ffp, readonly=True, memory_map_size=30, cache_size=5000) as imdb:
+        with IMDB(imdb_ffp, readonly=True, memory_map_size=5, cache_size=5000) as imdb:
             self._im_data = imdb.get_im_data_tmp_table(
                 self.ims, self.record_int_ids
             ).sort_index()

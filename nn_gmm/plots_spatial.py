@@ -10,6 +10,7 @@ import numpy as np
 from tqdm import tqdm
 
 from pygmt_helper import plotting
+from qcore import nhm
 
 from . import nn_gmm
 from .imdb import IMDB
@@ -22,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 class SpatialPlot:
 
+    IM_LIMITS_MAPPING = {
+        "pSA_0.01": (0.0, 1.0, 0.05),
+        "pSA_0.1": (0.0, 2.5, 0.125),
+        "pSA_0.5": (0.0, 1.5, 0.075),
+        "pSA_1.0": (0.0, 0.8, 0.04),
+        "pSA_3.0": (0.0, 0.6, 0.03),
+        "pSA_5.0": (0.0, 0.25, 0.0125),
+        "pSA_10.0": (0.0, 0.025, 0.00125),
+    }
+
     DEFAULT_PLT_KWARGS = {
         "topo_cmap_min": 0,
         "topo_cmap_max": 3000,
@@ -32,7 +43,7 @@ class SpatialPlot:
     DEFAULT_CONFIG_OPTIONS = dict(
         MAP_FRAME_TYPE="plain",
         FORMAT_GEO_MAP="ddd.xx",
-        MAP_GRID_PEN="0.5p,gray",
+        MAP_GRID_PEN="1p,gray",
         MAP_TICK_PEN_PRIMARY="1p,black",
         MAP_FRAME_PEN="1p,black",
         MAP_FRAME_AXES="wsne",
@@ -70,7 +81,78 @@ class SpatialPlot:
 
         return self
 
-    def plot_basin_boundaries(self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs):
+    def plot_ratio(
+        self,
+        ratio_df: pd.DataFrame,
+        data_key: str,
+        grid_spacing: str = "500e/500e",
+        **plot_grid_kwargs,
+    ):
+        """Adds a ratio grid to the existing figure."""
+        plot_grid_kwargs = {
+            "cb_label": data_key,
+            "plot_contours": False,
+            "reverse_cmap": True,
+            "cmap": "polar",
+            "cmap_limits": (-0.5, 0.5, 1.0 / 16),
+            "cmap_limit_colors": ("darkred", "darkblue"),
+        } | plot_grid_kwargs
+
+        grid = plotting.create_grid(ratio_df, data_key, grid_spacing=grid_spacing)
+
+        plotting.plot_grid(self.fig, grid, **plot_grid_kwargs)
+
+        return self
+
+    def plot_im_values(
+        self,
+        im_df: pd.DataFrame,
+        key: str,
+        im: str | None = None,
+        grid_spacing: str = "500e/500e",
+        **plot_grid_kwargs,
+    ):
+        """
+        Adds an IM grid to the existing figure.
+
+        Parameters
+        ----------
+        im_df : pd.DataFrame
+            DataFrame containing 'lon', 'lat', and IM column.
+        key : str
+            The IM column to plot.
+        im : str
+            The IM name (e.g., 'pSA_1.0') for setting color scale limits.
+            If None, key is used
+        """
+        im = im or key
+        assert key in im_df.columns, f"Invalid key: {key}"
+        assert im in self.IM_LIMITS_MAPPING, f"Unsupported IM: {im}"
+        assert "lon" in im_df.columns, "im_df must contain 'lon' column"
+        assert "lat" in im_df.columns, "im_df must contain 'lat' column"
+
+        plot_grid_kwargs = {
+            "cb_label": im,
+            "plot_contours": False,
+            "reverse_cmap": True,
+            "cmap": "hot",
+            "cmap_limits": self.IM_LIMITS_MAPPING[im],
+            "cmap_limit_colors": ("white", "black"),
+        } | plot_grid_kwargs
+
+        im_grid = plotting.create_grid(im_df, key, grid_spacing=grid_spacing)
+
+        plotting.plot_grid(
+            self.fig,
+            im_grid,
+            **plot_grid_kwargs,
+        )
+
+        return self
+
+    def plot_basin_boundaries(
+        self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs
+    ):
         """Adds basin boundaries to the existing figure."""
         plot_kwargs = {"pen": "0.15p,red"} | plot_kwargs
 
@@ -81,12 +163,45 @@ class SpatialPlot:
 
         return self
 
+    def plot_faults(self, faults: tuple[str] | list[str] | None = None, **plot_kwargs):
+        """Adds fault traces to the existing figure."""
+        plot_kwargs = {"pen": "0.5p,darkgray"} | plot_kwargs
+
+        nhm_data = nhm.load_nhm(str(constants.NHM_FAULT_FFP))
+
+        # Plot the fault traces
+        for cur_name, cur_fault in nhm_data.items():
+            if cur_name in faults or faults is None:
+                cur_trace = cur_fault.trace
+                self.fig.plot(
+                    x=cur_trace[:, 0],
+                    y=cur_trace[:, 1],
+                    **plot_kwargs,
+                )
+
+        return self
+    
+    def plot_hypocentre(self, lon: float, lat: float, **plot_kwargs):
+        """Adds a hypocentre to the existing figure."""
+        plot_kwargs = {"style": "a0.25c", "fill": "purple", "pen": "0.5p,black"} | plot_kwargs
+
+        self.fig.plot(
+            x=lon,
+            y=lat,
+            **plot_kwargs,
+        )
+
+        return self
+
     def save(self, output_ffp: Path, dpi: int = 900):
         self.fig.savefig(output_ffp, dpi=dpi, anti_alias=True)
 
 
 def basin_site_map(
-    imdb_ffp: Path, output_ffp: Path, site_levels: tuple[int] = (0,), basin_site_levels: tuple[int] | None = None
+    imdb_ffp: Path,
+    output_ffp: Path,
+    site_levels: tuple[int] = (0,),
+    basin_site_levels: tuple[int] | None = None,
 ):
     """Create a NZ wide map showing basin boundaries and site locations."""
     with IMDB(imdb_ffp, readonly=True) as imdb:
@@ -96,9 +211,11 @@ def basin_site_map(
 
     mask = site_df.grid_level.isin(site_levels)
     if basin_site_levels is not None:
-        mask |= (site_df["basin"] != "NiB") & (site_df.grid_level.isin(basin_site_levels))
+        mask |= (site_df["basin"] != "NiB") & (
+            site_df.grid_level.isin(basin_site_levels)
+        )
     site_df = site_df.loc[mask]
-    
+
     plot = SpatialPlot().plot_basin_boundaries()
 
     logger.info(f"Number of level 0 sites: {len(site_df.loc[site_df.grid_level == 0])}")
@@ -106,12 +223,19 @@ def basin_site_map(
     logger.info(f"Number of level 2 sites: {len(site_df.loc[site_df.grid_level == 2])}")
     logger.info(f"Number of level 3 sites: {len(site_df.loc[site_df.grid_level == 3])}")
 
-    logger.info(f"Number of level 0 basin sites: {len(site_df.loc[site_df.grid_level == 0])}")
-    logger.info(f"Number of level 1 basin sites: {len(site_df.loc[site_df.grid_level == 1])}")
-    logger.info(f"Number of level 2 basin sites: {len(site_df.loc[site_df.grid_level == 2])}")
-    logger.info(f"Number of level 3 basin sites: {len(site_df.loc[site_df.grid_level == 3])}")
+    logger.info(
+        f"Number of level 0 basin sites: {len(site_df.loc[site_df.grid_level == 0])}"
+    )
+    logger.info(
+        f"Number of level 1 basin sites: {len(site_df.loc[site_df.grid_level == 1])}"
+    )
+    logger.info(
+        f"Number of level 2 basin sites: {len(site_df.loc[site_df.grid_level == 2])}"
+    )
+    logger.info(
+        f"Number of level 3 basin sites: {len(site_df.loc[site_df.grid_level == 3])}"
+    )
     logger.info(f"Total number of sites: {len(site_df)}")
-
 
     # Plot site locations
     if site_df.loc[site_df.grid_level == 0].shape[0] > 0:
@@ -404,6 +528,11 @@ def _gen_im_bias_res_std_plot(
         reverse_cmap=True,
         plot_contours=False,
     )
+
+    for cur_ffp in basin_files:
+        cur_basin = np.loadtxt(cur_ffp)
+        bias_fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], pen="0.15p,black")
+
     res_std_fig.plot(
         x=site_df.loc[pred_site_int_ids, "lon"].values,
         y=site_df.loc[pred_site_int_ids, "lat"].values,
@@ -457,36 +586,60 @@ def _gen_im_bias_res_std_plot(
         return bias_fig, res_std_fig
 
 
-def record_event_distribution_map(imdb_ffp: Path, output_ffp: Path):
+def record_event_distribution_map(
+    imdb_ffp: Path, output_dir: Path, grid_size: str = "500e/500e"
+):
     """
     Creates two NZ wide maps showing spatial distribution of:
-    1. Number of records
-    2. Number of events
+    1. Number of events
+    2. Number of records
     """
-    with IMDB(imdb_ffp, readonly=True) as imdb:
-        site_df = imdb.get_site_df(min_grid_level=0, max_grid_level=0, add_nztm=True)
 
-    fig = plotting.gen_region_fig(
-        plot_topo=True,
-        plot_highways=True,
-        config_options=dict(
-            MAP_FRAME_TYPE="plain",
-            FORMAT_GEO_MAP="ddd.xx",
-            MAP_GRID_PEN="0.5p,gray",
-            MAP_TICK_PEN_PRIMARY="1p,black",
-            MAP_FRAME_PEN="1p,black",
-            MAP_FRAME_AXES="wsne",
-        ),
-        plot_kwargs={
-            "topo_cmap_min": 0,
-            "topo_cmap_max": 3000,
-            "topo_cmap_inc": 10,
-            "highway_pen_width": 0.1,
-        },
+    with IMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
+        record_info_df = imdb.get_record_info_df(
+            sites=site_df.site_id.values.astype(str)
+        )
+
+    site_groups = record_info_df.groupby("site_int_id")
+
+    event_counts = site_groups["event_id"].nunique().to_frame("n_events")
+    event_counts[["lon", "lat"]] = site_df.loc[event_counts.index, ["lon", "lat"]]
+
+    event_grid = plotting.create_grid(event_counts, "n_events", grid_spacing=grid_size)
+    event_plot = SpatialPlot(plot_topo=False)
+    plotting.plot_grid(
+        event_plot.fig,
+        event_grid,
+        cmap="hot",
+        cmap_limits=(0, 130, 10),
+        cmap_limit_colors=("white", "black"),
+        reverse_cmap=True,
+        plot_contours=False,
+        cb_label="Number of events",
     )
 
-    # Plot basin boundaries
-    basin_files = list(constants.BASIN_BOUNDARIES_DIR.glob("*.txt"))
-    for cur_ffp in basin_files:
-        cur_basin = np.loadtxt(cur_ffp)
-        fig.plot(x=cur_basin[:, 0], y=cur_basin[:, 1], pen="0.15p,red")
+    event_plot.plot_faults().plot_basin_boundaries(pen="0.25p,black").plot_sites(
+        site_df, style="p0.02c"
+    )
+    event_plot.save(output_dir / "event_map.png")
+
+    record_counts = site_groups.size().to_frame("n_rels")
+    record_counts[["lon", "lat"]] = site_df.loc[record_counts.index, ["lon", "lat"]]
+    record_grid = plotting.create_grid(record_counts, "n_rels", grid_spacing=grid_size)
+    record_plot = SpatialPlot(plot_topo=False)
+    plotting.plot_grid(
+        record_plot.fig,
+        record_grid,
+        cmap="hot",
+        cmap_limits=(0, 5000, 500),
+        cmap_limit_colors=("white", "black"),
+        reverse_cmap=True,
+        plot_contours=False,
+        cb_label="Number of records",
+    )
+
+    record_plot.plot_faults().plot_basin_boundaries(pen="0.25p,black").plot_sites(
+        site_df, style="p0.02c"
+    )
+    record_plot.save(output_dir / "record_map.png")

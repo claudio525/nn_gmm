@@ -1,6 +1,9 @@
+import os
+import functools
 import shutil
 from pathlib import Path
 import logging
+import warnings
 import torch
 import pandas as pd
 import numpy as np
@@ -165,11 +168,11 @@ class LocationEmbeddingNN(nn.Module):
         dropout_rate: float | None = None,
     ):
         super().__init__()
-        self.embedding_dim = embedding_dim
+        self._embedding_dim = embedding_dim
 
-        core_nn = nn.Sequential()
+        self.nn = nn.Sequential()
         for ix, cur_n_units in enumerate(units):
-            core_nn.append(
+            self.nn.append(
                 nn.Linear(
                     n_inputs if ix == 0 else units[ix - 1],
                     cur_n_units,
@@ -178,19 +181,22 @@ class LocationEmbeddingNN(nn.Module):
             ),
 
             if use_batch_norm:
-                core_nn.append(nn.BatchNorm1d(cur_n_units))
+                self.nn.append(nn.BatchNorm1d(cur_n_units))
 
             if act_fn_str is not None:
-                core_nn.append(mlt.torch.get_act_fn_layer(act_fn_str))
+                self.nn.append(mlt.torch.get_act_fn_layer(act_fn_str))
 
             if dropout_rate is not None and dropout_rate > 0:
-                core_nn.append(nn.Dropout(dropout_rate))
+                self.nn.append(nn.Dropout(dropout_rate))
 
-        core_nn.append(nn.Linear(units[-1], embedding_dim))
-        self.core_nn = core_nn
+        self.nn.append(nn.Linear(units[-1], self._embedding_dim))
+
+    @property
+    def embedding_dim(self):
+        return self._embedding_dim
 
     def forward(self, X: torch.Tensor):
-        emb_vector = self.core_nn(X)
+        emb_vector = self.nn(X)
         return emb_vector
 
 
@@ -248,7 +254,7 @@ class LocationRegionNN(nn.Module):
         return basin_out, district_out, authority_out
 
 
-def get_random_sites(n_sites: int, add_nztm: bool = False) -> np.ndarray:
+def get_random_sites(n_sites: int) -> np.ndarray:
     """Get random sites within New Zealand land area."""
     land_df = gpd.read_file(constants.NZ_LAND_SHAPEFILE)
 
@@ -390,7 +396,7 @@ def get_rand_site_cond_site_df(imdb_ffp: Path, n_sites: int) -> pd.DataFrame:
     with IMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
 
-    rand_site_df = pd.DataFrame(data=get_random_sites(10_000), columns=["lon", "lat"])
+    rand_site_df = pd.DataFrame(data=get_random_sites(n_sites), columns=["lon", "lat"])
     rand_site_df[["nztm_y", "nztm_x"]] = coordinates.wgs_depth_to_nztm(
         rand_site_df[["lat", "lon"]].values
     )
@@ -398,9 +404,11 @@ def get_rand_site_cond_site_df(imdb_ffp: Path, n_sites: int) -> pd.DataFrame:
     site_nn = skn.RadiusNeighborsRegressor(radius=8100, weights="distance")
     site_nn.fit(site_df[["nztm_x", "nztm_y"]], site_df[["vs30", "z1p0", "z2p5"]])
 
-    rand_site_df[["vs30", "z1p0", "z2p5"]] = site_nn.predict(
-        rand_site_df[["nztm_x", "nztm_y"]]
-    )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        rand_site_df[["vs30", "z1p0", "z2p5"]] = site_nn.predict(
+            rand_site_df[["nztm_x", "nztm_y"]]
+        )
 
     mask = rand_site_df.isna().any(axis=1)
     logger.info(f"Dropping {mask.sum()} random sites with NaN vs30/z1p0/z2p5 values")
@@ -433,6 +441,21 @@ def run_region_model_training(
 ):
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+    # Log hyperparameters
+    logger.info("Training region model with hyperparameters:")
+    logger.info(f"  n_train_sites: {n_train_sites}")
+    logger.info(f"  n_val_sites: {n_val_sites}")
+    logger.info(f"  n_epochs: {n_epochs}")
+    logger.info(f"  units: {units}")
+    logger.info(f"  l2_reg: {l2_reg}")
+    logger.info(f"  batch_size: {batch_size}")
+    logger.info(f"  activation_fn: {activation_fn}")
+    logger.info(f"  embedding_dim: {embedding_dim}")
+    logger.info(f"  dropout_rate: {dropout_rate}")
+    logger.info(f"  use_batch_norm: {use_batch_norm}")
+    logger.info(f"  device: {device}")
+    logger.info(f"  seed: {seed}")
 
     auth_df = gpd.read_file(constants.AUTHORITY_SHAPEFILE)
     districts_df = gpd.read_file(constants.DISTRICT_SHAPEFILE)
@@ -676,6 +699,21 @@ def run_site_cond_model_training(
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # Log hyperparameters
+    logger.info("Training region model with hyperparameters:")
+    logger.info(f"  n_train_sites: {n_train_sites}")
+    logger.info(f"  n_val_sites: {n_val_sites}")
+    logger.info(f"  n_epochs: {n_epochs}")
+    logger.info(f"  units: {units}")
+    logger.info(f"  l2_reg: {l2_reg}")
+    logger.info(f"  batch_size: {batch_size}")
+    logger.info(f"  activation_fn: {activation_fn}")
+    logger.info(f"  embedding_dim: {embedding_dim}")
+    logger.info(f"  dropout_rate: {dropout_rate}")
+    logger.info(f"  use_batch_norm: {use_batch_norm}")
+    logger.info(f"  device: {device}")
+    logger.info(f"  seed: {seed}")
+
     # Generate training and validation sites
     logger.info(f"Generating {n_train_sites} training sites")
     train_site_df, train_pre_site_df = get_rand_site_cond_site_df(
@@ -835,6 +873,42 @@ def run_site_cond_model_training(
     return outdir
 
 
+def run_hp_study(
+    study_dir: Path,
+    model_type: str,
+    n_train_sites: int,
+    n_val_sites: int,
+    n_epochs: int,
+    n_trials: int,
+    device: str,
+    imdb_ffp: Path | None = None,
+    using_mp: bool = False
+):
+    """
+    Starts an Optuna hyperparameter optimization study.
+    """
+    if using_mp:
+        logger = utils.setup_logging(enable_console=False)
+
+    study = opt.load_study(
+        study_name=study_dir.name,
+        storage="sqlite:///{}.db".format(study_dir / study_dir.name)
+    )
+    study.optimize(
+        functools.partial(
+            hp_objective,
+            model_type=model_type,
+            base_out_dir=study_dir,
+            n_train_sites=n_train_sites,
+            n_val_sites=n_val_sites,
+            n_epochs=n_epochs,
+            device=device,
+            imdb_ffp=imdb_ffp,
+        ),
+        n_trials=n_trials,
+    )
+
+
 def hp_objective(
     trial: opt.Trial,
     model_type: str,
@@ -918,7 +992,9 @@ def hp_objective(
             verbose=False,
         )
     else:
-        raise ValueError(f"Invalid type: {model_type}. Must be 'region' or 'site_cond'.")
+        raise ValueError(
+            f"Invalid type: {model_type}. Must be 'region' or 'site_cond'."
+        )
 
     # Remove file handler from logger
     logger.removeHandler(file_handler)

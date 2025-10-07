@@ -566,7 +566,7 @@ def run_model_training(
             + record_info_df.get("rrup_weight", 0).values
             + record_info_df.get("vs30_weight", 0).values,
             0,
-            run_config.total_max_weight,
+            run_config.total_max_weight - 1,
         )
 
         assert not record_info_df["sample_weight"].isna().any()
@@ -642,13 +642,13 @@ def run_model_training(
     # Create the model
     if run_config.using_loc_model:
         loc_model = torch.load(
-            run_config.loc_model_dir / "loc_model.pt",
+            run_config.loc_model_dir / "emb_model.pt",
             weights_only=False,
-            map_location=run_config.device,
-        ).core_nn
+            map_location=run_config.device, 
+        )
 
         core_model = model_fn(
-            n_inputs=run_config.n_inputs + loc_model[-1].out_features,
+            n_inputs=run_config.n_inputs + loc_model.embedding_dim,
         )
 
         model = nn_gmm_modules.NNCombined(
@@ -663,7 +663,7 @@ def run_model_training(
             {"params": model.core_model.parameters(), "lr": run_config.learning_rate}
         ]
         lr = run_config.loc_model_base_lr
-        for cur_layer in model.loc_model[::-1]:
+        for cur_layer in model.loc_model.nn[::-1]:
             if isinstance(cur_layer, nn.Linear):
                 opt_config.append({"params": cur_layer.parameters(), "lr": lr})
                 lr *= 0.9
@@ -834,6 +834,14 @@ def get_dataset_predictions(
                 ),
             ).astype({col: np.float16 for col in run_config.ind_loss_keys})
 
+            if run_config.use_sample_weights:
+                if len(cur_batch.sample_weights.shape) == 1:
+                    cur_result_df["sample_weight"] = (
+                        cur_batch.sample_weights.numpy(force=True).astype(np.float32)
+                    )
+                else:
+                    logger.info("Sample weights have multiple columns, skipping")
+                    
             result_dfs.append(cur_result_df)
 
     result_df = pd.concat(result_dfs, axis=0)
