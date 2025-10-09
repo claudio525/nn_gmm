@@ -136,7 +136,7 @@ DB_PSA_KEYS = [
     "pSA_0p8",
     "pSA_0p9",
     "pSA_1p0",
-    "pSA_1p25",
+    # "pSA_1p25",
     "pSA_1p5",
     "pSA_2p0",
     "pSA_2p5",

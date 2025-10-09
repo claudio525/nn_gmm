@@ -1,5 +1,5 @@
 from . import constants
-from .imdb import IMDB
+from .imdb import IMDB, DuckIMDB
 from .empdb import EmpiricalDB
 from . import emp_gmm
 from . import utils
@@ -18,11 +18,13 @@ from . import nn_gmm_obs
 from . import nn_hp_opt
 from .nn_gmm_cv import train_cv
 
+
 __all__ = [
     "constants",
     "IMDB",
     "EmpiricalDB",
     "IMDB",
+    "DuckIMDB",
     "emp_gmm",  
     "RunConfig",
     "utils",

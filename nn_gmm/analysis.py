@@ -36,7 +36,7 @@ def get_nn_sim_residuals(
 
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         if sim_df is None:
-            sim_df = imdb.get_im_data_tmp_table(
+            sim_df = imdb.get_im_data(
                 run_config.ims, val_record_int_ids
             )
         if record_info_df is None:

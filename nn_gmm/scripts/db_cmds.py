@@ -14,8 +14,7 @@ from qcore import nhm
 
 
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", level=logging.INFO
 )
 
 app = typer.Typer()
@@ -31,7 +30,8 @@ def create_imdb(
         ..., help="Path to the Cybershake source info directory"
     ),
     nhm_flt_ffp: Path = typer.Argument(
-        ..., help="Path to the NHM 2010 fault data file"),
+        ..., help="Path to the NHM 2010 fault data file"
+    ),
     ll_ffp: Path = typer.Argument(..., help="Path to the Cybershake site data file"),
     vs30_ffp: Path = typer.Argument(..., help="Path to the Cybershake vs30 data file"),
     z_ffp: Path = typer.Argument(..., help="Path to the Cybershake Z data file"),
@@ -65,11 +65,11 @@ def create_imdb(
         "type": "sim_type",
     }
 
-    logging.getLogger().setLevel(log_level)
-    logging.info(f"Logging level set to {log_level}")
+    logger = nng.utils.setup_logging(console_level=log_level)
+    logger.info(f"Logging level set to {log_level}")
 
     if db_ffp.exists():
-        logging.info(f"Database {db_ffp} already exists. Exiting.")
+        logger.info(f"Database {db_ffp} already exists. Exiting.")
         return
 
     site_df = pd.read_csv(
@@ -96,33 +96,34 @@ def create_imdb(
     site_df["nztm_x"], site_df["nztm_y"] = nztm_coords[:, 0], nztm_coords[:, 1]
 
     # Add site data
-    with nng.imdb.IMDB(db_ffp) as db:
+    with nng.DuckIMDB(db_ffp) as db:
         db.add_site_data(site_df)
 
     # Get events (and sanity check)
-    im_events = np.sort([cur_dir.stem for cur_dir in im_data_dir.iterdir() if cur_dir.is_dir()])
-    source_events = np.sort([
-        cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()
-    ])
+    im_events = np.sort(
+        [cur_dir.stem for cur_dir in im_data_dir.iterdir() if cur_dir.is_dir()]
+    )
+    source_events = np.sort(
+        [cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()]
+    )
     assert np.all(im_events == source_events), "IM and source events do not match!"
     events = im_events
 
     # Compute the site to source distances
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     faults = {
-            cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
-            for cur_name, cur_fault in flt_definitions.items()
-            if cur_name in events
+        cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
+        for cur_name, cur_fault in flt_definitions.items()
+        if cur_name in events
     }
-    site_event_df = nng.utils.run_site_to_source_calc(
-        faults,
-        site_df
-    )
+    logging.info("Calculating site to source distances...")
+    site_event_df = nng.utils.run_site_to_source_calc(faults, site_df)
 
-    with nng.imdb.IMDB(db_ffp) as db:
+    logging.info("Adding event and realisation data to the database...")
+    event_data, rel_data = [], []
+    with nng.DuckIMDB(db_ffp) as db:
         # Add event, realisation and IM data
         for cur_event in tqdm(events, desc="Processing events"):
-            logging.debug(f"Processing event: {cur_event}")
             source_dir = source_info_dir / cur_event / "Srf"
 
             # Read the median data
@@ -133,7 +134,9 @@ def create_imdb(
             # Read the realisation data
             rel_infos = []
             for cur_rel_ffp in source_dir.glob("*REL*.csv"):
-                cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                cur_rel_id = (
+                    f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                )
                 cur_rel_df = pd.read_csv(cur_rel_ffp)
                 cur_rel_df.index = [cur_rel_id]
 
@@ -148,16 +151,48 @@ def create_imdb(
             cur_fault = faults[cur_event]
             s = ((cur_fault.length / 2) - rel_df.shypo.values) / cur_fault.length
             d = rel_df.dhypo.values / cur_fault.width
-            hypo_info = np.stack([cur_fault.fault_coordinates_to_wgs_depth_coordinates((s[i], d[i])) for i in range(rel_df.shape[0])], axis=0)
+            hypo_info = np.stack(
+                [
+                    cur_fault.fault_coordinates_to_wgs_depth_coordinates((s[i], d[i]))
+                    for i in range(rel_df.shape[0])
+                ],
+                axis=0,
+            )
             rel_df["hypo_lat"] = hypo_info[:, 0]
             rel_df["hypo_lon"] = hypo_info[:, 1]
             rel_df["hypo_depth"] = hypo_info[:, 2] / 1000
 
+            cur_event_info = median_info.to_dict()
+            cur_event_info["event_id"] = cur_event
+            event_data.append(cur_event_info)
+
+            rel_data.append(rel_df)
+
+            # db.add_event_data(cur_event, median_info)
+            # db.add_realisation_data(rel_df)
+
+        event_df = pd.DataFrame(event_data)
+        db.add_event_data(event_df)
+
+        rel_df = pd.concat(rel_data, axis=0)
+        db.add_realisation_data(rel_df)
+
+        # Add site to event data
+        # Has to be after adding the event data
+        # as it uses the event_id -> event_int_id mapping
+        db.add_site_event_data(site_event_df)
+
+        # Add IM data
+        im_data = []
+        logging.info("Adding IM data to the database...")
+        for i, cur_event in tqdm(enumerate(events), desc="Processing events"):
             # Read the IM data
             im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
             rel_im_dfs = []
             for cur_rel_ffp in im_files:
-                cur_rel_id = f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                cur_rel_id = (
+                    f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                )
 
                 if cur_rel_id not in rel_df.index:
                     logging.warning(
@@ -176,28 +211,27 @@ def create_imdb(
                 rel_im_dfs.append(cur_im_df)
 
             im_df = pd.concat(rel_im_dfs, axis=0)
+            im_data.append(im_df)
 
-            db.add_event_data(cur_event, median_info)
-            db.add_realisation_data(rel_df)
-            db.add_record_im_data(im_df)
-        
-        # Add site to event data
-        # Has to be after adding the event data
-        # as it uses the event_id -> event_int_id mapping
-        db.add_site_event_data(site_event_df)
-        
+            if len(im_data) >= 50 or i == (len(events) - 1):
+                db.add_record_im_data(pd.concat(im_data, axis=0))
+                im_data = []
 
-    logging.info(f"Database {db_ffp} created successfully.")
+    logger.info(f"Database {db_ffp} created successfully.")
+
 
 @app.command("create-empirical-db")
-def create_emp_db(db_ffp: Path = typer.Argument(..., help="Path to the database file"),
-                  imdb_ffp: Path = typer.Argument(..., help="Path to the IMDB file")):
+def create_emp_db(
+    db_ffp: Path = typer.Argument(..., help="Path to the database file"),
+    imdb_ffp: Path = typer.Argument(..., help="Path to the IMDB file"),
+):
     if db_ffp.exists():
         logging.info(f"Database {db_ffp} already exists. Exiting.")
         return
 
     with nng.EmpiricalDB(db_ffp) as emp_db:
         emp_db.populate(imdb_ffp, nng.constants.GMM_MAPPING)
+
 
 if __name__ == "__main__":
     app()

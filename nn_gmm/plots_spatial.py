@@ -277,7 +277,7 @@ def nn_site_bias_res_std(
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         record_info_df = imdb.get_record_info_df(record_int_ids=pred_df.index.values)
-        sim_df = imdb.get_im_data_tmp_table(run_config.ims, record_int_ids).sort_index()
+        sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
 
     pred_df["site_int_id"] = record_info_df.loc[pred_df.index].site_int_id.values
     assert pred_df.index.equals(sim_df.index)
@@ -315,7 +315,7 @@ def emp_gmm_bias_res_std(
     with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
-        sim_df = imdb.get_im_data_tmp_table(run_config.ims, record_int_ids).sort_index()
+        sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
 
     with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
         emp_pred_df = empdb.get_gm_params_tmp_table(

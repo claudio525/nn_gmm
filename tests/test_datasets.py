@@ -26,7 +26,7 @@ def test_datasets(imdb_ffp: Path, seed: int):
     torch.manual_seed(seed)
 
     with nng.IMDB(imdb_ffp, readonly=True) as imdb:
-        site_df = imdb.get_site_df()
+        site_df = imdb.get_site_df(add_nztm=True)
         event_df = imdb.get_event_df()
 
         sites = np.random.choice(
@@ -49,23 +49,26 @@ def test_datasets(imdb_ffp: Path, seed: int):
             site_event_int_ids=record_info_df.site_event_int_id.values
         )
 
-    source_features = ["magnitude", "rake"]
-    site_features = ["vs30", "z1p0", "z2p5"]
-    site_event_features = ["rrup", "rjb", "rx", "ry"]
     record_info_df["sample_weight"] = 1.0
 
     mock_run_config = Mock()
     mock_run_config.scale_ims = False
     mock_run_config.device = device
+    mock_run_config.apply_im_weighting = False
+    mock_run_config.site_inputs = ["vs30", "z1p0", "z2p5"]
+    mock_run_config.source_inputs = ["magnitude", "rake", "tect_type", "dip", "dtop", "dbottom"]
+    mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
+    mock_run_config.loc_model_inputs = None
+    
     # mock_run_config.seed = seed
 
     dataset_1 = nng.data.IMDBDataset(
         imdb_ffp,
         record_int_ids,
         np.array(nng.constants.PSA_KEYS),
-        site_df[site_features],
-        source_df[source_features],
-        site_event_df[site_event_features],
+        site_df[mock_run_config.site_inputs],
+        source_df[mock_run_config.source_inputs],
+        site_event_df[mock_run_config.site_event_inputs],
         record_info_df,
         mock_run_config,
         is_train=False,
@@ -75,9 +78,9 @@ def test_datasets(imdb_ffp: Path, seed: int):
         imdb_ffp,
         record_int_ids,
         np.array(nng.constants.PSA_KEYS),
-        site_df[site_features],
-        source_df[source_features],
-        site_event_df[site_event_features],
+        site_df[mock_run_config.site_inputs],
+        source_df[mock_run_config.source_inputs],
+        site_event_df[mock_run_config.site_event_inputs],
         record_info_df,
         mock_run_config,
         is_train=False,        
