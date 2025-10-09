@@ -56,8 +56,9 @@ def test_datasets(imdb_ffp: Path, seed: int):
     mock_run_config.device = device
     mock_run_config.apply_im_weighting = False
     mock_run_config.site_inputs = ["vs30", "z1p0", "z2p5"]
-    mock_run_config.source_inputs = ["magnitude", "rake", "tect_type", "dip", "dtop", "dbottom"]
+    mock_run_config.source_inputs = ["magnitude", "rake"]
     mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
+    mock_run_config.using_loc_model = False
     mock_run_config.loc_model_inputs = None
     
     # mock_run_config.seed = seed
