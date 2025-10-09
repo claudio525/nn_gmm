@@ -191,7 +191,7 @@ def get_site_event_int_id(
     # Prime multipliers for good distribution
     p1, p2 = 73856093, 19349663
 
-    return (site_int_id * p1) ^ (event_int_id * p2) % 100000000
+    return (site_int_id.astype(np.int64) * p1) ^ (event_int_id.astype(np.int64) * p2) % 100000000
 
 
 def get_fault(nhm_flt_ffp: Path, fault_name: str) -> sources.Fault:

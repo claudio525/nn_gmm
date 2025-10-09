@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import torch
 
-from .imdb import IMDB
+from .imdb import IMDB, DuckIMDB
 from . import utils
 
 if typing.TYPE_CHECKING:
@@ -213,10 +213,18 @@ class BaseIMDBDataset(BaseDataset):
         logger.info(
             f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
         )
-        with IMDB(imdb_ffp, readonly=True, memory_map_size=5, cache_size=5000) as imdb:
-            self._im_data = imdb.get_im_data(
-                self.ims, self.record_int_ids
-            ).sort_index()
+
+        ### TMP
+        if imdb_ffp.suffix == ".db":
+            with IMDB(imdb_ffp, readonly=True, memory_map_size=5, cache_size=5000) as imdb:
+                self._im_data = imdb.get_im_data(
+                    self.ims, self.record_int_ids
+                ).sort_index()
+        else:
+            with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+                self._im_data = imdb.get_im_data(
+                    self.ims, self.record_int_ids
+                ).sort_index()
 
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
@@ -415,7 +423,7 @@ class IMDBDataset(BaseIMDBDataset):
         """
         y = self._im_data.loc[self.record_int_ids[indices]].values
 
-        site_int_ids = self.record_info_df.loc[
+        site_int_ids = self.record_info_df.loc[ 
             self.record_int_ids[indices]
         ].site_int_id.values
         event_int_ids = self.record_info_df.loc[

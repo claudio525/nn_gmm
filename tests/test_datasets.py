@@ -16,16 +16,27 @@ if torch.cuda.is_available():
 
 
 wdata = Path(os.environ["wdata"])
-imdb_ffp = Path(wdata / "nn_gmm/20250606_CS200m_imdb.db")
+sqlite_imdb_ffp = Path(wdata / "nn_gmm/20250606_CS200m_imdb.db")
+duckdb_imdb_ffp = Path(wdata / "nn_gmm/20251009_CS200m_imdb.duckdb")
 
 
-
-@pytest.mark.parametrize("imdb_ffp,seed", [(imdb_ffp, 42), (imdb_ffp, 199), (imdb_ffp, 2)])
+@pytest.mark.parametrize(
+    "imdb_ffp,seed",
+    [
+        (sqlite_imdb_ffp, 42),
+        (sqlite_imdb_ffp, 199),
+        (sqlite_imdb_ffp, 2),
+        (duckdb_imdb_ffp, 42),
+        (duckdb_imdb_ffp, 199),
+        (duckdb_imdb_ffp, 2),
+    ],
+)
 def test_datasets(imdb_ffp: Path, seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    with nng.IMDB(imdb_ffp, readonly=True) as imdb:
+    imdb_type = nng.IMDB if imdb_ffp.suffix == ".db" else nng.DuckIMDB
+    with imdb_type(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True)
         event_df = imdb.get_event_df()
 
@@ -60,8 +71,6 @@ def test_datasets(imdb_ffp: Path, seed: int):
     mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
     mock_run_config.using_loc_model = False
     mock_run_config.loc_model_inputs = None
-    
-    # mock_run_config.seed = seed
 
     dataset_1 = nng.data.IMDBDataset(
         imdb_ffp,
@@ -84,7 +93,7 @@ def test_datasets(imdb_ffp: Path, seed: int):
         site_event_df[mock_run_config.site_event_inputs],
         record_info_df,
         mock_run_config,
-        is_train=False,        
+        is_train=False,
     )
 
     assert len(dataset_1) == len(dataset_2)
@@ -99,5 +108,9 @@ def test_datasets(imdb_ffp: Path, seed: int):
         batch_2 = dataset_2.get_batch(indices)
         print(f"Took: {time.time() - start} for optimized")
 
-        np.testing.assert_array_equal(batch_1.X.numpy(force=True), batch_2.X.numpy(force=True))
-        np.testing.assert_array_equal(batch_1.y.numpy(force=True), batch_2.y.numpy(force=True))
+        np.testing.assert_array_equal(
+            batch_1.X.numpy(force=True), batch_2.X.numpy(force=True)
+        )
+        np.testing.assert_array_equal(
+            batch_1.y.numpy(force=True), batch_2.y.numpy(force=True)
+        )

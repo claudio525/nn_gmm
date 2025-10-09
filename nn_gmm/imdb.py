@@ -1367,7 +1367,6 @@ class DuckIMDB:
         event_df = (
             self._conn.execute("SELECT * FROM events").df().set_index("event_int_id")
         )
-        # event_df["tect_type"] = event_df["tect_type"].astype("category")
 
         return event_df
 
@@ -1460,6 +1459,8 @@ class DuckIMDB:
         logger.info("Getting site-event data from the database.")
 
         if site_event_int_ids is not None:
+            site_event_int_ids = np.unique(site_event_int_ids)
+
             start = time.time()
             # DuckDB handles large datasets efficiently with temporary views
             site_event_ids_df = pd.DataFrame({"site_event_int_id": site_event_int_ids})
@@ -1578,16 +1579,16 @@ class DuckIMDB:
 
             self._conn.unregister("temp_record_ids")
         elif events is not None or sites is not None:
-            query = "SELECT record_int_id, event_int_id, site_int_id, rel_int_id FROM record_ims r "
+            query = "SELECT r.record_int_id, r.event_int_id, r.site_int_id, r.rel_int_id FROM record_ims r "
 
             if sites is not None:
-                site_int_ids_df = self.site_to_int_id_mapping.loc[sites].to_frame()
+                site_int_ids_df = self.site_to_int_id_mapping.loc[sites].to_frame().reset_index(drop=True)
                 self._conn.register("temp_site_ids", site_int_ids_df)
                 query += (
                     "INNER JOIN temp_site_ids ts ON ts.site_int_id = r.site_int_id "
                 )
             if events is not None:
-                event_int_ids_df = self.event_to_int_id_mapping.loc[events].to_frame()
+                event_int_ids_df = self.event_to_int_id_mapping.loc[events].to_frame().reset_index(drop=True)
                 self._conn.register("temp_event_ids", event_int_ids_df)
                 query += (
                     "INNER JOIN temp_event_ids te ON te.event_int_id = r.event_int_id "
