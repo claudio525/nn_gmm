@@ -15,7 +15,7 @@ from sklearn.model_selection import StratifiedKFold
 
 from . import utils
 from . import nn_gmm
-from .imdb import IMDB
+from .imdb import DuckIMDB
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def train_cv(
     logger.info(f"Using device: {device.upper()}")
 
     # Get the data
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
 
@@ -252,7 +252,8 @@ def _run_helper(
         train_sites,
         val_sites,
         save_train_results=False,
-        verbose=p_ix is None,
+        verbose=False,
+        # verbose=p_ix is None,
     )
 
     if p_ix is None:

@@ -26,8 +26,7 @@ from . import data
 from . import constants
 from . import utils
 from . import preprocessing as pre
-from .imdb import IMDB
-from . import preprocessing as pre
+from .imdb import DuckIMDB
 
 
 logger = logging.getLogger(__name__)
@@ -393,7 +392,7 @@ def get_rand_site_cond_site_df(imdb_ffp: Path, n_sites: int) -> pd.DataFrame:
     Get random sites with vs30, z1p0, z2p5 values
     computed using nearest neighbour interpolation.
     """
-    with IMDB(imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
 
     rand_site_df = pd.DataFrame(data=get_random_sites(n_sites), columns=["lon", "lat"])

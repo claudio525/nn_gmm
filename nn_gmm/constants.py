@@ -219,6 +219,31 @@ AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
 
 
+# Default figure settings
+FIG_SIZE = (16, 10)
+if (env_figsize := os.environ.get("fig_size")) is not None:
+    FIG_SIZE = [float(x) for x in env_figsize.split(",")]
+
+FIG_FORMAT = "png"
+if (env_fig_format := os.environ.get("fig_format")) is not None:
+    FIG_FORMAT = env_fig_format
+
+FIG_DPI = 300
+if (env_fig_dpi := os.environ.get("fig_dpi")) is not None:
+    FIG_DPI = int(env_fig_dpi)
+
+FIG_FONT_SIZE = None
+if (env_fig_font_size := os.environ.get("fig_font_size")) is not None:
+    FIG_FONT_SIZE = int(env_fig_font_size)
+
+FIG_LINEWIDTH = None
+if (env_fig_linewidth := os.environ.get("fig_linewidth")) is not None:
+    FIG_LINEWIDTH = float(env_fig_linewidth)
+
+FIG_GROUP_LINEWIDTH = None
+if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not None:
+    FIG_GROUP_LINEWIDTH = float(env_fig_group_linewidth)
+
 
 MW_RRUP_LIMITS = np.array([
     [3.5, 96.001584],
@@ -268,3 +293,4 @@ MW_RRUP_LIMITS = np.array([
     [7.9, 994.534662958],
     [8.0, 1055.40814061]
 ])
+

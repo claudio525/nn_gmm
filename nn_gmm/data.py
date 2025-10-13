@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import torch
 
-from .imdb import IMDB, DuckIMDB
+from .imdb import DuckIMDB
 from . import utils
 
 if typing.TYPE_CHECKING:
@@ -211,20 +211,14 @@ class BaseIMDBDataset(BaseDataset):
 
         # Load IM data into memory
         logger.info(
-            f"Loading IM data for {self.record_int_ids.size} records into memory, will use {mem_req:.2f}GB"
+            f"Loading IM data for {self.record_int_ids.size} "
+            f"records into memory, will use {mem_req:.2f}GB"
         )
 
-        ### TMP
-        if imdb_ffp.suffix == ".db":
-            with IMDB(imdb_ffp, readonly=True, memory_map_size=5, cache_size=5000) as imdb:
-                self._im_data = imdb.get_im_data(
-                    self.ims, self.record_int_ids
-                ).sort_index()
-        else:
-            with DuckIMDB(imdb_ffp, readonly=True) as imdb:
-                self._im_data = imdb.get_im_data(
-                    self.ims, self.record_int_ids
-                ).sort_index()
+        with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+            self._im_data = imdb.get_im_data(
+                self.ims, self.record_int_ids
+            ).sort_index()
 
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
@@ -549,7 +543,7 @@ def get_similar_records(
         else:
             logging.info(f"{k}: {v} (no limits defined)")
 
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         event_df = imdb.get_event_df()
         rel_df = imdb.get_rel_df()
@@ -601,7 +595,7 @@ def get_similar_records(
         logger.warning("No valid site-event combinations found")
         return np.array([])
     site_event_int_ids = utils.get_site_event_int_id(comb[:, 0], comb[:, 1])
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_event_df = imdb.get_site_event_df(
             site_event_int_ids=site_event_int_ids,
         )
@@ -619,7 +613,7 @@ def get_similar_records(
             logger.info(f"Skipping event-site input {k}, not in fixed inputs or limits")
     logger.info(f"Found {len(site_event_df)} valid site-event pairs")
 
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         record_info_df = imdb.get_record_info_df(
             events=event_df.event_id.values.astype(str),
             sites=site_df.site_id.values.astype(str),
@@ -648,49 +642,3 @@ def get_similar_records(
     return record_info_df.index.values
 
 
-# def imdb_get_im_data_batched(
-#     imdb: IMDB, record_int_ids: np.ndarray, ims: np.ndarray
-# ) -> pd.DataFrame:
-#     """
-#     Get IM data from the IMDB in batches
-#     Most likely better to use the IMDB.get_im_data_tmp_table() method
-
-#     Parameters
-#     ----------
-#     imdb : IMDB
-#         The IMDB object, needs to be opened
-#     record_int_ids : np.ndarray
-#         The record ids to get the IM data for
-#     ims : np.ndarray
-#         The IMs to get the data for
-
-#     Returns
-#     -------
-#     pd.DataFrame
-#         The IM data for the given record ids and IMs
-#     """
-#     batch_size = 100_000
-#     n_batches = int(np.ceil(len(record_int_ids) / batch_size))
-
-#     im_data = []
-#     logger.info(
-#         f"Getting IM data for {len(record_int_ids)} records in {n_batches} batches"
-#     )
-#     start_time = time.time()
-#     for i in range(n_batches):
-#         start = i * batch_size
-#         end = min((i + 1) * batch_size, len(record_int_ids))
-#         cur_record_int_ids = record_int_ids[start:end]
-
-#         if i % 10 == 0 and i > 0:
-#             logger.info(f"Resetting IMDB connection, batch {i} of {n_batches}")
-#             imdb.close()
-#             imdb.open()
-
-#         cur_im_data = imdb.get_im_data(ims, record_int_ids=cur_record_int_ids)
-#         im_data.append(cur_im_data)
-#     logger.info(
-#         f"Took {time.time() - start_time:.2f} seconds to get IM data for {len(record_int_ids)} records"
-#     )
-
-#     return pd.concat(im_data, axis=0)

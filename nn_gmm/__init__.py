@@ -1,6 +1,6 @@
 from . import constants
 from .imdb import IMDB, DuckIMDB
-from .empdb import EmpiricalDB
+from .empdb import EmpiricalDB, DuckEmpiricalDB
 from . import emp_gmm
 from . import utils
 from . import nn_gmm

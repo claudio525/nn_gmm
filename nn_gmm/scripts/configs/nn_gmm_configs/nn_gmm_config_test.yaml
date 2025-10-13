@@ -1,18 +1,16 @@
-seed: 42
+seed: 72
 
-rel_imdb_ffp: nn_gmm/20250606_CS200m_imdb.db
+rel_imdb_ffp: nn_gmm/20251009_CS200m_imdb.duckdb
 rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
 ignore_events: null
-extra_basin_sites: False
+extra_basin_sites: True
 
 im_set: pSA
 scale_ims: True
 
 site_inputs: 
-# - nztm_x
-# - nztm_y 
 - vs30
 - z1p0
 - z2p5
@@ -24,9 +22,7 @@ source_inputs:
 - dip
 - dtop
 - dbottom
-# - "hypo_depth"
-# - "hypo_lat"
-# - "hypo_lon"
+
 
 source_to_site_inputs:
 - rrup
@@ -48,23 +44,15 @@ max_vs30_weight: 2.5
 total_max_weight: 5.0
 
 # IM weighting
-apply_im_weighting: True
-im_weights: 
-  pSA_2.0: 1.5
-  pSA_2.5: 2
-  pSA_3.0: 2
-  pSA_4.0: 2
-  pSA_5.0: 2
-  pSA_6.0: 2
-  pSA_7.5: 2
-  pSA_10.0: 2
+apply_im_weighting: False
+im_weights: null
 
 n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
 
-loc_max_grad_norm: 5.0
-core_max_grad_norm: 10.0
+loc_max_grad_norm: null
+core_max_grad_norm: null
 
 model:
   units: [32, 32, 64]
@@ -73,8 +61,7 @@ model:
   dropout_rate: 0.0
   l2_reg: 0.0001
 
-rel_loc_model_dir: nn_gmm/results/loc_models/0925_1157_optimized_10Epochs_emb32
+rel_loc_model_dir: nn_gmm/results/loc_models/0929_1130_optimized_siteCond_25Epochs
 loc_model_base_lr: 0.0001
-
 
 rel_results_dir: nn_gmm/results

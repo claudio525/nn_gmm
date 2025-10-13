@@ -229,7 +229,7 @@ def create_emp_db(
         logging.info(f"Database {db_ffp} already exists. Exiting.")
         return
 
-    with nng.EmpiricalDB(db_ffp) as emp_db:
+    with nng.DuckEmpiricalDB(db_ffp) as emp_db:
         emp_db.populate(imdb_ffp, nng.constants.GMM_MAPPING)
 
 

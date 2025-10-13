@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 import ml_tools as mlt
 
-from . import imdb
+from . import DuckIMDB
 from . import preprocessing
 from . import data
 from . import obs_data as obsd
@@ -508,7 +508,7 @@ def run_model_training(
         np.isin(run_config.test_events, events).sum() == 0
     ), "Test events are not allowed in the training or validation sets. "
 
-    with imdb.IMDB(run_config.imdb_ffp, readonly=True) as db:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as db:
         source_df = db.get_rel_df(events=events)
         site_event_df = db.get_site_event_df(sites=sites, max_rrup=run_config.max_rrup)
         record_info_df = db.get_record_info_df(events=events, sites=sites)
@@ -536,15 +536,15 @@ def run_model_training(
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
 
     # Add sample weights
-    record_info_df["sample_weight"] = np.float32(1.0)
+    record_info_df.loc[:, "sample_weight"] = np.float32(1.0)
     if run_config.use_sample_weights:
-        record_info_df["magnitude"] = event_df.loc[
+        record_info_df.loc[:, "magnitude"] = event_df.loc[
             record_info_df.event_int_id
         ].magnitude.values.astype(np.float32)
-        record_info_df["rrup"] = site_event_df.loc[
+        record_info_df.loc[:, "rrup"] = site_event_df.loc[
             record_info_df.site_event_int_id
         ].rrup.values.astype(np.float32)
-        record_info_df["vs30"] = site_df.loc[
+        record_info_df.loc[:, "vs30"] = site_df.loc[
             record_info_df.site_int_id
         ].vs30.values.astype(np.float32)
 

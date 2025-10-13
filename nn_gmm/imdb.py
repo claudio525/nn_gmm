@@ -1120,6 +1120,7 @@ class DuckIMDB:
             self._conn = duckdb.connect(database=self.db_ffp, read_only=True)
             # Set memory limit to 8GB
             self._conn.execute("SET memory_limit='8GB'")
+            self._conn.execute("SET enable_progress_bar = false")
         else:
             self._conn = duckdb.connect(database=self.db_ffp)
 
@@ -1164,7 +1165,8 @@ class DuckIMDB:
         """
         if self._event_table_columns is None:
             result = self._conn.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = 'events' ORDER BY ordinal_position"
+                "SELECT column_name FROM information_schema.columns WHERE " \
+                "table_name = 'events' ORDER BY ordinal_position"
             ).fetchall()
             self._event_table_columns = np.array([row[0] for row in result])
         return self._event_table_columns

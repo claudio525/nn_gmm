@@ -8,8 +8,8 @@ import pandas as pd
 import mera
 
 from . import constants
-from .empdb import EmpiricalDB
-from .imdb import IMDB
+from .empdb import DuckEmpiricalDB
+from .imdb import DuckIMDB
 from . import nn_gmm
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def get_nn_sim_residuals(
     assert record_info_df is None or np.all(val_record_int_ids == record_info_df.index.values)
     assert sim_df is None or np.all(val_record_int_ids == sim_df.index.values)
 
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         if sim_df is None:
             sim_df = imdb.get_im_data(
                 run_config.ims, val_record_int_ids
@@ -67,8 +67,9 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
     Get the residuals of the empirical GMM with respect to
     the specified simulation results.
     """
-    with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
-        val_emp_df = empdb.get_gm_params_tmp_table(sim_df.index.values.astype(int))
+    with DuckEmpiricalDB(empdb_ffp, readonly=True) as empdb:
+        val_emp_df = empdb.get_gm_params_tmp_table(sim_df.index.values.astype(int)).sort_index()
+    assert val_emp_df.index.equals(sim_df.index)    
 
     emp_res_df = pd.DataFrame(
         data=np.log(sim_df[constants.PSA_KEYS].values)
@@ -88,7 +89,7 @@ def run_nn_mera(
     logging.info("Getting NN residuals")
     res_df, *_ = get_nn_sim_residuals(result_dir)
 
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)
     res_df["rel_id"] = record_info_df.loc[res_df.index, "rel_id"]
     res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]

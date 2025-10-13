@@ -171,7 +171,7 @@ class SpatialPlot:
 
         # Plot the fault traces
         for cur_name, cur_fault in nhm_data.items():
-            if cur_name in faults or faults is None:
+            if faults is None or cur_name in faults:
                 cur_trace = cur_fault.trace
                 self.fig.plot(
                     x=cur_trace[:, 0],
@@ -594,7 +594,6 @@ def record_event_distribution_map(
     1. Number of events
     2. Number of records
     """
-
     with IMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
         record_info_df = imdb.get_record_info_df(
