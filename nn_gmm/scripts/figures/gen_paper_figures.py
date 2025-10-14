@@ -261,7 +261,7 @@ def nzgmdb_map(nzgmdb_ffp: Path, output_dir: Path):
         )
 
     spatial_plot.plot_sites(
-        obs_data.site_df, style="t0.05c", pen="0.05p,black,solid", fill="green3"
+        obs_data.site_df, style="t0.2c", pen="0.1p,black,solid", fill="green3"
     )
 
     legend_spec = io.StringIO()

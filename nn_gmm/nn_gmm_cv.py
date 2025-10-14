@@ -1,5 +1,5 @@
 """Module for running custom CV for NN-GMM models."""
-
+import gc
 import time
 import copy
 import shutil
@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import multiprocessing as mp
 
+import torch
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -120,7 +121,7 @@ def train_cv(
             out_dirs.append(cur_out_dir)
     else:
         logging.info(f"Running CV with {n_procs} processes.")
-        with mp.Pool(n_procs) as pool:
+        with mp.Pool(n_procs, maxtasksperchild=1) as pool:
             out_dirs = pool.starmap(
                 _run_helper,
                 [
@@ -255,6 +256,14 @@ def _run_helper(
         verbose=False,
         # verbose=p_ix is None,
     )
+
+    # Explicit GPU cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    # Force garbage collection
+    gc.collect()
 
     if p_ix is None:
         root_logger.removeHandler(file_handler)
