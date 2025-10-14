@@ -5,8 +5,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import mera
-
 from . import constants
 from .empdb import DuckEmpiricalDB
 from .imdb import DuckIMDB
@@ -84,6 +82,7 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
 def run_nn_mera(
     result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4
 ):
+    import mera
     run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
