@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from source_modelling import sources
 from qcore import nhm, point_in_polygon as pip
-import seismic_hazard_analysis as sha
 
 from . import constants
 
@@ -115,6 +114,8 @@ def run_site_to_source_calc(
         for each site.
         Shape: (n_sites, 3)
     """
+    import seismic_hazard_analysis as sha
+
     fault_id_mapping = {cur_name: i for i, cur_name in enumerate(faults.keys())}
     fault_id_mapping_reverse = {i: cur_name for i, cur_name in enumerate(faults.keys())}
     plane_nztm_coords = []
@@ -210,6 +211,7 @@ def get_fault(nhm_flt_ffp: Path, fault_name: str) -> sources.Fault:
     sources.Fault
         The fault object corresponding to the given name.
     """
+    import seismic_hazard_analysis as sha
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     if fault_name not in flt_definitions:
         raise ValueError(f"Fault '{fault_name}' not found in NHM definitions.")
@@ -231,6 +233,7 @@ def get_faults(nhm_flt_ffp: Path) -> dict[str, sources.Fault]:
     dict[str, sources.Fault]
         Dictionary mapping fault names to their corresponding Fault objects.
     """
+    import seismic_hazard_analysis as sha
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     return {
         cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)

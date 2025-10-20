@@ -1,24 +1,34 @@
-import os
 import multiprocessing as mp
 import logging
 from pathlib import Path
 from importlib import reload
 
-import pygmt
+import torch
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
 from pygmt_helper import plotting
-from qcore import nhm
+from qcore import nhm, coordinates
+import ml_tools as mlt
 
 from . import nn_gmm
-from .imdb import IMDB
+from .imdb import DuckIMDB
 from .empdb import EmpiricalDB
 from . import constants
 from . import utils
+from . import loc_pre
+
 
 logger = logging.getLogger(__name__)
+
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+if torch.mps.is_available():
+    device = "mps"
+
+print(f"Using device: {device.upper()}")
 
 
 class SpatialPlot:
@@ -86,6 +96,7 @@ class SpatialPlot:
         ratio_df: pd.DataFrame,
         data_key: str,
         grid_spacing: str = "500e/500e",
+        cmap_limits: tuple[float, float, float] = None,
         **plot_grid_kwargs,
     ):
         """Adds a ratio grid to the existing figure."""
@@ -94,7 +105,9 @@ class SpatialPlot:
             "plot_contours": False,
             "reverse_cmap": True,
             "cmap": "polar",
-            "cmap_limits": (-0.5, 0.5, 1.0 / 16),
+            "cmap_limits": (
+                (-0.5, 0.5, 1.0 / 16) if cmap_limits is None else cmap_limits
+            ),
             "cmap_limit_colors": ("darkred", "darkblue"),
         } | plot_grid_kwargs
 
@@ -180,10 +193,14 @@ class SpatialPlot:
                 )
 
         return self
-    
+
     def plot_hypocentre(self, lon: float, lat: float, **plot_kwargs):
         """Adds a hypocentre to the existing figure."""
-        plot_kwargs = {"style": "a0.25c", "fill": "purple", "pen": "0.5p,black"} | plot_kwargs
+        plot_kwargs = {
+            "style": "a0.25c",
+            "fill": "purple",
+            "pen": "0.5p,black",
+        } | plot_kwargs
 
         self.fig.plot(
             x=lon,
@@ -204,7 +221,7 @@ def basin_site_map(
     basin_site_levels: tuple[int] | None = None,
 ):
     """Create a NZ wide map showing basin boundaries and site locations."""
-    with IMDB(imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df().set_index("site_id")
 
     site_df = utils.add_basin_column(site_df)
@@ -274,7 +291,7 @@ def nn_site_bias_res_std(
     record_int_ids = pred_df.index.values.astype(int)
 
     logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         record_info_df = imdb.get_record_info_df(record_int_ids=pred_df.index.values)
         sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
@@ -312,7 +329,7 @@ def emp_gmm_bias_res_std(
     record_int_ids = nn_pred_df.index.values.astype(int)
 
     logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
-    with IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
         record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
         sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
@@ -491,7 +508,6 @@ def _gen_im_bias_res_std_plot(
             ("darkred", "darkblue"),
             reverse_cmap=True,
             plot_contours=False,
-            cb_label=im,
         )
 
         for cur_ffp in basin_files:
@@ -504,6 +520,8 @@ def _gen_im_bias_res_std_plot(
             style="p0.075c",
             fill="black",
         )
+
+    bias_metadata = dict(im=im, type="site-bias")
 
     # Residual Standard Deviation
     grid_res_std = plotting.create_grid(site_res_std, im, grid_spacing=grid_spacing)
@@ -526,6 +544,7 @@ def _gen_im_bias_res_std_plot(
         (0, 1.0, 1.0 / 16),
         ("white", "black"),
         reverse_cmap=True,
+        cb_label=im,
         plot_contours=False,
     )
 
@@ -577,10 +596,16 @@ def _gen_im_bias_res_std_plot(
             fill="black",
         )
 
+    res_std_metadata = dict(im=im, type="site-res-std")
+
     if output_dir is not None:
         bias_fig.savefig(output_dir / f"{im}_site_bias.png", dpi=900, anti_alias=True)
         res_std_fig.savefig(
             output_dir / f"{im}_site_res_std.png", dpi=900, anti_alias=True
+        )
+        mlt.utils.write_to_yaml(bias_metadata, output_dir / f"{im}_site_bias.yaml")
+        mlt.utils.write_to_yaml(
+            res_std_metadata, output_dir / f"{im}_site_res_std.yaml"
         )
     else:
         return bias_fig, res_std_fig
@@ -594,7 +619,7 @@ def record_event_distribution_map(
     1. Number of events
     2. Number of records
     """
-    with IMDB(imdb_ffp, readonly=True) as imdb:
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True, min_grid_level=0, max_grid_level=0)
         record_info_df = imdb.get_record_info_df(
             sites=site_df.site_id.values.astype(str)
@@ -642,3 +667,159 @@ def record_event_distribution_map(
         site_df, style="p0.02c"
     )
     record_plot.save(output_dir / "record_map.png")
+
+
+def nn_gmm_full_ratio_map(
+    model_dir_1: Path, model_dir_2: Path, output_dir: Path, n_procs: int = 1, plot_model_predictions: bool = False
+):
+    """
+    Generates ratio plots of two full NN-GMM models for
+    several different scenarios.
+
+    Assumes model 1 does not use location as an input!!
+    """
+    default_combs = [
+        # Short distance
+        [25, 6.5],
+        [25, 7.0],
+        [25, 7.5],
+        [25, 8.0],
+        # Moderate distance
+        [75, 6.5],
+        [75, 7.0],
+        [75, 7.5],
+        [75, 8.0],
+        # Long distance
+        [150, 6.5],
+        [150, 7.0],
+        [150, 7.5],
+        [150, 8.0],
+    ]
+
+    run_config_1 = nn_gmm.RunConfig.from_yaml(model_dir_1 / "run_config.yaml")
+    run_config_2 = nn_gmm.RunConfig.from_yaml(model_dir_2 / "run_config.yaml")
+
+    # Load the models
+    model_1 = torch.load(
+        model_dir_1 / "model.pt", weights_only=False, map_location=device
+    )
+    model_2 = torch.load(
+        model_dir_2 / "model.pt", weights_only=False, map_location=device
+    )
+
+    site_locs = loc_pre.get_random_sites(250_000)
+    site_locs = site_locs[site_locs[:, 1] < -36.0]
+    nztm_coords = coordinates.wgs_depth_to_nztm(site_locs[:, ::-1])
+
+    base_inputs = {
+        "tect_type": "crustal",
+        "rake": 0,
+        "dip": 90,
+        "dtop": 0,
+        "dbottom": 5,
+        "vs30": 760,
+        "z1p0": 0.1,
+        "z2p5": 1.0,
+    }
+
+    for i, (cur_dist, cur_mag) in enumerate(default_combs):
+        logger.info(
+            f"Running scenario {i + 1}/{len(default_combs)}: {cur_dist} km, M{cur_mag}"
+        )
+        cur_inputs = base_inputs | {
+            "magnitude": cur_mag,
+            "rjb": cur_dist,
+            "rx": cur_dist,
+            "ry": cur_dist,
+            "rrup": cur_dist,
+        }
+
+        # Get model 1 predictions
+        model_1_input_df = pd.DataFrame([cur_inputs])
+        model_1_preds = nn_gmm.run_predictions(
+            model_1, run_config_1, model_1_input_df, device=device
+        )
+
+        loc_input_df = pd.DataFrame(data=site_locs, columns=["lon", "lat"])
+        loc_input_df["nztm_y"] = nztm_coords[:, 0]
+        loc_input_df["nztm_x"] = nztm_coords[:, 1]
+
+        for cur_key in cur_inputs:
+            loc_input_df[cur_key] = cur_inputs[cur_key]
+        model_2_preds = nn_gmm.run_predictions(
+            model_2, run_config_2, loc_input_df, device=device
+        )
+
+        prefix = f"dist_{cur_dist}_mag_{cur_mag}".replace(".", "p")
+        if n_procs == 1:
+            for im in constants.PLOT_IMS:
+                _gen_nn_gmm_full_ratio_map(
+                    model_1_preds,
+                    model_2_preds,
+                    output_dir=output_dir,
+                    im=im,
+                    prefix=prefix,
+                    plot_model_predictions=plot_model_predictions
+                )
+        else:
+            ctx = mp.get_context("spawn")
+            with ctx.Pool(processes=n_procs) as pool:
+                pool.starmap(
+                    _gen_nn_gmm_full_ratio_map,
+                    [
+                        (model_1_preds, model_2_preds, output_dir, im, prefix, plot_model_predictions)
+                        for im in constants.PLOT_IMS
+                    ],
+                )
+
+
+def _gen_nn_gmm_full_ratio_map(
+    model_1_preds: pd.DataFrame,
+    model_2_preds: pd.DataFrame,
+    output_dir: Path,
+    im: str,
+    prefix: str,
+    plot_model_predictions: bool
+):
+    res_df = pd.DataFrame(
+        data=model_2_preds[f"{im}_pred"].values - model_1_preds[f"{im}_pred"].values,
+        columns=["residual"],
+    )
+    res_df[["lon", "lat"]] = model_2_preds[["lon", "lat"]]
+
+    spatial_plot = (
+        SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False)
+        .plot_ratio(
+            res_df,
+            "residual",
+            cmap_limits=(-1.0, 1.0, 2.0 / 16),
+            continuous_cmap=True,
+            cb_label=f"{utils.get_nice_im_name(im)} Ratio",
+        )
+        .plot_basin_boundaries(pen="0.15p,black")
+    )
+    spatial_plot.save(
+        output_dir / f"{prefix}_{utils.get_im_filename(im)}_full_ratio.png"
+    )
+
+    if plot_model_predictions:
+        model_1_plot = SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False).plot_im_values(
+            model_1_preds,
+            im,
+            grid_spacing="500e/500e",
+            cb_label=f"{utils.get_nice_im_name(im)} (Model 1)",
+        ).plot_basin_boundaries(pen="0.15p,black")
+        model_1_plot.save(
+            output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_1_pred.png"
+        )
+
+        model_2_plot = SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False).plot_im_values(
+            model_2_preds,
+            im,
+            grid_spacing="500e/500e",
+            cb_label=f"{utils.get_nice_im_name(im)} (Model 2)",
+        ).plot_basin_boundaries(pen="0.15p,black")
+        model_2_plot.save(
+            output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_2_pred.png"
+        )
+            

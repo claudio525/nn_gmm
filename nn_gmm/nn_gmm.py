@@ -1,5 +1,4 @@
 import functools
-import time
 import os
 import logging
 from pathlib import Path
@@ -179,6 +178,14 @@ class RunConfig:
     def ims(self) -> np.ndarray:
         """IMs to use for the model."""
         return np.array(constants.IM_SET_MAPPING[self.im_set])
+    
+    @property
+    def pSA_ims(self) -> np.ndarray:
+        return np.array([cur_im for cur_im in self.ims if cur_im.startswith("pSA")])
+    
+    @property
+    def pSA_periods(self) -> np.ndarray:
+        return np.array([float(cur_im.split("_")[-1]) for cur_im in self.pSA_ims])
 
     @property
     def ind_loss_keys(self) -> np.ndarray:
@@ -189,6 +196,11 @@ class RunConfig:
     def pred_mean_keys(self) -> np.ndarray:
         """Predicted mean IM keys."""
         return np.array([f"{cur_im}_pred" for cur_im in self.ims])
+    
+    @property
+    def pred_pSA_mean_keys(self) -> np.ndarray:
+        """Predicted mean pSA keys."""
+        return np.array([f"{cur_im}_pred" for cur_im in self.pSA_ims])
 
     @property
     def pred_std_keys(self) -> np.ndarray:
@@ -472,9 +484,9 @@ def run_model_training(
     event_df: pd.DataFrame,
     site_df: pd.DataFrame,
     train_events: list[str],
-    val_events: list[str],
+    val_events: list[str] | None,
     train_sites: list[str],
-    val_sites: list[str],
+    val_sites: list[str] | None,
     save_train_results: bool = True,
     verbose: bool = True,
 ):
@@ -493,15 +505,28 @@ def run_model_training(
         DataFrame containing site information.
     train_events : list[str]
         List of training event IDs.
-    val_events : list[str]
+    val_events : list[str] | None
         List of validation event IDs.
+        Set to None to skip validation.
     train_sites : list[str]
         List of training site IDs.
-    val_sites : list[str]
+    val_sites : list[str] | None
         List of validation site IDs.
+        Set to None to skip validation.
     """
-    events = np.concatenate([train_events, val_events])
-    sites = np.concatenate([train_sites, val_sites])
+    assert (val_events is not None and val_sites is not None) or (
+        val_events is None and val_sites is None
+    ), "If validation events are provided, validation sites must be provided and vice versa."
+    events = (
+        np.concatenate([train_events, val_events])
+        if val_events is not None
+        else train_events
+    )
+    sites = (
+        np.concatenate([train_sites, val_sites])
+        if val_sites is not None
+        else train_sites
+    )
 
     # Sanity check
     assert (
@@ -586,21 +611,11 @@ def run_model_training(
         site_event_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
 
-    # Get the record ids for the training and validation sets
+    # Prepare training data
     train_record_ids = record_info_df.loc[
         record_info_df.event_id.isin(train_events)
         & record_info_df.site_id.isin(train_sites)
     ].index.values.astype(int)
-    val_record_ids = record_info_df.loc[
-        record_info_df.event_id.isin(val_events)
-        & record_info_df.site_id.isin(val_sites)
-    ].index.values.astype(int)
-
-    assert record_info_df.loc[train_record_ids].event_id.isin(val_events).sum() == 0
-    assert record_info_df.loc[val_record_ids].event_id.isin(train_events).sum() == 0
-    assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
-    assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
-
     train_dataset = data.OptimizedIMDBDataset(
         run_config.imdb_ffp,
         train_record_ids,
@@ -612,24 +627,35 @@ def run_model_training(
         run_config,
         is_train=True,
     )
-    val_dataset = data.OptimizedIMDBDataset(
-        run_config.imdb_ffp,
-        val_record_ids,
-        run_config.ims,
-        pre_site_df,
-        pre_source_df,
-        pre_site_event_df,
-        record_info_df,
-        run_config,
-        is_train=False,
-    )
-
     train_dataloader = data.CustomDataLoader(
         train_dataset, batch_size=run_config.batch_size, shuffle=True
     )
-    val_dataloader = data.CustomDataLoader(
-        val_dataset, batch_size=run_config.batch_size, shuffle=False
-    )
+
+    # Prepare validation data
+    val_dataset, val_dataloader = None, None
+    if val_events is not None:
+        val_record_ids = record_info_df.loc[
+            record_info_df.event_id.isin(val_events)
+            & record_info_df.site_id.isin(val_sites)
+        ].index.values.astype(int)
+        assert record_info_df.loc[train_record_ids].event_id.isin(val_events).sum() == 0
+        assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
+        assert record_info_df.loc[val_record_ids].event_id.isin(train_events).sum() == 0
+        assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
+        val_dataset = data.OptimizedIMDBDataset(
+            run_config.imdb_ffp,
+            val_record_ids,
+            run_config.ims,
+            pre_site_df,
+            pre_source_df,
+            pre_site_event_df,
+            record_info_df,
+            run_config,
+            is_train=False,
+        )
+        val_dataloader = data.CustomDataLoader(
+            val_dataset, batch_size=run_config.batch_size, shuffle=False
+        )
 
     model_fn = functools.partial(
         nn_gmm_modules.create_multi_mlp,
@@ -644,7 +670,7 @@ def run_model_training(
         loc_model = torch.load(
             run_config.loc_model_dir / "emb_model.pt",
             weights_only=False,
-            map_location=run_config.device, 
+            map_location=run_config.device,
         )
 
         core_model = model_fn(
@@ -696,10 +722,9 @@ def run_model_training(
     model.to(run_config.device)
 
     logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
-    logger.info(
-        f"Training model with {len(train_dataset)} training records "
-        f"and {len(val_dataset)} validation records"
-    )
+    logger.info(f"Training model with {len(train_dataset)} training records ")
+    if val_events is not None:
+        logger.info(f"Validating model on {len(val_dataset)} records")
 
     metrics, best_model_state, best_model_epoch = train(
         model,
@@ -721,11 +746,12 @@ def run_model_training(
     ouput_dir.mkdir(parents=True, exist_ok=True)
 
     # Get simulation predictions
-    logger.info("Getting validation dataset predictions")
-    val_results_df = get_dataset_predictions(
-        model, val_dataset, run_config, verbose=verbose
-    )
-    val_results_df.to_parquet(ouput_dir / "val_results.parquet")
+    if val_events is not None:
+        logger.info("Getting validation dataset predictions")
+        val_results_df = get_dataset_predictions(
+            model, val_dataset, run_config, verbose=verbose
+        )
+        val_results_df.to_parquet(ouput_dir / "val_results.parquet")
 
     if save_train_results:
         logger.info("Getting training dataset predictions")
@@ -747,11 +773,12 @@ def run_model_training(
     metrics_df.to_parquet(ouput_dir / "metrics.parquet")
 
     np.save(ouput_dir / "train_record_ids.npy", train_record_ids)
-    np.save(ouput_dir / "val_record_ids.npy", val_record_ids)
     np.save(ouput_dir / "train_events.npy", train_events)
-    np.save(ouput_dir / "val_events.npy", val_events)
     np.save(ouput_dir / "train_sites.npy", train_sites)
-    np.save(ouput_dir / "val_sites.npy", val_sites)
+    if val_events is not None:
+        np.save(ouput_dir / "val_record_ids.npy", val_record_ids)
+        np.save(ouput_dir / "val_events.npy", val_events)
+        np.save(ouput_dir / "val_sites.npy", val_sites)
 
     torch.save(model, ouput_dir / "model.pt")
 
@@ -759,7 +786,7 @@ def run_model_training(
         "best_model_epoch": int(best_model_epoch),
         "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]),
         "n_train_samples": int(train_record_ids.shape[0]),
-        "n_val_samples": int(val_record_ids.shape[0]),
+        "n_val_samples": int(val_record_ids.shape[0]) if val_events is not None else 0,
         "n_model_params": int(nn_gmm_modules.get_n_params(model)),
     }
     mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
@@ -788,7 +815,7 @@ def get_dataset_predictions(
     pd.DataFrame
         A DataFrame containing the predicted mean and standard deviation values.
     """
-    dataloader = data.CustomDataLoader(dataset, batch_size=100_000, shuffle=False)
+    dataloader = data.CustomDataLoader(dataset, batch_size=run_config.batch_size, shuffle=False)
 
     result_dfs = []
     for cur_batch in tqdm(dataloader, desc="Predicting", disable=not verbose):
@@ -836,12 +863,12 @@ def get_dataset_predictions(
 
             if run_config.use_sample_weights:
                 if len(cur_batch.sample_weights.shape) == 1:
-                    cur_result_df["sample_weight"] = (
-                        cur_batch.sample_weights.numpy(force=True).astype(np.float32)
-                    )
+                    cur_result_df["sample_weight"] = cur_batch.sample_weights.numpy(
+                        force=True
+                    ).astype(np.float32)
                 else:
                     logger.info("Sample weights have multiple columns, skipping")
-                    
+
             result_dfs.append(cur_result_df)
 
     result_df = pd.concat(result_dfs, axis=0)
@@ -851,7 +878,7 @@ def get_dataset_predictions(
 def train(
     model: nn_gmm_modules.BaseNNModel,
     train_dataloader: data.CustomDataLoader,
-    val_dataloader: data.CustomDataLoader,
+    val_dataloader: data.CustomDataLoader | None,
     n_epochs: int,
     l2_reg: float = 0.0,
     learning_rate: float = 1e-3,
@@ -958,10 +985,15 @@ def train(
                 f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
 
-    logger.info(
-        f"Training completed. Best model at epoch "
-        f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}"
-    )
+    if val_dataloader is not None:
+        logger.info(
+            f"Training completed. Best model at epoch "
+            f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}"
+        )
+    else: 
+        best_model_state = model.state_dict()
+        best_model_epoch = n_epochs - 1
+        logger.info("Training completed.")
 
     return metrics, best_model_state, best_model_epoch
 

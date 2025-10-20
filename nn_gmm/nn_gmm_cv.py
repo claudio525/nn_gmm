@@ -2,7 +2,6 @@
 import gc
 import time
 import copy
-import shutil
 import logging
 from pathlib import Path
 import multiprocessing as mp
@@ -59,7 +58,7 @@ def train_cv(
 
     np.random.seed(run_config.seed)
 
-    # Only use a subset of sites for testing/debugging
+    # Only use a subset of sites for debugging
     if n_sites is not None:
         sites = np.random.choice(sites, size=n_sites, replace=False)
 
@@ -227,10 +226,10 @@ def _run_helper(
         root_logger.addHandler(file_handler)
     else:
         logger = utils.setup_logging(log_ffp, enable_console=False)
-        logging.info(
+        logger.info(
             f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}."
         )
-        logging.info(
+        logger.info(
             f"Sleeping for {10 * p_ix} seconds to stagger process start times."
         )
         time.sleep(10 * p_ix)

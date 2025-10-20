@@ -8,7 +8,6 @@ from tqdm import tqdm
 
 import ml_tools as mlt
 import nn_gmm as nng
-import seismic_hazard_analysis as sha
 from qcore import coordinates as coords
 from qcore import nhm
 
@@ -45,6 +44,8 @@ def create_imdb(
     """
     Create a new database.
     """
+    import seismic_hazard_analysis as sha
+
     SOURCE_INFO_FIELDS = [
         "magnitude",
         "type",

@@ -254,7 +254,10 @@ class LocationRegionNN(nn.Module):
 
 
 def get_random_sites(n_sites: int) -> np.ndarray:
-    """Get random sites within New Zealand land area."""
+    """
+    Get random sites within New Zealand land area.
+    ## TODO: This should be updated to use NZTM instead of lon/lat
+    """
     land_df = gpd.read_file(constants.NZ_LAND_SHAPEFILE)
 
     # Remove small islands

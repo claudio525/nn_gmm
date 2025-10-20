@@ -22,11 +22,35 @@ def nn_site_bias_res_std(
 ):
     """
     Generate site bias and site residual standard deviation plots
-    using NN-GMM results for specified IMs.
+    using NN-GMM CV results for specified IMs.
     """
-    logger = nng.utils.setup_logging()
+    nng.utils.setup_logging()
     nng.plots_spatial.nn_site_bias_res_std(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
+    )
+
+
+@app.command("nn-gmm-full-ratio-map")
+def nn_gmm_full_ratio_map(
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+    n_procs: int = 1,
+    plot_model_predictions: bool = False,
+):
+    """
+    Generates ratio plots of two full NN-GMM models for
+    several different scenarios.
+
+    Assumes model 1 does not use location as an input!!
+    """
+    nng.utils.setup_logging()
+    nng.plots_spatial.nn_gmm_full_ratio_map(
+        model_dir_1,
+        model_dir_2,
+        output_dir,
+        n_procs=n_procs,
+        plot_model_predictions=plot_model_predictions,
     )
 
 
@@ -43,7 +67,7 @@ def emp_gmm_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using Empirical GMM results for specified IMs.
     """
-    logger = nng.utils.setup_logging()
+    nng.utils.setup_logging()
     nng.plots_spatial.emp_gmm_bias_res_std(
         nn_model_dir,
         empdb_ffp,
@@ -56,29 +80,35 @@ def emp_gmm_bias_res_std(
 
 @app.command("basin-site-map")
 def basin_site_map(
-    imdb_ffp: Path, output_ffp: Path, site_levels: list[int], basin_site_levels: list[int] | None = None
+    imdb_ffp: Path,
+    output_ffp: Path,
+    site_levels: list[int],
+    basin_site_levels: list[int] | None = None,
 ):
     """Generate map showing basin boundaries and site locations."""
-    logger = nng.utils.setup_logging()
+    nng.utils.setup_logging()
     nng.plots_spatial.basin_site_map(
-        imdb_ffp, output_ffp, site_levels=tuple(site_levels), basin_site_levels=tuple(basin_site_levels)
+        imdb_ffp,
+        output_ffp,
+        site_levels=tuple(site_levels),
+        basin_site_levels=tuple(basin_site_levels),
     )
 
 
 @app.command("record-event-distribution-map")
-def record_event_distribution_map(imdb_ffp: Path, output_ffp: Path):
+def record_event_distribution_map(imdb_ffp: Path, output_dir: Path):
     """Creates two NZ wide maps showing spatial distribution of records and events"""
-    logger = nng.utils.setup_logging()
-    nng.plots_spatial.record_event_distribution_map(imdb_ffp, output_ffp)
+    nng.utils.setup_logging()
+    nng.plots_spatial.record_event_distribution_map(imdb_ffp, output_dir)
 
 
 @app.command("site-folds-map")
 def site_folds_map(result_dir: Path, output_ffp: Path):
     """
-    Generate map showing site locations and their what site-fold they belong to
+    Generate map showing site locations and their site-fold they belong to
     for the given CV results.
     """
-    logger = nng.utils.setup_logging()
+    nng.utils.setup_logging()
     run_config = nng.RunConfig.from_yaml(result_dir / "run_config.yaml")
 
     cv_dirs = [
@@ -87,7 +117,7 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
         if cur_dir.is_dir() and cur_dir.name.startswith("cv_")
     ]
 
-    with nng.imdb.IMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    with nng.DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True).set_index("site_id")
 
     site_df["site_fold"] = ""
@@ -116,9 +146,6 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
         )
 
     spatial_plot.save(output_ffp)
-
-
-
 
 
 if __name__ == "__main__":

@@ -218,6 +218,7 @@ DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-l
 AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
 
+PLOT_IMS = ["pSA_0.01", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 
 # Default figure settings
 FIG_SIZE = (16, 10)

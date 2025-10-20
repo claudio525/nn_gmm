@@ -1,12 +1,10 @@
 import time
 import logging
-import shutil
 from pathlib import Path
 
 import numpy as np
 import torch
 import typer
-from sklearn.model_selection import train_test_split
 
 import ml_tools as mlt
 import nn_gmm as nng
@@ -70,7 +68,79 @@ def train_cv(
         run_notebook=run_notebook,
         remove_cv_results=remove_cv_results,
     )
-    logger.info(f"Took: {(time.time() - start) / 60} minutes to complete CV model training.")
+    logger.info(
+        f"Took: {(time.time() - start) / 60} minutes to complete CV model training."
+    )
+
+
+@app.command("train-full-gmm")
+def train_full_gmm(
+    run_config_ffp: Path,
+    n_epochs: int | None = None,
+    seed: int | None = None,
+    batch_size: int | None = None,
+    id_suffix: str | None = None,
+    n_sites: int | None = None,
+):
+    """Train the GMM using all available data."""
+    run_config = nng.RunConfig.from_config_kwargs(
+        config_ffp=run_config_ffp,
+        device=device,
+        n_epochs=n_epochs,
+        seed=seed,
+        batch_size=batch_size,
+    )
+
+    id_suffix = f"_{id_suffix}" if id_suffix is not None else ""
+    (
+        out_dir := run_config.results_dir
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    ).mkdir(parents=False, exist_ok=False)
+
+    log_ffp = out_dir / "nn_train_cv.log"
+    logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
+    print("Writing logs to:", log_ffp)
+
+    # Get event and site data
+    with nng.DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+        site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
+
+    if run_config.extra_basin_sites:
+        # Take all level 0 sites and level 2 & 3 sites that are in a basin
+        site_df = nng.utils.add_basin_column(site_df)
+        site_df = site_df.loc[
+            (site_df.grid_level == 0)
+            | ((site_df["basin"] != "NiB") & (site_df.grid_level == 2))
+        ]
+
+    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
+        str
+    )
+
+    # Drop test events
+    events = events[~np.isin(events, run_config.test_events)]
+    event_df = event_df.loc[event_df.event_id.isin(events)]
+
+    np.random.seed(run_config.seed)
+
+    # Only use a subset of sites for debugging
+    if n_sites is not None:
+        sites = np.random.choice(sites, size=n_sites, replace=False)
+
+    start = time.time()
+    nng.nn_gmm.run_model_training(
+        out_dir,
+        run_config,
+        event_df,
+        site_df,
+        events,
+        None,
+        sites,
+        None,
+        save_train_results=False,
+    )
+    logger.info(f"Took: {(time.time() - start) / 60} minutes to complete model training.")
 
 
 @app.command("run-mera")

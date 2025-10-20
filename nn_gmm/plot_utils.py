@@ -1,10 +1,14 @@
 from pathlib import Path
 import tempfile
 
+import numpy as np
 import pygmt
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+
+def exp_formatter(y, pos):
+    return f"{np.exp(y):.3f}"
 
 def get_pSA_bias_residual_fig(
     figsize: tuple[float, float] = (16, 6),
