@@ -37,7 +37,7 @@ def train_cv(
     remove_cv_results: bool = False,
 ):
     """Train and evaluate the GMM using cross-validation."""
-    run_config = nng.RunConfig.from_config_kwargs(
+    run_config = nng.GMMRunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
         device=device,
         n_epochs=n_epochs,
@@ -49,8 +49,7 @@ def train_cv(
     base_out_dir = (
         run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
     )
-    assert not base_out_dir.exists(), "Output directory already exists!"
-    base_out_dir.mkdir()
+    base_out_dir.mkdir(exist_ok=False)
 
     log_ffp = base_out_dir / "nn_train_cv.log"
     logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
@@ -72,6 +71,51 @@ def train_cv(
         f"Took: {(time.time() - start) / 60} minutes to complete CV model training."
     )
 
+@app.command("train-loc-adj-cv")
+def train_loc_adj_cv(
+    run_config_ffp: Path,
+    batch_size: int | None = None,
+    n_epochs: int | None = None,   
+    id_suffix: str | None = None,
+    n_procs: int = 1,
+    run_notebook: bool = True,
+    remove_cv_results: bool = False,
+    rel_base_model_dir: Path | None = None,
+):
+    """Train and evaluate the location adjustment model using cross-validation."""
+    run_config = nng.LocAdjRunConfig.from_config_kwargs(
+        config_ffp=run_config_ffp,
+        device=device,
+        n_epochs=n_epochs,
+        batch_size=batch_size,
+        rel_base_model_dir=rel_base_model_dir,
+    )
+
+    id_suffix = f"_{id_suffix}" if id_suffix is not None else ""
+    base_out_dir = (
+        run_config.results_dir / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    )
+    base_out_dir.mkdir(exist_ok=False)
+
+    log_ffp = base_out_dir / "nn_train_cv.log"
+    logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
+    print("Writing logs to:", log_ffp)
+
+    start = time.time()
+    nng.train_loc_adj_cv(
+        run_config,
+        base_out_dir,
+        n_procs=n_procs,
+        run_notebook=run_notebook,
+        remove_cv_results=remove_cv_results,
+    )
+    logger.info(
+        f"Took: {(time.time() - start) / 60} minutes to complete CV model training."
+    )
+
+
+
+
 
 @app.command("train-full-gmm")
 def train_full_gmm(
@@ -83,7 +127,7 @@ def train_full_gmm(
     n_sites: int | None = None,
 ):
     """Train the GMM using all available data."""
-    run_config = nng.RunConfig.from_config_kwargs(
+    run_config = nng.GMMRunConfig.from_config_kwargs(
         config_ffp=run_config_ffp,
         device=device,
         n_epochs=n_epochs,

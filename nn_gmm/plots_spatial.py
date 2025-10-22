@@ -22,15 +22,6 @@ from . import loc_pre
 
 logger = logging.getLogger(__name__)
 
-device = "cpu"
-if torch.cuda.is_available():
-    device = "cuda"
-if torch.mps.is_available():
-    device = "mps"
-
-print(f"Using device: {device.upper()}")
-
-
 class SpatialPlot:
 
     IM_LIMITS_MAPPING = {
@@ -286,7 +277,7 @@ def nn_site_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using NN-GMM results for specified IMs.
     """
-    run_config = nn_gmm.RunConfig.from_yaml(nn_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(nn_dir / "run_config.yaml")
     pred_df = pd.read_parquet(nn_dir / "val_results.parquet").sort_index()
     record_int_ids = pred_df.index.values.astype(int)
 
@@ -324,7 +315,7 @@ def emp_gmm_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using Empirical GMM results for specified IMs.
     """
-    run_config = nn_gmm.RunConfig.from_yaml(nn_model_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(nn_model_dir / "run_config.yaml")
     nn_pred_df = pd.read_parquet(nn_model_dir / "val_results.parquet").sort_index()
     record_int_ids = nn_pred_df.index.values.astype(int)
 
@@ -670,7 +661,7 @@ def record_event_distribution_map(
 
 
 def nn_gmm_full_ratio_map(
-    model_dir_1: Path, model_dir_2: Path, output_dir: Path, n_procs: int = 1, plot_model_predictions: bool = False
+    model_dir_1: Path, model_dir_2: Path, output_dir: Path, device: str, n_procs: int = 1, plot_model_predictions: bool = False
 ):
     """
     Generates ratio plots of two full NN-GMM models for
@@ -696,8 +687,8 @@ def nn_gmm_full_ratio_map(
         [150, 8.0],
     ]
 
-    run_config_1 = nn_gmm.RunConfig.from_yaml(model_dir_1 / "run_config.yaml")
-    run_config_2 = nn_gmm.RunConfig.from_yaml(model_dir_2 / "run_config.yaml")
+    run_config_1 = nn_gmm.GMMRunConfig.from_yaml(model_dir_1 / "run_config.yaml")
+    run_config_2 = nn_gmm.GMMRunConfig.from_yaml(model_dir_2 / "run_config.yaml")
 
     # Load the models
     model_1 = torch.load(

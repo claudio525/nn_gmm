@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import Mock
 
 import torch
+import pandas as pd
 import numpy as np
 
 import nn_gmm as nng
@@ -62,42 +63,55 @@ def test_datasets(imdb_ffp: Path, seed: int):
 
     record_info_df["sample_weight"] = 1.0
 
-    mock_run_config = Mock()
-    mock_run_config.scale_ims = False
-    mock_run_config.device = device
-    mock_run_config.apply_im_weighting = False
-    mock_run_config.site_inputs = ["vs30", "z1p0", "z2p5"]
-    mock_run_config.source_inputs = ["magnitude", "rake"]
-    mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
-    mock_run_config.using_loc_model = False
-    mock_run_config.loc_model_inputs = None
+    site_inputs = ["vs30", "z1p0", "z2p5"]
+    source_inputs = ["magnitude", "rake"]
+    site_event_inputs = ["rrup", "rjb", "rx", "ry"]
+
+    # mock_run_config = Mock()
+    # mock_run_config.scale_ims = False
+    # mock_run_config.device = device
+    # mock_run_config.apply_im_weighting = False
+    # mock_run_config.site_inputs = ["vs30", "z1p0", "z2p5"]
+    # mock_run_config.source_inputs = ["magnitude", "rake"]
+    # mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
+    # mock_run_config.using_loc_model = False
+    # mock_run_config.loc_model_inputs = None
 
     dataset_1 = nng.data.IMDBDataset(
         imdb_ffp,
         record_int_ids,
         np.array(nng.constants.PSA_KEYS),
-        site_df[mock_run_config.site_inputs],
-        source_df[mock_run_config.source_inputs],
-        site_event_df[mock_run_config.site_event_inputs],
+        site_df[site_inputs],
+        source_df[source_inputs],
+        site_event_df[site_event_inputs],
         record_info_df,
-        mock_run_config,
-        is_train=False,
+        device,
+        scale_ims=True
     )
 
     dataset_2 = nng.data.OptimizedIMDBDataset(
         imdb_ffp,
         record_int_ids,
         np.array(nng.constants.PSA_KEYS),
-        site_df[mock_run_config.site_inputs],
-        source_df[mock_run_config.source_inputs],
-        site_event_df[mock_run_config.site_event_inputs],
+        site_df[site_inputs],
+        source_df[source_inputs],
+        site_event_df[site_event_inputs],
         record_info_df,
-        mock_run_config,
-        is_train=False,
+        device,
+        scale_ims=True
     )
 
     assert len(dataset_1) == len(dataset_2)
 
+    # Compare the scale parameters
+    scale_params_1 = dataset_1.im_scale_params
+    scale_params_2 = dataset_2.im_scale_params
+    for cur_key in scale_params_1.keys():
+        pd.testing.assert_series_equal(
+            scale_params_1[cur_key], scale_params_2[cur_key], check_names=True
+        )
+    
+    # Compare IM values
     for ix in range(10):
         indices = np.random.choice(len(dataset_1), 4096, replace=False)
 

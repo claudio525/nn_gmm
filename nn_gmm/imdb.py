@@ -1418,6 +1418,12 @@ class DuckIMDB:
         """
         Returns a DataFrame containing all realisation data.
 
+        Parameters
+        ----------
+        events : np.ndarray, optional
+            Array of event IDs to filter the realisation data.
+            If None, all realisation data is returned.
+
         Returns
         -------
         pd.DataFrame

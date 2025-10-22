@@ -55,7 +55,7 @@ def magnitude_trend_plot(
         np.isin(record_int_ids, simulation_df.index)
     ), "record_int_ids must be a subset of the simulation_df index"
 
-    run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(result_dir / "run_config.yaml")
 
     min_mag, max_mag = 5.25, 8.25
     input_df = analysis.get_mag_input_df(
@@ -273,7 +273,7 @@ def rrup_trend_plot(
         np.isin(record_int_ids, simulation_df.index)
     ), "record_int_ids must be a subset of the simulation_df index"
 
-    run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(result_dir / "run_config.yaml")
 
     min_rrup, max_rrup = 0.1, 300
     input_df = analysis.get_rrup_input_df(

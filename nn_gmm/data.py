@@ -57,7 +57,6 @@ class SimBatchData(BaseBatchData):
         self.X = X
         self.X_loc = X_loc
         self.sample_weights = sample_weights
-
         self.record_int_ids = record_int_ids
 
     @property
@@ -170,8 +169,10 @@ class BaseIMDBDataset(BaseDataset):
         source_df: pd.DataFrame,
         site_event_df: pd.DataFrame,
         record_info_df: pd.DataFrame,
-        run_config: "nn_gmm.RunConfig",
-        is_train: bool,
+        device: str,
+        scale_ims: bool,
+        im_scale_params: dict | None = None,
+        loc_df: pd.DataFrame | None = None,
     ):
         """
         Parameters
@@ -190,16 +191,16 @@ class BaseIMDBDataset(BaseDataset):
             The site event data
         record_info_df : pd.DataFrame
             The record info data
-        run_config : nn_gmm.RunConfig
-            The run configuration
-        is_train : bool
-            Whether the dataset is for training
+        im_scale_params : dict | None
+            The scaling parameters for the IM data
         """
         super().__init__()
 
+        self.device = device
         self.ims = ims
-        self.run_config = run_config
         self.record_int_ids = np.sort(record_int_ids)
+        self.im_scale_params = im_scale_params
+        self._return_X_loc = loc_df is not None
 
         # Check required memory
         mem_req = self.record_int_ids.size * self.ims.size * 4 / 1e9
@@ -216,9 +217,7 @@ class BaseIMDBDataset(BaseDataset):
         )
 
         with DuckIMDB(imdb_ffp, readonly=True) as imdb:
-            self._im_data = imdb.get_im_data(
-                self.ims, self.record_int_ids
-            ).sort_index()
+            self._im_data = imdb.get_im_data(self.ims, self.record_int_ids).sort_index()
 
         # Drop records with zero IM values
         zero_record_ids = self._im_data.loc[self._im_data.sum(axis=1) == 0].index.values
@@ -240,27 +239,35 @@ class BaseIMDBDataset(BaseDataset):
         ].sort_index()
         self.source_df = source_df.loc[
             source_df.index.isin(self.record_info_df.rel_int_id)
-        ].sort_index()
+        ].sort_index() 
         self.site_event_df = site_event_df.loc[
             site_event_df.index.isin(self.record_info_df.site_event_int_id)
-        ].sort_index()
+        ].sort_index() 
+
+        self.loc_df = None
+        if self._return_X_loc:
+            self.loc_df = loc_df.loc[
+                loc_df.index.isin(self.record_info_df.site_int_id)
+            ].sort_index()
 
         # Convert to log
         self._im_data = np.log(self._im_data)
 
-        if run_config.scale_ims:
+        if scale_ims:
             logger.info(f"Scaling IM data, shape {self._im_data.shape}")
             # Compute scale parameters
-            if is_train:
-                logger.info("Calculating mean and std for IM data")
-                run_config.im_scale_params = {
+            if self.im_scale_params is None:
+                logger.info(
+                    "No IM scale parameters provided, calculating mean and std for IM data"
+                )
+                self.im_scale_params = {
                     "mean": self._im_data.mean(axis=0),
                     "std": self._im_data.std(axis=0),
                 }
             # Scale the IM data
             self._im_data = (
-                self._im_data - run_config.im_scale_params["mean"]
-            ) / run_config.im_scale_params["std"]
+                self._im_data - self.im_scale_params["mean"]
+            ) / self.im_scale_params["std"]
 
     def __len__(self) -> int:
         return self.record_int_ids.size
@@ -274,11 +281,14 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         record_int_ids: np.ndarray,
         ims: np.ndarray,
         site_df: pd.DataFrame,
-        source_df: pd.DataFrame,
-        site_event_df: pd.DataFrame,
+        source_df: pd.DataFrame | None,
+        site_event_df: pd.DataFrame | None,
         record_info_df: pd.DataFrame,
-        run_config: "nn_gmm.RunConfig",
-        is_train: bool,
+        device: str,
+        scale_ims: bool,
+        im_scale_params: dict | None = None,
+        im_weights: dict | None = None,
+        loc_df: pd.DataFrame | None = None,
     ) -> None:
         super().__init__(
             imdb_ffp,
@@ -288,8 +298,10 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             source_df,
             site_event_df,
             record_info_df,
-            run_config,
-            is_train,
+            device,
+            scale_ims,
+            im_scale_params=im_scale_params,
+            loc_df=loc_df,
         )
 
         assert np.all(self.record_int_ids == self._im_data.index.values)
@@ -298,51 +310,59 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         self._index_to_site_ix = self.site_df.index.get_indexer(
             self.record_info_df.loc[self.record_int_ids].site_int_id.values
         )
-        self._index_to_source_ix = self.source_df.index.get_indexer(
-            self.record_info_df.loc[self.record_int_ids].rel_int_id.values
+        self._index_to_source_ix = (
+            self.source_df.index.get_indexer(
+                self.record_info_df.loc[self.record_int_ids].rel_int_id.values
+            )
         )
-        self._index_to_site_event_ix = self.site_event_df.index.get_indexer(
-            self.record_info_df.loc[self.record_int_ids].site_event_int_id.values
+        self._index_to_site_event_ix = (
+            self.site_event_df.index.get_indexer(
+                self.record_info_df.loc[self.record_int_ids].site_event_int_id.values
+            )
         )
 
         self._im_data_tensor = torch.tensor(
-            self._im_data.values, device=run_config.device, dtype=torch.float32
-        )
-        self._source_data_tensor = torch.tensor(
-            self.source_df.values, device=run_config.device, dtype=torch.float32
+            self._im_data.values, device=device, dtype=torch.float32
         )
         self._site_data_tensor = torch.tensor(
-            self.site_df[self.run_config.site_inputs].values,
-            device=run_config.device,
+            self.site_df.values,
+            device=device,
             dtype=torch.float32,
-        )
+        ) 
+        self._source_data_tensor = torch.tensor(
+            self.source_df.values, device=device, dtype=torch.float32
+        ) 
         self._site_event_tensor = torch.tensor(
-            self.site_event_df.values, device=run_config.device, dtype=torch.float32
-        )
+            self.site_event_df.values, device=device, dtype=torch.float32
+        ) 
 
-        if self.run_config.using_loc_model:
+        if self._return_X_loc:
             self._loc_data_tensor = torch.tensor(
-                self.site_df[self.run_config.loc_model_inputs].values,
-                device=run_config.device,
+                self.loc_df.values,
+                device=device,
                 dtype=torch.float32,
             )
 
         self._sample_weight_tensor = torch.tensor(
-                self.record_info_df["sample_weight"].values,
-                device=run_config.device,
-                dtype=torch.float32,
-            )
-        if run_config.apply_im_weighting:
-            im_weights = np.ones(run_config.ims.size, dtype=float)
-            for cur_im, w in run_config.im_weights.items():
+            self.record_info_df["sample_weight"].values,
+            device=device,
+            dtype=torch.float32,
+        )
+        if im_weights is not None:
+            im_weights = np.ones(ims.size, dtype=float)
+            for cur_im, w in im_weights.items():
                 im_ix = np.flatnonzero(self.ims == cur_im)
                 if im_ix.size == 0:
                     logger.warning(f"IM {cur_im} not found in dataset IMs")
                 else:
                     im_weights[im_ix] = w
 
-            self._sample_weight_tensor = einops.repeat(self._sample_weight_tensor, "n -> n im", im=run_config.n_ims).clone()
-            self._sample_weight_tensor *= torch.tensor(im_weights, device=run_config.device, dtype=torch.float32)
+            self._sample_weight_tensor = einops.repeat(
+                self._sample_weight_tensor, "n -> n im", im=ims.size
+            ).clone()
+            self._sample_weight_tensor *= torch.tensor(
+                im_weights, device=device, dtype=torch.float32
+            )
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """
@@ -353,23 +373,27 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         """
         y = self._im_data_tensor[indices, :]
 
-        site_data = torch.atleast_2d(self._site_data_tensor[self._index_to_site_ix[indices], :])
-        source_data = torch.atleast_2d(self._source_data_tensor[self._index_to_source_ix[indices], :])
-        site_event_data = torch.atleast_2d(self._site_event_tensor[self._index_to_site_event_ix[indices], :])
+        site_data = torch.atleast_2d(
+            self._site_data_tensor[self._index_to_site_ix[indices], :]
+        )
+        source_data = torch.atleast_2d(
+            self._source_data_tensor[self._index_to_source_ix[indices], :]
+        )
+        site_event_data = torch.atleast_2d(
+            self._site_event_tensor[self._index_to_site_event_ix[indices], :]
+        )
 
         X = torch.cat(
-            (
-                site_data,
-                source_data,
-                site_event_data,
-            ),
+            [site_data, source_data, site_event_data],
             dim=1,
         )
 
         X_loc = None
-        if self.run_config.using_loc_model:
-            X_loc = torch.atleast_2d(self._loc_data_tensor[self._index_to_site_ix[indices], :])
-
+        if self._return_X_loc:
+            X_loc = torch.atleast_2d(
+                self._loc_data_tensor[self._index_to_site_ix[indices], :]
+            )
+            
         return SimBatchData(
             self.record_int_ids[indices],
             X,
@@ -390,8 +414,10 @@ class IMDBDataset(BaseIMDBDataset):
         source_df: pd.DataFrame,
         site_event_df: pd.DataFrame,
         record_info_df: pd.DataFrame,
-        run_config: "nn_gmm.RunConfig",
-        is_train: bool,
+        device: str,
+        scale_ims: bool,
+        im_scale_params: dict | None = None,
+        im_weights: dict | None = None,
     ) -> None:
         super().__init__(
             imdb_ffp,
@@ -401,12 +427,15 @@ class IMDBDataset(BaseIMDBDataset):
             source_df,
             site_event_df,
             record_info_df,
-            run_config,
-            is_train,
+            device,
+            scale_ims,
+            im_scale_params=im_scale_params,
         )
 
-        if run_config.apply_im_weighting:
-            raise NotImplementedError("IM-based weighting not implemented for this dataset")
+        if im_weights is not None:
+            raise NotImplementedError(
+                "IM-based weighting not implemented for this dataset"
+            )
 
     def get_batch(self, indices: np.ndarray) -> BaseBatchData:
         """
@@ -417,7 +446,7 @@ class IMDBDataset(BaseIMDBDataset):
         """
         y = self._im_data.loc[self.record_int_ids[indices]].values
 
-        site_int_ids = self.record_info_df.loc[ 
+        site_int_ids = self.record_info_df.loc[
             self.record_int_ids[indices]
         ].site_int_id.values
         event_int_ids = self.record_info_df.loc[
@@ -442,8 +471,8 @@ class IMDBDataset(BaseIMDBDataset):
 
         return SimBatchData(
             self.record_int_ids[indices],
-            torch.from_numpy(X).to(dtype=torch.float32, device=self.run_config.device),
-            torch.from_numpy(y).to(dtype=torch.float32, device=self.run_config.device),
+            torch.from_numpy(X).to(dtype=torch.float32, device=self.device),
+            torch.from_numpy(y).to(dtype=torch.float32, device=self.device),
         )
 
 
@@ -531,7 +560,7 @@ class ObservedDataset(BaseDataset):
 
 
 def get_similar_records(
-    run_config: "nn_gmm.RunConfig",
+    run_config: "nn_gmm.GMMRunConfig",
     fixed_inputs: dict,
     limits: dict,
     record_int_ids: np.ndarray = None,
@@ -640,5 +669,3 @@ def get_similar_records(
         record_info_df = record_info_df.loc[record_info_df.index.isin(record_int_ids)]
 
     return record_info_df.index.values
-
-

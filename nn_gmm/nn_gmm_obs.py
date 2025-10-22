@@ -49,11 +49,11 @@ class FineTuneConfig:
         self._base_run_config = None
 
     @property
-    def base_run_config(self) -> nn_gmm.RunConfig | None:
+    def base_run_config(self) -> nn_gmm.GMMRunConfig | None:
         return self._base_run_config
 
     @base_run_config.setter
-    def base_run_config(self, value: nn_gmm.RunConfig):
+    def base_run_config(self, value: nn_gmm.GMMRunConfig):
         if self._base_run_config is not None:
             raise ValueError("Base RunConfig already set.")
         self._base_run_config = value
@@ -126,7 +126,7 @@ def run_fine_tune(
 ):
     """Performs fine-tuning for a single CV model."""
     tune_config = copy.deepcopy(tune_config)
-    tune_config.base_run_config = nn_gmm.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    tune_config.base_run_config = nn_gmm.GMMRunConfig.from_yaml(model_dir / "run_config.yaml")
 
     events, sites = obs_data.events, obs_data.sites
 

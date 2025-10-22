@@ -10,7 +10,7 @@ import optuna as opt
 
 import ml_tools as mlt
 
-from .nn_gmm import RunConfig
+from .nn_gmm import GMMRunConfig
 from .nn_gmm_cv import train_cv
 
 
@@ -18,7 +18,7 @@ from .nn_gmm_cv import train_cv
 class HPOptConfig:
 
     rel_base_output_dir: str
-    base_run_config: RunConfig
+    base_run_config: GMMRunConfig
 
     n_event_folds: int
     n_site_folds: int
@@ -53,7 +53,7 @@ class HPOptConfig:
 
     @classmethod
     def from_config(cls, config_ffp: Path, run_config_ffp: Path, device: str):
-        run_config = RunConfig.from_config_kwargs(run_config_ffp, device=device)
+        run_config = GMMRunConfig.from_config_kwargs(run_config_ffp, device=device)
         config_dict = mlt.utils.load_yaml(config_ffp)
 
         return cls(
@@ -97,7 +97,7 @@ class HPOptConfig:
     def from_dict(cls, config_dict: dict):
         return cls(
             rel_base_output_dir=config_dict["rel_base_output_dir"],
-            base_run_config=RunConfig.from_dict(config_dict["base_run_config"]),
+            base_run_config=GMMRunConfig.from_dict(config_dict["base_run_config"]),
             n_event_folds=config_dict["n_event_folds"],
             n_site_folds=config_dict["n_site_folds"],
             n_epochs=config_dict["n_epochs"],
@@ -178,7 +178,7 @@ def objective(trial: opt.Trial, hp_config: HPOptConfig) -> float:
     return median_w_val_loss
 
 
-def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> RunConfig:
+def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
     """Get a RunConfig object with hyperparameters set from the trial."""
     run_config = copy.deepcopy(hp_config.base_run_config)
     run_config.rel_results_dir = "nn_gmm/hp_opt"

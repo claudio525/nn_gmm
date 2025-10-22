@@ -1,4 +1,6 @@
 """Module for running custom CV for NN-GMM models."""
+
+import os
 import gc
 import time
 import copy
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def train_cv(
-    run_config: nn_gmm.RunConfig,
+    run_config: nn_gmm.GMMRunConfig,
     n_event_folds: int,
     n_site_folds: int,
     base_out_dir: Path,
@@ -48,9 +50,8 @@ def train_cv(
     else:
         site_df = site_df.loc[site_df.grid_level == 0]
 
-    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
-        str
-    )
+    events = event_df.event_id.values.astype(str)
+    sites = site_df.site_id.values.astype(str)
 
     # Drop test events
     events = events[~np.isin(events, run_config.test_events)]
@@ -144,6 +145,218 @@ def train_cv(
 
     logger.info("Cross-validation run successfully.")
 
+    _run_postprocessing(
+        base_out_dir,
+        out_dirs,
+        run_config,
+        remove_cv_results=remove_cv_results,
+        run_notebook=run_notebook,
+    )
+
+
+def _run_helper(
+    run_config: nn_gmm.GMMRunConfig,
+    event_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    event_folds: list[np.ndarray],
+    site_folds: list[np.ndarray],
+    cv_iter: int,
+    train_folds_ind: list[tuple[int, int]],
+    val_fold_ind: tuple[int, int],
+    base_out_dir: Path,
+    p_ix: int = None,
+):
+    (out_dir := base_out_dir / f"cv_{cv_iter:02d}").mkdir(parents=True)
+
+    # Set up logging
+    log_ffp = out_dir / f"nn_cv_iter_{cv_iter:02d}.log"
+    if p_ix is None:
+        root_logger = logging.getLogger()
+        file_handler = logging.FileHandler(log_ffp)
+        file_handler.setLevel(logging.DEBUG)
+        root_logger.addHandler(file_handler)
+    else:
+        logger = utils.setup_logging(log_ffp, enable_console=False)
+        logger.info(
+            f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}."
+        )
+        logger.info(f"Sleeping for {10 * p_ix} seconds to stagger process start times.")
+        time.sleep(10 * p_ix)
+
+    val_events = event_folds[val_fold_ind[0]]
+    val_sites = site_folds[val_fold_ind[1]]
+
+    train_events = np.unique(
+        np.concatenate([event_folds[i] for i, _ in train_folds_ind])
+    )
+    train_sites = np.unique(np.concatenate([site_folds[j] for _, j in train_folds_ind]))
+
+    nn_gmm.run_model_training(
+        out_dir,
+        run_config,
+        event_df,
+        site_df,
+        train_events=train_events,
+        val_events=val_events,
+        train_sites=train_sites,
+        val_sites=val_sites,
+        save_train_results=False,
+        verbose=False,
+        # verbose=p_ix is None,
+    )
+
+    # Explicit GPU cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    # Force garbage collection
+    gc.collect()
+
+    if p_ix is None:
+        root_logger.removeHandler(file_handler)
+    return out_dir
+
+
+def get_cv_iterator(fold_combs: list[tuple[int, int]]):
+    for val_fold_ind in fold_combs:
+        train_folds_ind = [
+            cur_fold
+            for cur_fold in fold_combs
+            if (cur_fold[0] != val_fold_ind[0]) and (cur_fold[1] != val_fold_ind[1])
+        ]
+        yield train_folds_ind, val_fold_ind
+
+
+def train_loc_adj_cv(
+    run_config: nn_gmm.LocAdjRunConfig,
+    base_out_dir: Path,
+    n_procs: int = 1,
+    run_notebook: bool = True,
+    remove_cv_results: bool = False,
+):
+    cv_folds = [
+        result for result in run_config.base_model_dir.glob("cv_*") if result.is_dir()
+    ]
+
+    with DuckIMDB(run_config.base_gmm_run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+        site_df = imdb.get_site_df(add_nztm=True)
+
+    # Drop test events
+    event_df = event_df.loc[
+        ~event_df.event_id.isin(run_config.base_gmm_run_config.test_events)
+    ]
+
+    if n_procs == 1:
+        output_dirs = []
+        for cur_cv_dir in cv_folds:
+            logger.info(f"Processing CV directory: {cur_cv_dir}")
+            output_dir = _run_adj_helper(
+                cur_cv_dir,
+                run_config,
+                event_df,
+                site_df,
+                base_out_dir,
+            )
+            output_dirs.append(output_dir)
+    else:
+        logger.info(f"Running location adjustment CV with {n_procs} processes.")
+        with mp.Pool(n_procs, maxtasksperchild=1) as pool:
+            output_dirs = pool.starmap(
+                _run_adj_helper,
+                [
+                    (
+                        cur_cv_dir,
+                        run_config,
+                        event_df,
+                        site_df,
+                        base_out_dir,
+                        p_ix,
+                    )
+                    for p_ix, cur_cv_dir in enumerate(cv_folds)
+                ],
+            )
+
+    output_dirs.append(output_dir)
+
+    _run_postprocessing(
+        base_out_dir,
+        output_dirs,
+        run_config,
+        remove_cv_results=remove_cv_results,
+        run_notebook=run_notebook,
+    )
+
+def _run_adj_helper(
+    cv_dir: Path,
+    run_config: nn_gmm.LocAdjRunConfig,
+    event_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    base_out_dir: Path,
+    p_ix: int = None,
+):
+    (output_dir := base_out_dir / cv_dir.name).mkdir()
+
+    # Set up logging
+    log_ffp = output_dir / f"{cv_dir.stem}.log"
+    if p_ix is None:
+        root_logger = logging.getLogger()
+        file_handler = logging.FileHandler(log_ffp)
+        file_handler.setLevel(logging.DEBUG)
+        root_logger.addHandler(file_handler)
+    else:
+        logger = utils.setup_logging(log_ffp, enable_console=False)
+        logger.info(
+            f"Running CV iteration {cv_dir.stem} on process {p_ix}."
+        )
+        logger.info(f"Sleeping for {10 * p_ix} seconds to stagger process start times.")
+        time.sleep(10 * p_ix)
+
+    train_record_ids = np.load(cv_dir / "train_record_ids.npy")
+    val_record_ids = np.load(cv_dir / "val_record_ids.npy")
+
+    # Update base_run_config to match the current CV fold
+    cur_run_config = copy.deepcopy(run_config)
+    cur_run_config.base_gmm_run_config = nn_gmm.GMMRunConfig.from_yaml(
+        cv_dir / "run_config.yaml"
+    )
+    cur_run_config.rel_base_model_dir = str(cv_dir).replace(
+        f"{os.environ['wdata']}/", ""
+    )
+
+    nn_gmm.run_model_training(
+        output_dir,
+        cur_run_config,
+        event_df,
+        site_df,
+        train_record_ids=train_record_ids,
+        val_record_ids=val_record_ids,
+        save_train_results=False,
+        verbose=False,
+    )
+
+        # Explicit GPU cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    # Force garbage collection
+    gc.collect()
+
+    if p_ix is None:
+        root_logger.removeHandler(file_handler)
+
+    return output_dir
+        
+
+def _run_postprocessing(
+    base_out_dir: Path,
+    out_dirs: list[Path],
+    run_config: nn_gmm.GMMRunConfig | nn_gmm.LocAdjRunConfig,
+    remove_cv_results: bool = False,
+    run_notebook: bool = True,
+):
     # Post-processing
     run_config.to_yaml(base_out_dir / "run_config.yaml")
 
@@ -182,7 +395,7 @@ def train_cv(
         },
     )
     metrics_da.to_netcdf(base_out_dir / "metrics.nc")
-    
+
     # Remove the train/validation result files
     # for each CV directory
     if remove_cv_results:
@@ -200,80 +413,3 @@ def train_cv(
             base_out_dir / "results_report.html",
             result_dir=str(base_out_dir),
         )
-
-
-
-def _run_helper(
-    run_config: nn_gmm.RunConfig,
-    event_df: pd.DataFrame,
-    site_df: pd.DataFrame,
-    event_folds: list[np.ndarray],
-    site_folds: list[np.ndarray],
-    cv_iter: int,
-    train_folds_ind: list[tuple[int, int]],
-    val_fold_ind: tuple[int, int],
-    base_out_dir: Path,
-    p_ix: int = None,
-):
-    (out_dir := base_out_dir / f"cv_{cv_iter:02d}").mkdir(parents=True)
-
-    # Set up logging
-    log_ffp = out_dir / f"nn_cv_iter_{cv_iter:02d}.log"
-    if p_ix is None:
-        root_logger = logging.getLogger()
-        file_handler = logging.FileHandler(log_ffp)
-        file_handler.setLevel(logging.DEBUG)
-        root_logger.addHandler(file_handler)
-    else:
-        logger = utils.setup_logging(log_ffp, enable_console=False)
-        logger.info(
-            f"Running CV iteration {cv_iter + 1}/{len(event_folds) * len(site_folds)} on process {p_ix}."
-        )
-        logger.info(
-            f"Sleeping for {10 * p_ix} seconds to stagger process start times."
-        )
-        time.sleep(10 * p_ix)
-
-    val_events = event_folds[val_fold_ind[0]]
-    val_sites = site_folds[val_fold_ind[1]]
-
-    train_events = np.unique(
-        np.concatenate([event_folds[i] for i, _ in train_folds_ind])
-    )
-    train_sites = np.unique(np.concatenate([site_folds[j] for _, j in train_folds_ind]))
-
-    nn_gmm.run_model_training(
-        out_dir,
-        run_config,
-        event_df,
-        site_df,
-        train_events,
-        val_events,
-        train_sites,
-        val_sites,
-        save_train_results=False,
-        verbose=False,
-        # verbose=p_ix is None,
-    )
-
-    # Explicit GPU cleanup
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-    
-    # Force garbage collection
-    gc.collect()
-
-    if p_ix is None:
-        root_logger.removeHandler(file_handler)
-    return out_dir
-
-
-def get_cv_iterator(fold_combs: list[tuple[int, int]]):
-    for val_fold_ind in fold_combs:
-        train_folds_ind = [
-            cur_fold
-            for cur_fold in fold_combs
-            if (cur_fold[0] != val_fold_ind[0]) and (cur_fold[1] != val_fold_ind[1])
-        ]
-        yield train_folds_ind, val_fold_ind

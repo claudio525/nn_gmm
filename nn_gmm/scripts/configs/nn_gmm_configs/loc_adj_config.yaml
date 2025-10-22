@@ -1,0 +1,29 @@
+rel_base_model_dir: nn_gmm/results/1022_1621_cv_v1_25Epochs_3E4Folds
+
+loc_inputs:
+  - "nztm_x"
+  - "nztm_y"
+
+loc_emb_dim: 128
+loc_emb_model_config:
+  units: [32, 32, 32, 32]
+  activation: "leaky_relu"
+  use_batch_norm: False
+  dropout_rate: 0.0
+  l2_reg: 0.0005
+
+adj_model_config:
+  units: []
+  activation: "leaky_relu"
+  use_batch_norm: False
+  dropout_rate: 0.0
+  l2_reg: 0.0005
+
+n_epochs: 100
+batch_size: 512
+learning_rate: 0.001
+
+loc_emb_max_grad_norm: null
+adj_max_grad_norm: null
+
+rel_results_dir: nn_gmm/results

@@ -8,6 +8,7 @@ import ml_tools as mlt
 
 logger = logging.getLogger(__name__)
 
+
 class ClipLayer(nn.Module):
     """Layer that clips the layer input to a specified range."""
 
@@ -28,6 +29,7 @@ def create_multi_mlp(
     bias: bool = True,
     use_batch_norm: bool = False,
     dropout_rate: float | None = None,
+    add_clip_layer: bool = True,
 ) -> nn.Sequential:
     """Creates a multi-layer perceptron"""
     mlp = nn.Sequential()
@@ -51,13 +53,14 @@ def create_multi_mlp(
 
     mlp.append(
         nn.Linear(
-            units[-1],
+            units[-1] if len(units) > 0 else n_inputs,
             n_outputs,
             bias=bias,
         )
     )
 
-    mlp.append(ClipLayer())
+    if add_clip_layer:
+        mlp.append(ClipLayer())
 
     return mlp
 
@@ -65,10 +68,16 @@ def create_multi_mlp(
 class BaseNNModel(nn.Module):
     """Base class for neural network models."""
 
-    def __init__(self, model: nn.Module, max_norm: float | None = None):
+    def __init__(
+        self,
+        model: nn.Module,
+        max_norm: float | None = None,
+        uses_loc_inputs: bool = False,
+    ):
         super().__init__()
         self.model = model
         self.max_norm = max_norm
+        self.uses_loc_inputs = uses_loc_inputs
 
         self._grad_norms = []
 
@@ -107,49 +116,57 @@ class BaseNNModel(nn.Module):
         )
 
 
-class NNCombined(BaseNNModel):
+class LocAdjModel(BaseNNModel):
 
     def __init__(
         self,
-        loc_model: nn.Module,
-        core_model: nn.Module,
-        max_loc_grad_norm: float | None = None,
-        max_core_grad_norm: float | None = None,
+        loc_emb_model: nn.Module,
+        adj_model: nn.Module,
+        base_model: nn.Module,
+        max_loc_emb_grad_norm: float | None = None,
+        max_adj_grad_norm: float | None = None,
     ):
         nn.Module.__init__(self)
-        self.loc_model = loc_model
-        self.core_model = core_model
+        self.loc_emb_model = loc_emb_model
+        self.adj_model = adj_model
+        self.base_model = base_model
+        self.uses_loc_inputs = True
 
-        self.max_loc_norm = max_loc_grad_norm
-        self.max_core_norm = max_core_grad_norm
+        # Freeze base model parameters
+        for param in self.base_model.parameters():
+            param.requires_grad = False
+
+        self.max_loc_emb_norm = max_loc_emb_grad_norm
+        self.max_adj_norm = max_adj_grad_norm
 
         self._grad_norms = []
-        self._loc_grad_norms = []
-        self._core_grad_norms = []
+        self._loc_emb_grad_norms = []
+        self._adj_grad_norms = []
 
     def apply_grad_clipping(self) -> None:
         """Apply gradient clipping to the model parameters."""
-        if self.max_loc_norm is not None:
+        if self.max_loc_emb_norm is not None:
             torch.nn.utils.clip_grad_norm_(
-                self.loc_model.parameters(), self.max_loc_norm
+                self.loc_emb_model.parameters(), self.max_loc_emb_norm
             )
 
-        if self.max_core_norm is not None:
+        if self.max_adj_norm is not None:
             torch.nn.utils.clip_grad_norm_(
-                self.core_model.parameters(), self.max_core_norm
+                self.adj_model.parameters(), self.max_adj_norm
             )
 
     def forward(self, X: torch.Tensor, X_loc: torch.Tensor) -> torch.Tensor:
-        X_loc = self.loc_model(X_loc)
-        X = torch.cat([X, X_loc], dim=-1)
-        pred = self.core_model(X)
-        return pred
+        loc_emb = self.loc_emb_model(X_loc)
+        base_emb = self.base_model(X)
+
+        adj_pred = self.adj_model(torch.cat([base_emb, loc_emb], dim=-1))
+        return adj_pred
 
     def reset_logged_grad_norms(self) -> None:
         """Reset the gradient norms."""
         self._grad_norms = []
-        self._loc_grad_norms = []
-        self._core_grad_norms = []
+        self._loc_emb_grad_norms = []
+        self._adj_grad_norms = []
 
     def update_logged_grad_norms(self) -> None:
         """Update the gradient norms."""
@@ -159,21 +176,21 @@ class NNCombined(BaseNNModel):
             )
         )
 
-        self._loc_grad_norms.append(
+        self._loc_emb_grad_norms.append(
             torch.nn.utils.get_total_norm(
                 [
                     param.grad
-                    for param in self.loc_model.parameters()
+                    for param in self.loc_emb_model.parameters()
                     if param.grad is not None
                 ]
             )
         )
 
-        self._core_grad_norms.append(
+        self._adj_grad_norms.append(
             torch.nn.utils.get_total_norm(
                 [
                     param.grad
-                    for param in self.core_model.parameters()
+                    for param in self.adj_model.parameters()
                     if param.grad is not None
                 ]
             )
@@ -185,18 +202,18 @@ class NNCombined(BaseNNModel):
             return "No gradient norms recorded."
 
         grad_norms = torch.tensor(self._grad_norms)
-        loc_grad_norms = torch.tensor(self._loc_grad_norms)
-        core_grad_norms = torch.tensor(self._core_grad_norms)
+        loc_grad_norms = torch.tensor(self._loc_emb_grad_norms)
+        adj_grad_norms = torch.tensor(self._adj_grad_norms)
         if reset:
             self.reset_logged_grad_norms()
 
         return (
             f"Gradient Norm: {torch.mean(grad_norms):.2f} ± {torch.std(grad_norms):.2f}, "
             f"Max: {torch.max(grad_norms):.2f}, Min: {torch.min(grad_norms):.2f}\n"
-            f"  Location Sub-Model Gradient Norm: {torch.mean(loc_grad_norms):.2f} ± {torch.std(loc_grad_norms):.2f}, "
+            f"  Location Embedding Model Gradient Norm: {torch.mean(loc_grad_norms):.2f} ± {torch.std(loc_grad_norms):.2f}, "
             f"Max: {torch.max(loc_grad_norms):.2f}, Min: {torch.min(loc_grad_norms):.2f}\n"
-            f"  Core Model Gradient Norm: {torch.mean(core_grad_norms):.2f} ± {torch.std(core_grad_norms):.2f}, "
-            f"Max: {torch.max(core_grad_norms):.2f}, Min: {torch.min(core_grad_norms):.2f}"
+            f"  Adjustment Model Gradient Norm: {torch.mean(adj_grad_norms):.2f} ± {torch.std(adj_grad_norms):.2f}, "
+            f"Max: {torch.max(adj_grad_norms):.2f}, Min: {torch.min(adj_grad_norms):.2f}"
         )
 
 

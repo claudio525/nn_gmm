@@ -1,8 +1,7 @@
-import functools
 import os
 import logging
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from typing import NamedTuple
 
 import torch
@@ -21,15 +20,24 @@ from . import data
 from . import obs_data as obsd
 from . import constants
 from . import utils
-from . import nn_gmm_modules
+from . import nn_gmm_modules as modules
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class RunConfig:
+class BaseRunConfig:
+    """
+    Base run configuration for all models.
+
+    Defines common parameters used
+    across different model types.
+    """
 
     seed: int
+
+    device: str
+    """Device to use"""
 
     rel_imdb_ffp: str
     """Relative path to the IMDB file."""
@@ -49,26 +57,11 @@ class RunConfig:
     extra_basin_sites: bool
     """Whether to include extra basin sites."""
 
-    device: str
-    """Device to use"""
-
     im_set: str
     """IM set to use"""
 
     scale_ims: bool
     """Whether to scale the IMs or not"""
-
-    site_inputs: list[str]
-    """Model site inputs"""
-
-    source_inputs: list[str]
-    """Model source inputs"""
-
-    source_to_site_inputs: list[str]
-    """Model source to site inputs"""
-
-    loc_model_inputs: list[str] | None
-    """Location model inputs"""
 
     apply_mag_sample_weighting: bool
     """Whether to apply magnitude-based sample weighting"""
@@ -96,33 +89,6 @@ class RunConfig:
 
     im_weights: dict[str, float] | None
     """Weights for each IM"""
-
-    n_epochs: int
-    """Number of epochs to train the model"""
-
-    batch_size: int
-    """Batch size for training"""
-
-    learning_rate: float
-    """Learning rate for training"""
-
-    loc_max_grad_norm: float | None
-    """Maximum gradient norm for location model if using one."""
-
-    core_max_grad_norm: float | None
-    """Maximum gradient norm for core model"""
-
-    model_config: "ModelConfig"
-    """Model configuration"""
-
-    rel_loc_model_dir: str | None
-    """Relative path to the location model file."""
-
-    loc_model_base_lr: float | None
-    """Base learning rate for the location model if using one."""
-
-    rel_results_dir: str
-    """Relative path to the results directory."""
 
     _im_scale_params: dict[str, pd.Series] | None = None
 
@@ -158,18 +124,6 @@ class RunConfig:
         return Path(os.environ["wdata"]) / self.rel_results_dir
 
     @property
-    def loc_model_dir(self) -> Path | None:
-        """Absolute path to the location model file."""
-        if self.rel_loc_model_dir is not None:
-            return Path(os.environ["wdata"]) / self.rel_loc_model_dir
-        return None
-
-    @property
-    def using_loc_model(self) -> bool:
-        """Whether a location model is being used."""
-        return self.rel_loc_model_dir is not None
-
-    @property
     def test_events(self) -> np.ndarray:
         """Get the test events."""
         return self._test_events
@@ -178,11 +132,11 @@ class RunConfig:
     def ims(self) -> np.ndarray:
         """IMs to use for the model."""
         return np.array(constants.IM_SET_MAPPING[self.im_set])
-    
+
     @property
     def pSA_ims(self) -> np.ndarray:
         return np.array([cur_im for cur_im in self.ims if cur_im.startswith("pSA")])
-    
+
     @property
     def pSA_periods(self) -> np.ndarray:
         return np.array([float(cur_im.split("_")[-1]) for cur_im in self.pSA_ims])
@@ -196,7 +150,7 @@ class RunConfig:
     def pred_mean_keys(self) -> np.ndarray:
         """Predicted mean IM keys."""
         return np.array([f"{cur_im}_pred" for cur_im in self.ims])
-    
+
     @property
     def pred_pSA_mean_keys(self) -> np.ndarray:
         """Predicted mean pSA keys."""
@@ -206,19 +160,6 @@ class RunConfig:
     def pred_std_keys(self) -> np.ndarray:
         """Predicted IM std keys."""
         return np.array([f"{cur_im}_pred_std" for cur_im in self.ims])
-
-    @property
-    def n_inputs(self) -> int:
-        """Get the number of inputs for the model."""
-        n_inputs = (
-            len((self.site_inputs))
-            + len((self.source_inputs))
-            + len(self.source_to_site_inputs)
-        )
-        if "tect_type" in self.source_inputs:
-            n_inputs += 2
-
-        return n_inputs
 
     @property
     def n_ims(self) -> int:
@@ -271,14 +212,6 @@ class RunConfig:
             "device": self.device,
             "im_set": str(self.im_set),
             "scale_ims": self.scale_ims,
-            "site_inputs": list(self.site_inputs),
-            "source_inputs": list(self.source_inputs),
-            "source_to_site_inputs": list(self.source_to_site_inputs),
-            "loc_model_inputs": (
-                list(self.loc_model_inputs)
-                if self.loc_model_inputs is not None
-                else None
-            ),
             "apply_mag_sample_weighting": self.apply_mag_sample_weighting,
             "max_mag_weight": float(self.max_mag_weight),
             "apply_rrup_sample_weighting": self.apply_rrup_sample_weighting,
@@ -288,31 +221,7 @@ class RunConfig:
             "total_max_weight": float(self.total_max_weight),
             "apply_im_weighting": bool(self.apply_im_weighting),
             "im_weights": self.im_weights,
-            "batch_size": int(self.batch_size),
-            "learning_rate": float(self.learning_rate),
-            "loc_max_grad_norm": (
-                float(self.loc_max_grad_norm)
-                if self.loc_max_grad_norm is not None
-                else None
-            ),
-            "core_max_grad_norm": (
-                float(self.core_max_grad_norm)
-                if self.core_max_grad_norm is not None
-                else None
-            ),
-            "model": ModelConfig.to_dict(self.model_config),
-            "rel_loc_model_dir": (
-                str(self.rel_loc_model_dir)
-                if self.rel_loc_model_dir is not None
-                else None
-            ),
-            "loc_model_base_lr": (
-                float(self.loc_model_base_lr)
-                if self.loc_model_base_lr is not None
-                else None
-            ),
             "rel_results_dir": str(self.rel_results_dir),
-            "n_epochs": int(self.n_epochs),
         }
         if self.scale_ims and self.im_scale_params is not None:
             config_dict["_im_scale_params"] = {
@@ -324,28 +233,6 @@ class RunConfig:
     def to_yaml(self, ffp: Path):
         """Save the RunConfig to a YAML file."""
         mlt.utils.write_to_yaml(self.to_dict(), ffp)
-
-    @classmethod
-    def from_config_kwargs(cls, config_ffp: Path, **kwargs):
-        """
-        Creates an instance from the given config.
-        If kwargs are set then they overwrite the values
-        specified in the config.
-        """
-        config_dict = mlt.utils.load_yaml(config_ffp)
-
-        for cur_key, cur_val in kwargs.items():
-            if cur_val is not None:
-                config_dict[cur_key] = cur_val
-
-        return cls.from_dict(config_dict)
-
-    @classmethod
-    def from_dict(cls, d: dict):
-        model_config = ModelConfig.from_dict(d.pop("model"))
-        d["model_config"] = model_config
-
-        return cls(**d)
 
     @classmethod
     def from_yaml(cls, ffp: Path):
@@ -388,7 +275,10 @@ class RunConfig:
                     else str(value)
                 )
             else:
-                display_value = str(value)
+                if isinstance(value, BaseRunConfig):
+                    display_value = "BaseRunConfig"
+                else:
+                    display_value = str(value)
 
             # Add table row with fixed width for variable names
             html += "<tr style='border-bottom: 1px solid #eee;'>"
@@ -456,6 +346,258 @@ class ModelConfig:
         }
 
 
+@dataclass
+class GMMRunConfig(BaseRunConfig):
+    """
+    Run configuration for a standard
+    ML-surrogate GMM model.
+
+    Defines model inputs, training parameters,
+    and model architecture.
+    """
+
+    site_inputs: list[str] = field(kw_only=True)
+    """Model site inputs"""
+
+    source_inputs: list[str] = field(kw_only=True)
+    """Model source inputs"""
+
+    source_to_site_inputs: list[str] = field(kw_only=True)
+    """Model source to site inputs"""
+
+    n_epochs: int = field(kw_only=True)
+    """Number of epochs to train the model"""
+
+    batch_size: int = field(kw_only=True)
+    """Batch size for training"""
+
+    learning_rate: float = field(kw_only=True)
+    """Learning rate for training"""
+
+    max_grad_norm: float | None = field(kw_only=True)
+    """Maximum gradient norm for core model"""
+
+    model_config: ModelConfig = field(kw_only=True)
+    """Model configuration"""
+
+    rel_results_dir: str = field(kw_only=True)
+    """Relative path to the results directory."""
+
+    @property
+    def n_inputs(self) -> int:
+        """Get the number of inputs for the model."""
+        n_inputs = (
+            len((self.site_inputs))
+            + len((self.source_inputs))
+            + len(self.source_to_site_inputs)
+        )
+        if "tect_type" in self.source_inputs:
+            n_inputs += 2
+
+        return n_inputs
+
+    def to_dict(self) -> dict:
+        """
+        Convert the GMMRunConfig object to a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary representation of the GMMRunConfig object.
+        """
+        base_dict = super().to_dict()
+        config_dict = {
+            "site_inputs": list(self.site_inputs),
+            "source_inputs": list(self.source_inputs),
+            "source_to_site_inputs": list(self.source_to_site_inputs),
+            "batch_size": int(self.batch_size),
+            "learning_rate": float(self.learning_rate),
+            "max_grad_norm": (
+                float(self.max_grad_norm) if self.max_grad_norm is not None else None
+            ),
+            "model": ModelConfig.to_dict(self.model_config),
+            "rel_results_dir": str(self.rel_results_dir),
+            "n_epochs": int(self.n_epochs),
+        }
+        return base_dict | config_dict
+
+    @classmethod
+    def from_config_kwargs(cls, config_ffp: Path, **kwargs):
+        """
+        Creates an instance from the given config.
+        If kwargs are set then they overwrite the values
+        specified in the config.
+        """
+        config_dict = mlt.utils.load_yaml(config_ffp)
+
+        for cur_key, cur_val in kwargs.items():
+            if cur_val is not None:
+                config_dict[cur_key] = cur_val
+
+        return cls.from_dict(config_dict)
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        model_config = ModelConfig.from_dict(d.pop("model"))
+        d["model_config"] = model_config
+
+        return cls(**d)
+
+
+@dataclass
+class LocAdjRunConfig(BaseRunConfig):
+    """
+    Run configuration for a location adjustment model.
+
+    Defines base model, location model inputs,
+    training parameters, and model architectures.
+    """
+
+    rel_base_model_dir: str = field(kw_only=True)
+    """Directory of the base model."""
+
+    loc_inputs: list[str] = field(kw_only=True)
+    """Location model inputs."""
+
+    loc_emb_dim: int = field(kw_only=True)
+    """Dimensionality of the location embedding."""
+
+    loc_emb_model_config: ModelConfig = field(kw_only=True)
+    """Model configuration for the location adjustment model."""
+
+    adj_model_config: ModelConfig = field(kw_only=True)
+    """Model configuration for the adjustment model."""
+
+    n_epochs: int = field(kw_only=True)
+    """Number of training epochs."""
+
+    batch_size: int = field(kw_only=True)
+    """Batch size for training."""
+
+    learning_rate: float = field(kw_only=True)
+    """Learning rate for the optimizer."""
+
+    loc_emb_max_grad_norm: float | None = field(kw_only=True)
+    """Maximum gradient norm for training of the location embedding model."""
+
+    adj_max_grad_norm: float | None = field(kw_only=True)
+    """Maximum gradient norm for training of the adjustment model."""
+
+    rel_results_dir: str = field(kw_only=True)
+    """Relative path to the results directory."""
+
+    base_gmm_run_config: GMMRunConfig | None = field(default=None, init=False)
+    """GMMRunConfig of the base model."""
+
+    def __post_init__(self):
+        self.base_gmm_run_config = GMMRunConfig.from_yaml(
+            self.base_model_dir / "run_config.yaml"
+        )
+
+    @property
+    def base_model_dir(self) -> Path:
+        """Absolute path to the base model directory."""
+        return Path(os.environ["wdata"]) / self.rel_base_model_dir
+
+    @property
+    def results_dir(self) -> Path:
+        """Absolute path to the results directory."""
+        return Path(os.environ["wdata"]) / self.rel_results_dir
+
+    #### Pass through properties from base GMM model config ####
+
+    @property
+    def site_inputs(self) -> list[str]:
+        """Site inputs for the base GMM model."""
+        return self.base_gmm_run_config.site_inputs
+
+    @property
+    def source_inputs(self) -> list[str]:
+        """Source inputs from the base GMM model."""
+        return self.base_gmm_run_config.source_inputs
+
+    @property
+    def source_to_site_inputs(self) -> list[str]:
+        """Source to site inputs from the base GMM model."""
+        return self.base_gmm_run_config.source_to_site_inputs
+
+    ### End pass through properties ###
+
+    def to_yaml(self, ffp: Path):
+        """Save the RunConfig to a YAML file."""
+        mlt.utils.write_to_yaml(self.to_dict(), ffp)
+
+    def to_dict(self) -> dict:
+        """
+        Convert the LocAdjustmentRunConfig object to a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary representation of the LocAdjustmentRunConfig object.
+        """
+        config_dict = {
+            "rel_base_model_dir": str(self.base_model_dir),
+            "loc_inputs": list(self.loc_inputs),
+            "loc_emb_dim": int(self.loc_emb_dim),
+            "loc_emb_model_config": ModelConfig.to_dict(self.loc_emb_model_config),
+            "adj_model_config": ModelConfig.to_dict(self.adj_model_config),
+            "n_epochs": int(self.n_epochs),
+            "batch_size": int(self.batch_size),
+            "learning_rate": float(self.learning_rate),
+            "loc_emb_max_grad_norm": (
+                float(self.loc_emb_max_grad_norm)
+                if self.loc_emb_max_grad_norm is not None
+                else None
+            ),
+            "adj_max_grad_norm": (
+                float(self.adj_max_grad_norm)
+                if self.adj_max_grad_norm is not None
+                else None
+            ),
+            "rel_results_dir": str(self.rel_results_dir),
+        }
+        return config_dict
+
+    @classmethod
+    def from_config_kwargs(cls, config_ffp: Path, **kwargs):
+        """
+        Creates an instance from the given config.
+        If kwargs are set then they overwrite the values
+        specified in the config.
+        """
+        config_dict = mlt.utils.load_yaml(config_ffp)
+
+        for cur_key, cur_val in kwargs.items():
+            if cur_val is not None:
+                config_dict[cur_key] = cur_val
+
+        return cls.from_dict(config_dict)
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        loc_emb_model_config = ModelConfig.from_dict(d.pop("loc_emb_model_config"))
+        d["loc_emb_model_config"] = loc_emb_model_config
+
+        adj_model_config = ModelConfig.from_dict(d.pop("adj_model_config"))
+        d["adj_model_config"] = adj_model_config
+
+        base_config_fields = [f.name for f in fields(BaseRunConfig)]
+        gmm_config_ffp = (
+            Path(os.environ["wdata"]) / d["rel_base_model_dir"] / "run_config.yaml"
+        )
+        gmm_config = GMMRunConfig.from_yaml(gmm_config_ffp)
+        for f in fields(gmm_config):
+            if f.name in base_config_fields and f.name not in d:
+                d[f.name] = getattr(gmm_config, f.name)
+
+        return cls(**d)
+
+    @classmethod
+    def from_yaml(cls, ffp: Path):
+        return cls.from_dict(mlt.utils.load_yaml(ffp))
+
+
 class BatchResult(NamedTuple):
     batch: data.SimBatchData
     """The batch data"""
@@ -478,15 +620,102 @@ class BatchResult(NamedTuple):
     """Mask for the nan values"""
 
 
+def get_model(
+    run_config: GMMRunConfig | LocAdjRunConfig,
+) -> tuple[modules.BaseNNModel, torch.optim.Optimizer | None]:
+    """
+    Get the model and optimizer for the given run configuration.
+    """
+    if isinstance(run_config, GMMRunConfig):
+        model = modules.BaseNNModel(
+            model=modules.create_multi_mlp(
+                run_config.n_inputs,
+                run_config.model_config.units,
+                run_config.n_ims * 2,
+                run_config.model_config.activation,
+                use_batch_norm=run_config.model_config.use_batch_norm,
+                dropout_rate=run_config.model_config.dropout_rate,
+            ),
+            max_norm=run_config.max_grad_norm,
+        )
+        return model, None
+    elif isinstance(run_config, LocAdjRunConfig):
+        # Load the base model
+        base_model = torch.load(
+            run_config.base_model_dir / "model.pt",
+            weights_only=False,
+            map_location=run_config.device,
+        )
+        assert isinstance(base_model, modules.BaseNNModel) and isinstance(
+            base_model.model, nn.Sequential
+        )
+        # Remove the output layer and clip layer if present
+        base_model = base_model.model
+        if isinstance(base_model[-1], modules.ClipLayer):
+            base_model = nn.Sequential(*list(base_model.children())[:-2])
+        else:
+            base_model = nn.Sequential(*list(base_model.children())[:-1])
+
+        # Create the location embedding model
+        loc_emb_model = modules.create_multi_mlp(
+            2,
+            run_config.loc_emb_model_config.units,
+            run_config.loc_emb_dim,
+            run_config.loc_emb_model_config.activation,
+            use_batch_norm=run_config.loc_emb_model_config.use_batch_norm,
+            dropout_rate=run_config.loc_emb_model_config.dropout_rate,
+            add_clip_layer=False,
+        )
+        # Create the adjustment model
+        adj_model = modules.create_multi_mlp(
+            run_config.loc_emb_dim
+            + run_config.base_gmm_run_config.model_config.units[-1],
+            run_config.adj_model_config.units,
+            run_config.base_gmm_run_config.n_ims * 2,
+            run_config.adj_model_config.activation,
+            use_batch_norm=run_config.adj_model_config.use_batch_norm,
+            dropout_rate=run_config.adj_model_config.dropout_rate,
+        )
+
+        model = modules.LocAdjModel(
+            loc_emb_model,
+            adj_model,
+            base_model,
+            max_loc_emb_grad_norm=run_config.loc_emb_max_grad_norm,
+            max_adj_grad_norm=run_config.adj_max_grad_norm,
+        )
+        model = model.to(run_config.device)
+
+        # Create the optimizer
+        optimizer = torch.optim.Adam(
+            [
+                {
+                    "params": model.loc_emb_model.parameters(),
+                    "weight_decay": run_config.loc_emb_model_config.l2_reg,
+                },
+                {
+                    "params": model.adj_model.parameters(),
+                    "weight_decay": run_config.adj_model_config.l2_reg,
+                },
+            ],
+            lr=run_config.learning_rate,
+        )
+        return model, optimizer
+    else:
+        raise ValueError("Invalid run_config type")
+
+
 def run_model_training(
-    ouput_dir: Path,
-    run_config: RunConfig,
+    output_dir: Path,
+    run_config: GMMRunConfig | LocAdjRunConfig,
     event_df: pd.DataFrame,
     site_df: pd.DataFrame,
-    train_events: list[str],
-    val_events: list[str] | None,
-    train_sites: list[str],
-    val_sites: list[str] | None,
+    train_record_ids: np.ndarray | None = None,
+    val_record_ids: np.ndarray | None = None,
+    train_events: list[str] | None = None,
+    val_events: list[str] | None = None,
+    train_sites: list[str] | None = None,
+    val_sites: list[str] | None = None,
     save_train_results: bool = True,
     verbose: bool = True,
 ):
@@ -514,45 +743,113 @@ def run_model_training(
         List of validation site IDs.
         Set to None to skip validation.
     """
-    assert (val_events is not None and val_sites is not None) or (
-        val_events is None and val_sites is None
-    ), "If validation events are provided, validation sites must be provided and vice versa."
-    events = (
-        np.concatenate([train_events, val_events])
-        if val_events is not None
-        else train_events
-    )
-    sites = (
-        np.concatenate([train_sites, val_sites])
-        if val_sites is not None
-        else train_sites
-    )
+    if train_record_ids is not None:
+        assert (
+            train_events is None
+            and val_events is None
+            and train_sites is None
+            and val_sites is None
+        ), "If train_record_ids is provided, train_events, val_events, "
+        "train_sites, and val_sites must be None."
+        logger.info("Using record_ids for training/validation data selection.")
 
-    # Sanity check
-    assert (
-        np.isin(run_config.test_events, events).sum() == 0
-    ), "Test events are not allowed in the training or validation sets. "
+        record_ids = np.concatenate(
+            [train_record_ids, val_record_ids]
+            if val_record_ids is not None
+            else [train_record_ids]
+        )
 
-    with DuckIMDB(run_config.imdb_ffp, readonly=True) as db:
-        source_df = db.get_rel_df(events=events)
-        site_event_df = db.get_site_event_df(sites=sites, max_rrup=run_config.max_rrup)
-        record_info_df = db.get_record_info_df(events=events, sites=sites)
-    # Add site-event-int-id, and update types to reduce memory usage
-    record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
-        record_info_df.site_int_id.values, record_info_df.event_int_id.values
-    )
+        with DuckIMDB(run_config.base_gmm_run_config.imdb_ffp, readonly=True) as imdb:
+            record_info_df = imdb.get_record_info_df(record_int_ids=record_ids)
+            events = record_info_df.event_id.unique().astype(str)
+            source_df = imdb.get_rel_df(events=events)
+
+            # Add site-event-int-id, and update types to reduce memory usage
+            record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+                record_info_df.site_int_id.values, record_info_df.event_int_id.values
+            )
+            site_event_df = imdb.get_site_event_df(
+                site_event_int_ids=record_info_df.site_event_int_id.values
+            )
+
+        # Sanity check that there is no overlap between train and val sets
+        if val_record_ids is not None:
+            assert (
+                np.isin(train_record_ids, val_record_ids).sum() == 0
+            ), "There is overlap between training and validation record IDs."
+    else:
+        logger.info("Using event and site IDs for training/validation data selection.")
+        assert (val_events is not None and val_sites is not None) or (
+            val_events is None and val_sites is None
+        ), "If validation events are provided, validation sites must be provided and vice versa."
+        events = (
+            np.concatenate([train_events, val_events])
+            if val_events is not None
+            else train_events
+        )
+        sites = (
+            np.concatenate([train_sites, val_sites])
+            if val_sites is not None
+            else train_sites
+        )
+
+        # Sanity check
+        assert (
+            np.isin(run_config.test_events, events).sum() == 0
+        ), "Test events are not allowed in the training or validation sets. "
+
+        with DuckIMDB(run_config.imdb_ffp, readonly=True) as db:
+            source_df = db.get_rel_df(events=events)
+            site_event_df = db.get_site_event_df(
+                sites=sites, max_rrup=run_config.max_rrup
+            )
+            record_info_df = db.get_record_info_df(events=events, sites=sites)
+
+        # Add site-event-int-id, and update types to reduce memory usage
+        record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+            record_info_df.site_int_id.values, record_info_df.event_int_id.values
+        )
+
+        assert record_info_df.site_event_int_id.dtype == np.int64
+
+        # Drop records that are not in site_event_df (due to max_rrup)
+        drop_mask = ~record_info_df.site_event_int_id.isin(site_event_df.index.values)
+        if np.any(drop_mask):
+            record_info_df = record_info_df.loc[~drop_mask]
+            logger.info(
+                f"Dropping {drop_mask.sum()} records that are not in the site_event_df due to max_rrup"
+            )
+
+        # Get record ids
+        train_record_ids = record_info_df.loc[
+            record_info_df.event_id.isin(train_events)
+            & record_info_df.site_id.isin(train_sites)
+        ].index.values.astype(int)
+        if val_events is not None:
+            val_record_ids = record_info_df.loc[
+                record_info_df.event_id.isin(val_events)
+                & record_info_df.site_id.isin(val_sites)
+            ].index.values.astype(int)
+
+            # Sanity check that there is no overlap between train and val sets
+            assert (
+                record_info_df.loc[train_record_ids].event_id.isin(val_events).sum()
+                == 0
+            )
+            assert (
+                record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
+            )
+            assert (
+                record_info_df.loc[val_record_ids].event_id.isin(train_events).sum()
+                == 0
+            )
+            assert (
+                record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
+            )
+
     record_info_df = record_info_df.astype(
         {"event_int_id": np.uint32, "site_int_id": np.uint32, "rel_int_id": np.uint32}
     )
-    assert record_info_df.site_event_int_id.dtype == np.int64
-
-    # Drop records that based not in site_event_df (due to max_rrup)
-    drop_mask = ~record_info_df.site_event_int_id.isin(site_event_df.index.values)
-    if np.any(drop_mask):
-        record_info_df = record_info_df.loc[~drop_mask]
-        logger.info(
-            f"Dropping {drop_mask.sum()} records that are not in the site_event_df due to max_rrup"
-        )
 
     # Add event level source data
     source_df["tect_type"] = event_df.loc[source_df.event_int_id].tect_type.values
@@ -561,61 +858,32 @@ def run_model_training(
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
 
     # Add sample weights
-    record_info_df.loc[:, "sample_weight"] = np.float32(1.0)
-    if run_config.use_sample_weights:
-        record_info_df.loc[:, "magnitude"] = event_df.loc[
-            record_info_df.event_int_id
-        ].magnitude.values.astype(np.float32)
-        record_info_df.loc[:, "rrup"] = site_event_df.loc[
-            record_info_df.site_event_int_id
-        ].rrup.values.astype(np.float32)
-        record_info_df.loc[:, "vs30"] = site_df.loc[
-            record_info_df.site_int_id
-        ].vs30.values.astype(np.float32)
-
-        if run_config.apply_mag_sample_weighting:
-            record_info_df = get_mag_weights(
-                record_info_df, max_weight=run_config.max_mag_weight
-            )
-        if run_config.apply_rrup_sample_weighting:
-            record_info_df = get_rrup_weights(
-                record_info_df, max_weight=run_config.max_rrup_weight
-            )
-        if run_config.apply_vs30_sample_weighting:
-            record_info_df = get_vs30_weights(
-                record_info_df, max_weight=run_config.max_vs30_weight
-            )
-
-        record_info_df["sample_weight"] += np.clip(
-            record_info_df.get("mag_weight", 0).values
-            + record_info_df.get("rrup_weight", 0).values
-            + record_info_df.get("vs30_weight", 0).values,
-            0,
-            run_config.total_max_weight - 1,
-        )
-
-        assert not record_info_df["sample_weight"].isna().any()
+    _add_sample_weights(
+        run_config,
+        record_info_df,
+        event_df,
+        site_df,
+        site_event_df,
+    )
 
     # Run preprocessing
     pre_site_df = preprocessing.preprocess_site_features(
-        site_df,
-        run_config.site_inputs
-        + (run_config.loc_model_inputs if run_config.using_loc_model else []),
+        site_df, run_config.site_inputs
     )
-
     pre_source_df = preprocessing.preprocess_source_features(
         source_df, run_config.source_inputs
     )
-
     pre_site_event_df = preprocessing.preprocess_event_site_features(
         site_event_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
 
+    pre_loc_df = None
+    if hasattr(run_config, "loc_inputs"):
+        pre_loc_df = preprocessing.preprocess_site_features(
+            site_df, run_config.loc_inputs
+        )
+
     # Prepare training data
-    train_record_ids = record_info_df.loc[
-        record_info_df.event_id.isin(train_events)
-        & record_info_df.site_id.isin(train_sites)
-    ].index.values.astype(int)
     train_dataset = data.OptimizedIMDBDataset(
         run_config.imdb_ffp,
         train_record_ids,
@@ -624,24 +892,18 @@ def run_model_training(
         pre_source_df,
         pre_site_event_df,
         record_info_df,
-        run_config,
-        is_train=True,
+        run_config.device,
+        run_config.scale_ims,
+        loc_df=pre_loc_df,
     )
+    run_config.im_scale_params = train_dataset.im_scale_params
     train_dataloader = data.CustomDataLoader(
         train_dataset, batch_size=run_config.batch_size, shuffle=True
     )
 
     # Prepare validation data
     val_dataset, val_dataloader = None, None
-    if val_events is not None:
-        val_record_ids = record_info_df.loc[
-            record_info_df.event_id.isin(val_events)
-            & record_info_df.site_id.isin(val_sites)
-        ].index.values.astype(int)
-        assert record_info_df.loc[train_record_ids].event_id.isin(val_events).sum() == 0
-        assert record_info_df.loc[train_record_ids].site_id.isin(val_sites).sum() == 0
-        assert record_info_df.loc[val_record_ids].event_id.isin(train_events).sum() == 0
-        assert record_info_df.loc[val_record_ids].site_id.isin(train_sites).sum() == 0
+    if val_record_ids is not None:
         val_dataset = data.OptimizedIMDBDataset(
             run_config.imdb_ffp,
             val_record_ids,
@@ -650,80 +912,22 @@ def run_model_training(
             pre_source_df,
             pre_site_event_df,
             record_info_df,
-            run_config,
-            is_train=False,
+            run_config.device,
+            run_config.scale_ims,
+            im_scale_params=run_config.im_scale_params,
+            loc_df=pre_loc_df,
         )
         val_dataloader = data.CustomDataLoader(
             val_dataset, batch_size=run_config.batch_size, shuffle=False
         )
 
-    model_fn = functools.partial(
-        nn_gmm_modules.create_multi_mlp,
-        units=run_config.model_config.units,
-        n_outputs=run_config.n_ims * 2,
-        act_fn_str=run_config.model_config.activation,
-        use_batch_norm=run_config.model_config.use_batch_norm,
-    )
-
     # Create the model
-    if run_config.using_loc_model:
-        loc_model = torch.load(
-            run_config.loc_model_dir / "emb_model.pt",
-            weights_only=False,
-            map_location=run_config.device,
-        )
-
-        core_model = model_fn(
-            n_inputs=run_config.n_inputs + loc_model.embedding_dim,
-        )
-
-        model = nn_gmm_modules.NNCombined(
-            loc_model,
-            core_model,
-            max_loc_grad_norm=run_config.loc_max_grad_norm,
-            max_core_grad_norm=run_config.core_max_grad_norm,
-        )
-
-        # Custom optimizer to handle different learning rates
-        opt_config = [
-            {"params": model.core_model.parameters(), "lr": run_config.learning_rate}
-        ]
-        lr = run_config.loc_model_base_lr
-        for cur_layer in model.loc_model.nn[::-1]:
-            if isinstance(cur_layer, nn.Linear):
-                opt_config.append({"params": cur_layer.parameters(), "lr": lr})
-                lr *= 0.9
-        optimizer = torch.optim.Adam(
-            opt_config, weight_decay=run_config.model_config.l2_reg
-        )
-
-        # Log parameter groups and learning rates
-        logger.info("Optimizer configuration with custom learning rates:")
-        total_params = 0
-        for i, group in enumerate(optimizer.param_groups):
-            n_params = sum(p.numel() for p in group["params"])
-            total_params += n_params
-            if i == 0:
-                logger.info(
-                    f"  Group {i}: Core model - {n_params:,} params, lr={group['lr']:.2e}"
-                )
-            else:
-                logger.info(
-                    f"  Group {i}: Location model layer {i} - {n_params:,} params, lr={group['lr']:.2e}"
-                )
-        logger.info(f"  Total parameters: {total_params:,}")
-    else:
-        model = nn_gmm_modules.BaseNNModel(
-            model_fn(n_inputs=run_config.n_inputs),
-            max_norm=run_config.core_max_grad_norm,
-        )
-        optimizer = None
-
+    model, optimizer = get_model(run_config)
     model.to(run_config.device)
 
-    logger.info(f"Model has {nn_gmm_modules.get_n_params(model)} trainable parameters")
+    logger.info(f"Model has {modules.get_n_params(model)} trainable parameters")
     logger.info(f"Training model with {len(train_dataset)} training records ")
-    if val_events is not None:
+    if val_record_ids is not None:
         logger.info(f"Validating model on {len(val_dataset)} records")
 
     metrics, best_model_state, best_model_epoch = train(
@@ -731,7 +935,7 @@ def run_model_training(
         train_dataloader,
         val_dataloader,
         run_config.n_epochs,
-        l2_reg=run_config.model_config.l2_reg,
+        l2_reg=run_config.model_config.l2_reg if optimizer is None else None,
         learning_rate=run_config.learning_rate,
         use_sample_weights=run_config.use_sample_weights,
         optimizer=optimizer,
@@ -743,22 +947,22 @@ def run_model_training(
     model.load_state_dict(best_model_state)
 
     # Create output directory
-    ouput_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get simulation predictions
-    if val_events is not None:
+    if val_record_ids is not None:
         logger.info("Getting validation dataset predictions")
         val_results_df = get_dataset_predictions(
             model, val_dataset, run_config, verbose=verbose
         )
-        val_results_df.to_parquet(ouput_dir / "val_results.parquet")
+        val_results_df.to_parquet(output_dir / "val_results.parquet")
 
     if save_train_results:
         logger.info("Getting training dataset predictions")
         train_results_df = get_dataset_predictions(
             model, train_dataset, run_config, verbose=verbose
         )
-        train_results_df.to_parquet(ouput_dir / "train_results.parquet")
+        train_results_df.to_parquet(output_dir / "train_results.parquet")
 
     # Get observation predictions
     logging.info("Getting observation predictions")
@@ -766,36 +970,36 @@ def run_model_training(
     obs_results_df = run_predictions(
         model, run_config, obsd.get_input_df(obs_data, run_config), run_config.device
     )
-    obs_results_df.to_parquet(ouput_dir / "obs_results.parquet")
+    obs_results_df.to_parquet(output_dir / "obs_results.parquet")
 
     logging.info("Saving results")
-    run_config.to_yaml(ouput_dir / "run_config.yaml")
-    metrics_df.to_parquet(ouput_dir / "metrics.parquet")
+    run_config.to_yaml(output_dir / "run_config.yaml")
+    metrics_df.to_parquet(output_dir / "metrics.parquet")
 
-    np.save(ouput_dir / "train_record_ids.npy", train_record_ids)
-    np.save(ouput_dir / "train_events.npy", train_events)
-    np.save(ouput_dir / "train_sites.npy", train_sites)
+    np.save(output_dir / "train_record_ids.npy", train_record_ids)
+    np.save(output_dir / "train_events.npy", train_events)
+    np.save(output_dir / "train_sites.npy", train_sites)
     if val_events is not None:
-        np.save(ouput_dir / "val_record_ids.npy", val_record_ids)
-        np.save(ouput_dir / "val_events.npy", val_events)
-        np.save(ouput_dir / "val_sites.npy", val_sites)
+        np.save(output_dir / "val_record_ids.npy", val_record_ids)
+        np.save(output_dir / "val_events.npy", val_events)
+        np.save(output_dir / "val_sites.npy", val_sites)
 
-    torch.save(model, ouput_dir / "model.pt")
+    torch.save(model, output_dir / "model.pt")
 
     metadata = {
         "best_model_epoch": int(best_model_epoch),
         "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]),
         "n_train_samples": int(train_record_ids.shape[0]),
-        "n_val_samples": int(val_record_ids.shape[0]) if val_events is not None else 0,
-        "n_model_params": int(nn_gmm_modules.get_n_params(model)),
+        "n_val_samples": int(val_record_ids.shape[0]) if val_record_ids is not None else 0,
+        "n_model_params": int(modules.get_n_params(model)),
     }
-    mlt.utils.write_to_yaml(metadata, ouput_dir / "metadata.yaml")
+    mlt.utils.write_to_yaml(metadata, output_dir / "metadata.yaml")
 
 
 def get_dataset_predictions(
     model: nn.Module,
     dataset: data.IMDBDataset,
-    run_config: RunConfig,
+    run_config: GMMRunConfig,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """
@@ -815,7 +1019,9 @@ def get_dataset_predictions(
     pd.DataFrame
         A DataFrame containing the predicted mean and standard deviation values.
     """
-    dataloader = data.CustomDataLoader(dataset, batch_size=run_config.batch_size, shuffle=False)
+    dataloader = data.CustomDataLoader(
+        dataset, batch_size=run_config.batch_size, shuffle=False
+    )
 
     result_dfs = []
     for cur_batch in tqdm(dataloader, desc="Predicting", disable=not verbose):
@@ -876,7 +1082,7 @@ def get_dataset_predictions(
 
 
 def train(
-    model: nn_gmm_modules.BaseNNModel,
+    model: modules.BaseNNModel,
     train_dataloader: data.CustomDataLoader,
     val_dataloader: data.CustomDataLoader | None,
     n_epochs: int,
@@ -990,7 +1196,7 @@ def train(
             f"Training completed. Best model at epoch "
             f"{best_model_epoch + 1} with val loss {best_val_loss:.4f}"
         )
-    else: 
+    else:
         best_model_state = model.state_dict()
         best_model_epoch = n_epochs - 1
         logger.info("Training completed.")
@@ -1000,7 +1206,7 @@ def train(
 
 def _get_batch_result(
     batch: data.BaseBatchData,
-    model: nn.Module,
+    model: modules.BaseNNModel,
     use_sample_weights: bool,
     has_nan: bool = False,
 ) -> BatchResult:
@@ -1018,7 +1224,7 @@ def _get_batch_result(
     has_nan : bool, optional
         Whether the batch has NaN values in the target variable
     """
-    if isinstance(model, nn_gmm_modules.NNCombined):
+    if model.uses_loc_inputs:
         pred_mean, pred_ln_std = model(batch.X, batch.X_loc).chunk(2, dim=-1)
     else:
         pred_mean, pred_ln_std = model(batch.X).chunk(2, dim=-1)
@@ -1122,7 +1328,7 @@ def _save_metrics(
 
 def revert_im_scaling(
     scaled_ln_im_mean: np.ndarray[float],
-    run_config: RunConfig,
+    run_config: GMMRunConfig,
     scaled_ln_im_std: np.ndarray[float] = None,
 ):
     """
@@ -1243,7 +1449,7 @@ def run_predictions_dir(
         Device to run the model on, e.g., 'cpu' or 'cuda'.
     """
     # Load the model and run config
-    run_config = RunConfig.from_yaml(model_dir / "run_config.yaml")
+    run_config = GMMRunConfig.from_yaml(model_dir / "run_config.yaml")
     model = torch.load(
         model_dir / "model.pt", weights_only=False, map_location=torch.device(device)
     )
@@ -1251,8 +1457,8 @@ def run_predictions_dir(
 
 
 def run_predictions(
-    model: torch.nn.Module,
-    run_config: RunConfig,
+    model: modules.BaseNNModel,
+    run_config: BaseRunConfig,
     input_df: pd.DataFrame,
     device: str,
 ) -> pd.DataFrame:
@@ -1271,8 +1477,7 @@ def run_predictions(
     # Pre-process the input DataFrame
     pre_site_df = preprocessing.preprocess_site_features(
         input_df,
-        run_config.site_inputs
-        + (run_config.loc_model_inputs if run_config.using_loc_model else []),
+        run_config.site_inputs,
     )
     pre_source_df = preprocessing.preprocess_source_features(
         input_df, run_config.source_inputs
@@ -1280,22 +1485,27 @@ def run_predictions(
     pre_source_site_df = preprocessing.preprocess_event_site_features(
         input_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
+
     pre_input_df = pd.concat(
         [pre_site_df[run_config.site_inputs], pre_source_df, pre_source_site_df], axis=1
     )
     X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
 
-    if run_config.using_loc_model:
-        X_loc = torch.from_numpy(pre_site_df[run_config.loc_model_inputs].values).to(
+    if model.uses_loc_inputs:
+        pre_loc_input_df = preprocessing.preprocess_site_features(
+            input_df, run_config.loc_inputs
+        )
+        X_loc = torch.from_numpy(pre_loc_input_df.values).to(
             dtype=torch.float32, device=device
         )
 
     model.eval()
     with torch.no_grad():
-        if isinstance(model, nn_gmm_modules.NNCombined):
+        if model.uses_loc_inputs:
             pred_mean, pred_ln_std = model(X, X_loc).chunk(2, dim=-1)
         else:
             pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+
         pred_std = torch.exp(pred_ln_std).cpu().numpy()
         pred_mean = pred_mean.cpu().numpy()
 
@@ -1311,3 +1521,74 @@ def run_predictions(
     pred_df = pd.concat([input_df, pred_mean_df, pred_std_df], axis=1)
 
     return pred_df
+
+
+def _add_sample_weights(
+    run_config: GMMRunConfig,
+    record_info_df: pd.DataFrame,
+    event_df: pd.DataFrame,
+    site_df: pd.DataFrame,
+    site_event_df: pd.DataFrame,
+):
+    record_info_df.loc[:, "sample_weight"] = np.float32(1.0)
+    if run_config.use_sample_weights:
+        record_info_df.loc[:, "magnitude"] = event_df.loc[
+            record_info_df.event_int_id
+        ].magnitude.values.astype(np.float32)
+        record_info_df.loc[:, "rrup"] = site_event_df.loc[
+            record_info_df.site_event_int_id
+        ].rrup.values.astype(np.float32)
+        record_info_df.loc[:, "vs30"] = site_df.loc[
+            record_info_df.site_int_id
+        ].vs30.values.astype(np.float32)
+
+        if run_config.apply_mag_sample_weighting:
+            record_info_df = get_mag_weights(
+                record_info_df, max_weight=run_config.max_mag_weight
+            )
+        if run_config.apply_rrup_sample_weighting:
+            record_info_df = get_rrup_weights(
+                record_info_df, max_weight=run_config.max_rrup_weight
+            )
+        if run_config.apply_vs30_sample_weighting:
+            record_info_df = get_vs30_weights(
+                record_info_df, max_weight=run_config.max_vs30_weight
+            )
+
+        record_info_df["sample_weight"] += np.clip(
+            record_info_df.get("mag_weight", 0).values
+            + record_info_df.get("rrup_weight", 0).values
+            + record_info_df.get("vs30_weight", 0).values,
+            0,
+            run_config.total_max_weight - 1,
+        )
+
+        assert not record_info_df["sample_weight"].isna().any()
+
+
+def load_config(config_ffp: Path) -> GMMRunConfig | LocAdjRunConfig:
+    """
+    Load the run configuration from the given file path.
+
+    Parameters
+    ----------
+    config_ffp : Path
+        File path to the configuration file.
+
+    Returns
+    -------
+    GMMRunConfig | LocAdjRunConfig
+        The loaded run configuration.
+    """
+    config_dict = mlt.utils.load_yaml(config_ffp)
+    try:
+        return GMMRunConfig.from_dict(config_dict)
+    except ValueError:
+        pass
+
+    try:
+        return LocAdjRunConfig.from_dict(config_dict)
+    except ValueError:
+        pass
+
+    raise ValueError("Invalid configuration file")

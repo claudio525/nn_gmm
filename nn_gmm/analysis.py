@@ -22,7 +22,7 @@ def get_nn_sim_residuals(
     """
     Get the residuals of the specified NN model validation results
     """
-    run_config = nn_gmm.RunConfig.from_yaml(model_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(model_dir / "run_config.yaml")
 
     if pred_df is None:
         pred_df = pd.read_parquet(model_dir / "val_results.parquet")
@@ -83,7 +83,7 @@ def run_nn_mera(
     result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4
 ):
     import mera
-    run_config = nn_gmm.RunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nn_gmm.GMMRunConfig.from_yaml(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
     res_df, *_ = get_nn_sim_residuals(result_dir)
@@ -126,7 +126,7 @@ def run_nn_mera(
 
 
 def get_mag_input_df(
-    mag_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs
+    mag_values: np.ndarray, run_config: nn_gmm.GMMRunConfig | None = None, **kwargs
 ) -> pd.DataFrame:
     """
     Create a DataFrame with the given magnitude values and additional parameters.
@@ -170,7 +170,7 @@ def get_mag_input_df(
 
 
 def get_rrup_input_df(
-    rrup_values: np.ndarray, run_config: nn_gmm.RunConfig | None = None, **kwargs
+    rrup_values: np.ndarray, run_config: nn_gmm.GMMRunConfig | None = None, **kwargs
 ) -> pd.DataFrame:
     """
     Create a DataFrame with the given rrup values and additional parameters.

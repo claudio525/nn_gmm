@@ -29,8 +29,6 @@ source_to_site_inputs:
 - rx
 - ry
 
-loc_model_inputs: null
-
 # Sample weighting
 apply_mag_sample_weighting: True
 max_mag_weight: 2.5
@@ -48,8 +46,7 @@ n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
 
-loc_max_grad_norm: null
-core_max_grad_norm: null
+max_grad_norm: null
 
 model:
   units: [32, 32, 64]
@@ -57,8 +54,5 @@ model:
   activation: relu
   dropout_rate: 0.0
   l2_reg: 0.0001
-
-rel_loc_model_dir: null
-loc_model_base_lr: null
 
 rel_results_dir: nn_gmm/results

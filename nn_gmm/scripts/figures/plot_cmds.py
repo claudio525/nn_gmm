@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import torch
 import typer
 import numpy as np
 import matplotlib
@@ -8,6 +9,13 @@ import seaborn as sns
 
 import nn_gmm as nng
 
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+if torch.mps.is_available():
+    device = "mps"
+
+print(f"Using device: {device.upper()}")
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
@@ -49,6 +57,7 @@ def nn_gmm_full_ratio_map(
         model_dir_1,
         model_dir_2,
         output_dir,
+        device,
         n_procs=n_procs,
         plot_model_predictions=plot_model_predictions,
     )
@@ -109,7 +118,7 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
     for the given CV results.
     """
     nng.utils.setup_logging()
-    run_config = nng.RunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nng.GMMRunConfig.from_yaml(result_dir / "run_config.yaml")
 
     cv_dirs = [
         cur_dir

@@ -1,5 +1,5 @@
 import logging
-from typing import Sequence, Optional, TYPE_CHECKING
+from typing import Sequence, Optional, Union, TYPE_CHECKING
 from pathlib import Path
 from enum import StrEnum
 
@@ -10,7 +10,6 @@ import ml_tools as mlt
 from qcore import coordinates
 
 from . import constants
-
 if TYPE_CHECKING:
     from . import nn_gmm
 
@@ -781,7 +780,7 @@ def load_obs_nzgmdb(
 
 
 def get_input_df(
-    obs_data: ObservedData, run_config: "nn_gmm.RunConfig"
+    obs_data: ObservedData, run_config: Union["nn_gmm.GMMRunConfig", "nn_gmm.LocAdjRunConfig"]
 ) -> pd.DataFrame:
     """
     Gets the input dataframe for the observed data.
@@ -801,8 +800,8 @@ def get_input_df(
         + run_config.source_inputs
         + run_config.source_to_site_inputs
     )
-    if run_config.using_loc_model:
-        features += run_config.loc_model_inputs
+    if hasattr(run_config, "loc_inputs"):
+        features += run_config.loc_inputs
 
     input_df = obs_data.record_df.rename(
         columns={
