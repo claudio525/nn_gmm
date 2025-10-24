@@ -118,7 +118,7 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
     for the given CV results.
     """
     nng.utils.setup_logging()
-    run_config = nng.GMMRunConfig.from_yaml(result_dir / "run_config.yaml")
+    run_config = nng.nn_gmm.load_config(result_dir / "run_config.yaml")
 
     cv_dirs = [
         cur_dir

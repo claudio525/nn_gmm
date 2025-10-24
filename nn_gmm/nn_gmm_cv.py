@@ -278,8 +278,6 @@ def train_loc_adj_cv(
                 ],
             )
 
-    output_dirs.append(output_dir)
-
     _run_postprocessing(
         base_out_dir,
         output_dirs,

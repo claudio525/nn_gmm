@@ -14,7 +14,6 @@ from .nn_gmm import GMMRunConfig, LocAdjRunConfig
 from . import nn_gmm_modules
 from . import loc_pre   
 from . import preprocessing
-from . import nn_gmm_obs
 from . import nn_hp_opt
 from .nn_gmm_cv import train_cv, train_loc_adj_cv
 
@@ -27,7 +26,6 @@ __all__ = [
     "GMMRunConfig",
     "utils",
     "nn_gmm",
-    "nn_gmm_obs",
     "nn_hp_opt",
     "preprocessing",
     "nn_gmm_modules",

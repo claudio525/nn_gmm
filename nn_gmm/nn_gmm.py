@@ -465,6 +465,12 @@ class LocAdjRunConfig(BaseRunConfig):
     loc_emb_model_config: ModelConfig = field(kw_only=True)
     """Model configuration for the location adjustment model."""
 
+    rel_pre_loc_emb_model_dir: str = field(kw_only=True)
+    """
+    Directory of pre-trained location embedding model.
+    If given, loc_emb_model_config and loc_emb_dim are ignored.
+    """
+
     adj_model_config: ModelConfig = field(kw_only=True)
     """Model configuration for the adjustment model."""
 
@@ -474,8 +480,11 @@ class LocAdjRunConfig(BaseRunConfig):
     batch_size: int = field(kw_only=True)
     """Batch size for training."""
 
-    learning_rate: float = field(kw_only=True)
-    """Learning rate for the optimizer."""
+    loc_learning_rate: float = field(kw_only=True)
+    """Learning rate for location embedding model."""
+
+    adj_learning_rate: float = field(kw_only=True)
+    """Learning rate for adjustment model."""
 
     loc_emb_max_grad_norm: float | None = field(kw_only=True)
     """Maximum gradient norm for training of the location embedding model."""
@@ -498,6 +507,13 @@ class LocAdjRunConfig(BaseRunConfig):
     def base_model_dir(self) -> Path:
         """Absolute path to the base model directory."""
         return Path(os.environ["wdata"]) / self.rel_base_model_dir
+
+    @property
+    def pre_loc_emb_model_dir(self) -> Path | None:
+        """Absolute path to the pre-trained location embedding model directory."""
+        if self.rel_pre_loc_emb_model_dir is not None:
+            return Path(os.environ["wdata"]) / self.rel_pre_loc_emb_model_dir
+        return None
 
     @property
     def results_dir(self) -> Path:
@@ -537,14 +553,22 @@ class LocAdjRunConfig(BaseRunConfig):
             Dictionary representation of the LocAdjustmentRunConfig object.
         """
         config_dict = {
-            "rel_base_model_dir": str(self.base_model_dir),
+            "rel_base_model_dir": (
+                str(self.rel_base_model_dir) if self.rel_base_model_dir else None
+            ),
             "loc_inputs": list(self.loc_inputs),
-            "loc_emb_dim": int(self.loc_emb_dim),
-            "loc_emb_model_config": ModelConfig.to_dict(self.loc_emb_model_config),
+            "rel_pre_loc_emb_model_dir": (
+                str(self.rel_pre_loc_emb_model_dir)
+                if self.rel_pre_loc_emb_model_dir
+                else None
+            ),
+            "loc_emb_dim": int(self.loc_emb_dim) if self.loc_emb_dim is not None else None,
+            "loc_emb_model_config": ModelConfig.to_dict(self.loc_emb_model_config) if self.loc_emb_model_config is not None else None,
             "adj_model_config": ModelConfig.to_dict(self.adj_model_config),
             "n_epochs": int(self.n_epochs),
             "batch_size": int(self.batch_size),
-            "learning_rate": float(self.learning_rate),
+            "loc_learning_rate": float(self.loc_learning_rate),
+            "adj_learning_rate": float(self.adj_learning_rate),
             "loc_emb_max_grad_norm": (
                 float(self.loc_emb_max_grad_norm)
                 if self.loc_emb_max_grad_norm is not None
@@ -576,8 +600,13 @@ class LocAdjRunConfig(BaseRunConfig):
 
     @classmethod
     def from_dict(cls, d: dict):
-        loc_emb_model_config = ModelConfig.from_dict(d.pop("loc_emb_model_config"))
-        d["loc_emb_model_config"] = loc_emb_model_config
+        if d.get("rel_pre_loc_emb_model_dir"):
+            assert (
+                d["loc_emb_model_config"] is None and d["loc_emb_dim"] is None
+            ), "If rel_pre_loc_emb_model_dir is set, loc_emb_model_config and loc_emb_dim must not be set."
+        else:
+            loc_emb_model_config = ModelConfig.from_dict(d.pop("loc_emb_model_config"))
+            d["loc_emb_model_config"] = loc_emb_model_config
 
         adj_model_config = ModelConfig.from_dict(d.pop("adj_model_config"))
         d["adj_model_config"] = adj_model_config
@@ -592,10 +621,6 @@ class LocAdjRunConfig(BaseRunConfig):
                 d[f.name] = getattr(gmm_config, f.name)
 
         return cls(**d)
-
-    @classmethod
-    def from_yaml(cls, ffp: Path):
-        return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
 class BatchResult(NamedTuple):
@@ -656,20 +681,44 @@ def get_model(
         else:
             base_model = nn.Sequential(*list(base_model.children())[:-1])
 
-        # Create the location embedding model
-        loc_emb_model = modules.create_multi_mlp(
-            2,
-            run_config.loc_emb_model_config.units,
-            run_config.loc_emb_dim,
-            run_config.loc_emb_model_config.activation,
-            use_batch_norm=run_config.loc_emb_model_config.use_batch_norm,
-            dropout_rate=run_config.loc_emb_model_config.dropout_rate,
-            add_clip_layer=False,
-        )
+        loc_opt_configs = []
+        if run_config.pre_loc_emb_model_dir is not None:
+            # Load the pre-trained location embedding model
+            loc_emb_model = torch.load(
+                run_config.pre_loc_emb_model_dir / "model.pt",
+                weights_only=False,
+                map_location=run_config.device,
+            ).embedding_model
+            loc_emb_dim = loc_emb_model.embedding_dim
+
+            lr = run_config.loc_learning_rate
+            for cur_layer in loc_emb_model.nn[::-1]:
+                if isinstance(cur_layer, nn.Linear):
+                    loc_opt_configs.append({"params": cur_layer.parameters(), "lr": lr})
+                    lr *= 0.9
+        else:
+            # Create the location embedding model
+            loc_emb_model = modules.create_multi_mlp(
+                2,
+                run_config.loc_emb_model_config.units,
+                run_config.loc_emb_dim,
+                run_config.loc_emb_model_config.activation,
+                use_batch_norm=run_config.loc_emb_model_config.use_batch_norm,
+                dropout_rate=run_config.loc_emb_model_config.dropout_rate,
+                add_clip_layer=False,
+            )
+            loc_emb_dim = run_config.loc_emb_dim
+            loc_opt_configs.append(
+                {
+                    "params": model.loc_emb_model.parameters(),
+                    "weight_decay": run_config.loc_emb_model_config.l2_reg,
+                    "lr": run_config.loc_learning_rate,
+                },
+            )
+
         # Create the adjustment model
         adj_model = modules.create_multi_mlp(
-            run_config.loc_emb_dim
-            + run_config.base_gmm_run_config.model_config.units[-1],
+            loc_emb_dim + run_config.base_gmm_run_config.model_config.units[-1],
             run_config.adj_model_config.units,
             run_config.base_gmm_run_config.n_ims * 2,
             run_config.adj_model_config.activation,
@@ -687,18 +736,15 @@ def get_model(
         model = model.to(run_config.device)
 
         # Create the optimizer
+        loc_opt_configs.append(
+            {
+                "params": model.adj_model.parameters(),
+                "weight_decay": run_config.adj_model_config.l2_reg,
+                "lr": run_config.adj_learning_rate,
+            }
+        )
         optimizer = torch.optim.Adam(
-            [
-                {
-                    "params": model.loc_emb_model.parameters(),
-                    "weight_decay": run_config.loc_emb_model_config.l2_reg,
-                },
-                {
-                    "params": model.adj_model.parameters(),
-                    "weight_decay": run_config.adj_model_config.l2_reg,
-                },
-            ],
-            lr=run_config.learning_rate,
+            loc_opt_configs,
         )
         return model, optimizer
     else:
@@ -936,7 +982,7 @@ def run_model_training(
         val_dataloader,
         run_config.n_epochs,
         l2_reg=run_config.model_config.l2_reg if optimizer is None else None,
-        learning_rate=run_config.learning_rate,
+        learning_rate=run_config.learning_rate if optimizer is None else None,
         use_sample_weights=run_config.use_sample_weights,
         optimizer=optimizer,
         verbose=verbose,
@@ -990,7 +1036,9 @@ def run_model_training(
         "best_model_epoch": int(best_model_epoch),
         "best_model_val_loss": float(metrics["loss_hist_val"][best_model_epoch]),
         "n_train_samples": int(train_record_ids.shape[0]),
-        "n_val_samples": int(val_record_ids.shape[0]) if val_record_ids is not None else 0,
+        "n_val_samples": (
+            int(val_record_ids.shape[0]) if val_record_ids is not None else 0
+        ),
         "n_model_params": int(modules.get_n_params(model)),
     }
     mlt.utils.write_to_yaml(metadata, output_dir / "metadata.yaml")
@@ -1449,7 +1497,7 @@ def run_predictions_dir(
         Device to run the model on, e.g., 'cpu' or 'cuda'.
     """
     # Load the model and run config
-    run_config = GMMRunConfig.from_yaml(model_dir / "run_config.yaml")
+    run_config = load_config(model_dir / "run_config.yaml")
     model = torch.load(
         model_dir / "model.pt", weights_only=False, map_location=torch.device(device)
     )
@@ -1583,12 +1631,12 @@ def load_config(config_ffp: Path) -> GMMRunConfig | LocAdjRunConfig:
     config_dict = mlt.utils.load_yaml(config_ffp)
     try:
         return GMMRunConfig.from_dict(config_dict)
-    except ValueError:
+    except (ValueError, KeyError):
         pass
 
     try:
         return LocAdjRunConfig.from_dict(config_dict)
-    except ValueError:
+    except (ValueError, KeyError):
         pass
 
     raise ValueError("Invalid configuration file")
