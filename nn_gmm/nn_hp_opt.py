@@ -129,9 +129,9 @@ def continue_hp_opt(study_dir: Path, n_trials: int):
     study.optimize(functools.partial(objective, hp_config=hp_config), n_trials=n_trials)
 
 
-def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = ""):
+def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs: int = 1):
     """Run hyperparameter optimization using Optuna."""
-    objective_fn_call = functools.partial(objective, hp_config=hp_config)
+    objective_fn_call = functools.partial(objective, hp_config=hp_config, n_procs=n_procs)
 
     study_id = mlt.utils.create_run_id()
     study_name = f"{study_id}{f'_{suffix}' if suffix else ''}"
@@ -149,7 +149,7 @@ def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = ""):
     study.optimize(objective_fn_call, n_trials=n_trials)
 
 
-def objective(trial: opt.Trial, hp_config: HPOptConfig) -> float:
+def objective(trial: opt.Trial, hp_config: HPOptConfig, n_procs: int) -> float:
     """Objective function for hyperparameter optimization."""
     run_config = _get_run_config(trial, hp_config)
     run_config.n_epochs = hp_config.n_epochs
@@ -163,7 +163,7 @@ def objective(trial: opt.Trial, hp_config: HPOptConfig) -> float:
         hp_config.n_site_folds,
         output_dir,
         device=run_config.device,
-        n_procs=4,
+        n_procs=n_procs,
         run_notebook=False,
         remove_cv_results=True,
     )
@@ -204,6 +204,9 @@ def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
     )
     run_config.model_config.dropout_rate = trial.suggest_categorical(
         "dropout_rate", hp_config.dropout_rates
+    )
+    run_config.model_config.use_batch_norm = trial.suggest_categorical(
+        "use_batch_norm", [True, False]
     )
 
     return run_config

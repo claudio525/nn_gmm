@@ -1,4 +1,4 @@
-rel_base_model_dir: nn_gmm/results/1022_1621_cv_v1_25Epochs_3E4Folds
+rel_base_model_dir: null
 
 loc_inputs:
   - "nztm_x"

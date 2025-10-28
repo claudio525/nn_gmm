@@ -1,3 +1,4 @@
+import time
 import os
 import logging
 from pathlib import Path
@@ -499,6 +500,7 @@ class LocAdjRunConfig(BaseRunConfig):
     """GMMRunConfig of the base model."""
 
     def __post_init__(self):
+        super().__post_init__()
         self.base_gmm_run_config = GMMRunConfig.from_yaml(
             self.base_model_dir / "run_config.yaml"
         )
@@ -552,6 +554,7 @@ class LocAdjRunConfig(BaseRunConfig):
         dict
             Dictionary representation of the LocAdjustmentRunConfig object.
         """
+        base_dict = super().to_dict()
         config_dict = {
             "rel_base_model_dir": (
                 str(self.rel_base_model_dir) if self.rel_base_model_dir else None
@@ -562,8 +565,14 @@ class LocAdjRunConfig(BaseRunConfig):
                 if self.rel_pre_loc_emb_model_dir
                 else None
             ),
-            "loc_emb_dim": int(self.loc_emb_dim) if self.loc_emb_dim is not None else None,
-            "loc_emb_model_config": ModelConfig.to_dict(self.loc_emb_model_config) if self.loc_emb_model_config is not None else None,
+            "loc_emb_dim": (
+                int(self.loc_emb_dim) if self.loc_emb_dim is not None else None
+            ),
+            "loc_emb_model_config": (
+                ModelConfig.to_dict(self.loc_emb_model_config)
+                if self.loc_emb_model_config is not None
+                else None
+            ),
             "adj_model_config": ModelConfig.to_dict(self.adj_model_config),
             "n_epochs": int(self.n_epochs),
             "batch_size": int(self.batch_size),
@@ -581,7 +590,7 @@ class LocAdjRunConfig(BaseRunConfig):
             ),
             "rel_results_dir": str(self.rel_results_dir),
         }
-        return config_dict
+        return base_dict | config_dict
 
     @classmethod
     def from_config_kwargs(cls, config_ffp: Path, **kwargs):
@@ -611,14 +620,20 @@ class LocAdjRunConfig(BaseRunConfig):
         adj_model_config = ModelConfig.from_dict(d.pop("adj_model_config"))
         d["adj_model_config"] = adj_model_config
 
-        base_config_fields = [f.name for f in fields(BaseRunConfig)]
-        gmm_config_ffp = (
-            Path(os.environ["wdata"]) / d["rel_base_model_dir"] / "run_config.yaml"
-        )
-        gmm_config = GMMRunConfig.from_yaml(gmm_config_ffp)
-        for f in fields(gmm_config):
-            if f.name in base_config_fields and f.name not in d:
-                d[f.name] = getattr(gmm_config, f.name)
+        # Add common fields from base GMM config
+        missing_base_config_fields = [
+            f.name
+            for f in fields(BaseRunConfig)
+            if f.name not in ["_im_scale_params"] and f.name not in d
+        ]
+        if len(missing_base_config_fields) > 0:
+            gmm_config_ffp = (
+                Path(os.environ["wdata"]) / d["rel_base_model_dir"] / "run_config.yaml"
+            )
+            gmm_config = GMMRunConfig.from_yaml(gmm_config_ffp)
+            for f in fields(gmm_config):
+                if f.name in missing_base_config_fields and f.name not in d:
+                    d[f.name] = getattr(gmm_config, f.name)
 
         return cls(**d)
 
@@ -1025,7 +1040,7 @@ def run_model_training(
     np.save(output_dir / "train_record_ids.npy", train_record_ids)
     np.save(output_dir / "train_events.npy", train_events)
     np.save(output_dir / "train_sites.npy", train_sites)
-    if val_events is not None:
+    if val_record_ids is not None:
         np.save(output_dir / "val_record_ids.npy", val_record_ids)
         np.save(output_dir / "val_events.npy", val_events)
         np.save(output_dir / "val_sites.npy", val_sites)
@@ -1640,3 +1655,61 @@ def load_config(config_ffp: Path) -> GMMRunConfig | LocAdjRunConfig:
         pass
 
     raise ValueError("Invalid configuration file")
+
+
+def run_full_training(
+    run_config: GMMRunConfig | LocAdjRunConfig,
+    n_sites: int | None = None,
+    id_suffix: str | None = None,
+):
+    """Runs training with all available data (except test events)"""
+    id_suffix = f"_{id_suffix}" if id_suffix is not None else ""
+    (
+        out_dir := run_config.results_dir
+        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
+    ).mkdir(parents=False, exist_ok=False)
+
+    log_ffp = out_dir / "nn_train_cv.log"
+    logger = utils.setup_logging(log_ffp, console_level=logging.DEBUG)
+    print("Writing logs to:", log_ffp)
+
+    # Get event and site data
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+        site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
+
+    if run_config.extra_basin_sites:
+        # Take all level 0 sites and level 2 & 3 sites that are in a basin
+        site_df = utils.add_basin_column(site_df)
+        site_df = site_df.loc[
+            (site_df.grid_level == 0)
+            | ((site_df["basin"] != "NiB") & (site_df.grid_level == 2))
+        ]
+
+    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
+        str
+    )
+
+    # Drop test events
+    events = events[~np.isin(events, run_config.test_events)]
+    event_df = event_df.loc[event_df.event_id.isin(events)]
+
+    np.random.seed(run_config.seed)
+
+    # Only use a subset of sites for debugging
+    if n_sites is not None:
+        sites = np.random.choice(sites, size=n_sites, replace=False)
+
+    start = time.time()
+    run_model_training(
+        output_dir=out_dir,
+        run_config=run_config,
+        event_df=event_df,
+        site_df=site_df,
+        train_events=events,
+        train_sites=sites,
+        save_train_results=False,
+    )
+    logger.info(
+        f"Took: {(time.time() - start) / 60} minutes to complete model training."
+    )

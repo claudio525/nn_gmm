@@ -71,11 +71,12 @@ def train_cv(
         f"Took: {(time.time() - start) / 60} minutes to complete CV model training."
     )
 
+
 @app.command("train-loc-adj-cv")
 def train_loc_adj_cv(
     run_config_ffp: Path,
     batch_size: int | None = None,
-    n_epochs: int | None = None,   
+    n_epochs: int | None = None,
     id_suffix: str | None = None,
     n_procs: int = 1,
     run_notebook: bool = True,
@@ -114,9 +115,6 @@ def train_loc_adj_cv(
     )
 
 
-
-
-
 @app.command("train-full-gmm")
 def train_full_gmm(
     run_config_ffp: Path,
@@ -135,56 +133,33 @@ def train_full_gmm(
         batch_size=batch_size,
     )
 
-    id_suffix = f"_{id_suffix}" if id_suffix is not None else ""
-    (
-        out_dir := run_config.results_dir
-        / f"{mlt.utils.create_run_id(False)}{id_suffix}"
-    ).mkdir(parents=False, exist_ok=False)
-
-    log_ffp = out_dir / "nn_train_cv.log"
-    logger = nng.utils.setup_logging(log_ffp, console_level=logging.DEBUG)
-    print("Writing logs to:", log_ffp)
-
-    # Get event and site data
-    with nng.DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
-        event_df = imdb.get_event_df()
-        site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
-
-    if run_config.extra_basin_sites:
-        # Take all level 0 sites and level 2 & 3 sites that are in a basin
-        site_df = nng.utils.add_basin_column(site_df)
-        site_df = site_df.loc[
-            (site_df.grid_level == 0)
-            | ((site_df["basin"] != "NiB") & (site_df.grid_level == 2))
-        ]
-
-    events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
-        str
+    nng.nn_gmm.run_full_training(
+        run_config=run_config,
+        n_sites=n_sites,
+        id_suffix=id_suffix,
     )
 
-    # Drop test events
-    events = events[~np.isin(events, run_config.test_events)]
-    event_df = event_df.loc[event_df.event_id.isin(events)]
 
-    np.random.seed(run_config.seed)
-
-    # Only use a subset of sites for debugging
-    if n_sites is not None:
-        sites = np.random.choice(sites, size=n_sites, replace=False)
-
-    start = time.time()
-    nng.nn_gmm.run_model_training(
-        out_dir,
-        run_config,
-        event_df,
-        site_df,
-        events,
-        None,
-        sites,
-        None,
-        save_train_results=False,
+@app.command("train-full-loc-adj-model")
+def train_full_loc_adj_model(
+    run_config_ffp: Path,
+    rel_base_model_dir: Path | None = None,
+    n_epochs: int | None = None,
+    id_suffix: str | None = None,
+    n_sites: int | None = None,
+):
+    """
+    Train location adjustment model
+    using all available data.
+    """
+    run_config = nng.LocAdjRunConfig.from_config_kwargs(
+        config_ffp=run_config_ffp,
+        device=device,
+        n_epochs=n_epochs,
+        rel_base_model_dir=rel_base_model_dir,
     )
-    logger.info(f"Took: {(time.time() - start) / 60} minutes to complete model training.")
+
+    nng.nn_gmm.run_full_training(run_config, id_suffix=id_suffix, n_sites=n_sites)
 
 
 @app.command("run-mera")
@@ -214,12 +189,12 @@ def obs_fine_tune_cv_nn(results_dir: Path, config_ffp: Path, suffix: str = None)
 
 
 @app.command("run-hp-opt")
-def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int):
+def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_procs: int = 1):
     """Run hyperparameter optimization using Optuna."""
     hp_config = nng.nn_hp_opt.HPOptConfig.from_config(
         hp_config_ffp, base_run_config_ffp, device
     )
-    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials)
+    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials, n_procs=n_procs)
 
 
 @app.command("continue-hp-opt")

@@ -7,6 +7,7 @@ import torch
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from pygmt_helper import plotting
 from qcore import nhm, coordinates
@@ -21,6 +22,7 @@ from . import loc_pre
 
 
 logger = logging.getLogger(__name__)
+
 
 class SpatialPlot:
 
@@ -388,6 +390,35 @@ def site_bias_res_std(
     site_res_std["lon"] = site_df.loc[site_res_std.index, "lon"].values
     site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
 
+    # Site residual histogram
+    for cur_im in ims:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.hist(site_bias[cur_im].values, bins=50, color="blue", edgecolor="black")
+        ax.set_xlim(-0.75, 0.75)
+        ax.set_title(f"{utils.get_nice_im_name(cur_im)}")
+        ax.set_xlabel("Mean Site Residual")
+        ax.set_ylabel("Count")
+
+        ax.text(
+            0.025,
+            0.95,
+            f"Mean: {np.mean(site_bias[cur_im].values):.2f},\nStd: {np.std(site_bias[cur_im].values):.2f}",
+            transform=ax.transAxes,
+            horizontalalignment="left",
+            verticalalignment="center",
+        )
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        fig.tight_layout()
+        plt.savefig(output_dir / f"site_residual_hist_{cur_im}.png")
+        plt.close(fig)
+
+        mlt.utils.write_to_yaml(
+            dict(im=cur_im, type="site-residual-histogram"),
+            output_dir / f"site_residual_hist_{cur_im}.yaml",
+            clobber=True,
+        )
+
     if n_procs == 1 or len(ims) == 1:
         for im in tqdm(ims):
             _gen_im_bias_res_std_plot(
@@ -594,9 +625,11 @@ def _gen_im_bias_res_std_plot(
         res_std_fig.savefig(
             output_dir / f"{im}_site_res_std.png", dpi=900, anti_alias=True
         )
-        mlt.utils.write_to_yaml(bias_metadata, output_dir / f"{im}_site_bias.yaml")
         mlt.utils.write_to_yaml(
-            res_std_metadata, output_dir / f"{im}_site_res_std.yaml"
+            bias_metadata, output_dir / f"{im}_site_bias.yaml", clobber=True
+        )
+        mlt.utils.write_to_yaml(
+            res_std_metadata, output_dir / f"{im}_site_res_std.yaml", clobber=True
         )
     else:
         return bias_fig, res_std_fig
@@ -661,7 +694,12 @@ def record_event_distribution_map(
 
 
 def nn_gmm_full_ratio_map(
-    model_dir_1: Path, model_dir_2: Path, output_dir: Path, device: str, n_procs: int = 1, plot_model_predictions: bool = False
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+    device: str,
+    n_procs: int = 1,
+    plot_model_predictions: bool = False,
 ):
     """
     Generates ratio plots of two full NN-GMM models for
@@ -750,7 +788,7 @@ def nn_gmm_full_ratio_map(
                     output_dir=output_dir,
                     im=im,
                     prefix=prefix,
-                    plot_model_predictions=plot_model_predictions
+                    plot_model_predictions=plot_model_predictions,
                 )
         else:
             ctx = mp.get_context("spawn")
@@ -758,7 +796,14 @@ def nn_gmm_full_ratio_map(
                 pool.starmap(
                     _gen_nn_gmm_full_ratio_map,
                     [
-                        (model_1_preds, model_2_preds, output_dir, im, prefix, plot_model_predictions)
+                        (
+                            model_1_preds,
+                            model_2_preds,
+                            output_dir,
+                            im,
+                            prefix,
+                            plot_model_predictions,
+                        )
                         for im in constants.PLOT_IMS
                     ],
                 )
@@ -770,10 +815,10 @@ def _gen_nn_gmm_full_ratio_map(
     output_dir: Path,
     im: str,
     prefix: str,
-    plot_model_predictions: bool
+    plot_model_predictions: bool,
 ):
     res_df = pd.DataFrame(
-        data=model_2_preds[f"{im}_pred"].values - model_1_preds[f"{im}_pred"].values,
+        data=model_1_preds[f"{im}_pred"].values - model_2_preds[f"{im}_pred"].values,
         columns=["residual"],
     )
     res_df[["lon", "lat"]] = model_2_preds[["lon", "lat"]]
@@ -783,34 +828,56 @@ def _gen_nn_gmm_full_ratio_map(
         .plot_ratio(
             res_df,
             "residual",
-            cmap_limits=(-1.0, 1.0, 2.0 / 16),
+            cmap_limits=(-1.5, 1.5, 3.0 / 15.0),
             continuous_cmap=True,
-            cb_label=f"{utils.get_nice_im_name(im)} Ratio",
+            cb_label=f"NoLocModel - LocModel, {utils.get_nice_im_name(im)} Ratio",
         )
         .plot_basin_boundaries(pen="0.15p,black")
     )
     spatial_plot.save(
         output_dir / f"{prefix}_{utils.get_im_filename(im)}_full_ratio.png"
     )
+    mlt.utils.write_to_yaml(
+        dict(type="full-scenario-model-ratio", im=im, prefix=prefix),
+        output_dir / f"{prefix}_{utils.get_im_filename(im)}_full_ratio.yaml",
+        clobber=True,
+    )
 
     if plot_model_predictions:
-        model_1_plot = SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False).plot_im_values(
-            model_1_preds,
-            im,
-            grid_spacing="500e/500e",
-            cb_label=f"{utils.get_nice_im_name(im)} (Model 1)",
-        ).plot_basin_boundaries(pen="0.15p,black")
+        model_1_plot = (
+            SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False)
+            .plot_im_values(
+                model_1_preds,
+                im,
+                grid_spacing="500e/500e",
+                cb_label=f"{utils.get_nice_im_name(im)} (Model 1)",
+            )
+            .plot_basin_boundaries(pen="0.15p,black")
+        )
         model_1_plot.save(
             output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_1_pred.png"
         )
+        mlt.utils.write_to_yaml(
+            dict(type="full-scenario-noLocModel-prediction", im=im, prefix=prefix),
+            output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_1_pred.yaml",
+            clobber=True,
+        )
 
-        model_2_plot = SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False).plot_im_values(
-            model_2_preds,
-            im,
-            grid_spacing="500e/500e",
-            cb_label=f"{utils.get_nice_im_name(im)} (Model 2)",
-        ).plot_basin_boundaries(pen="0.15p,black")
+        model_2_plot = (
+            SpatialPlot(plot_topo=False, plot_roads=False, plot_highways=False)
+            .plot_im_values(
+                model_2_preds,
+                im,
+                grid_spacing="500e/500e",
+                cb_label=f"{utils.get_nice_im_name(im)} (Model 2)",
+            )
+            .plot_basin_boundaries(pen="0.15p,black")
+        )
         model_2_plot.save(
             output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_2_pred.png"
         )
-            
+        mlt.utils.write_to_yaml(
+            dict(type="full-scenario-locModel-prediction", im=im, prefix=prefix),
+            output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_2_pred.yaml",
+            clobber=True,
+        )

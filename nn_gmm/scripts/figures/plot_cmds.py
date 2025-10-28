@@ -37,7 +37,6 @@ def nn_site_bias_res_std(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
     )
 
-
 @app.command("nn-gmm-full-ratio-map")
 def nn_gmm_full_ratio_map(
     model_dir_1: Path,
