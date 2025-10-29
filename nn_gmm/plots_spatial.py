@@ -19,6 +19,7 @@ from .empdb import EmpiricalDB
 from . import constants
 from . import utils
 from . import loc_pre
+from . import analysis
 
 
 logger = logging.getLogger(__name__)
@@ -279,26 +280,18 @@ def nn_site_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using NN-GMM results for specified IMs.
     """
-    run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
-    pred_df = pd.read_parquet(nn_dir / "val_results.parquet").sort_index()
-    record_int_ids = pred_df.index.values.astype(int)
+    res_df, *_ = analysis.get_nn_sim_residuals(nn_dir)    
 
+    run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
     logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
-        record_info_df = imdb.get_record_info_df(record_int_ids=pred_df.index.values)
-        sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
-
-    pred_df["site_int_id"] = record_info_df.loc[pred_df.index].site_int_id.values
-    assert pred_df.index.equals(sim_df.index)
 
     logging.info(f"Generating site bias and residual std plots for IMs: {ims}")
     site_bias_res_std(
-        pred_df,
-        sim_df,
+        res_df,
         site_df,
         ims,
-        "_pred",
         n_procs=n_procs,
         output_dir=output_dir,
         grid_spacing=grid_spacing,
@@ -350,11 +343,9 @@ def emp_gmm_bias_res_std(
 
 
 def site_bias_res_std(
-    pred_df: pd.DataFrame,
-    sim_df: pd.DataFrame,
+    res_df: pd.DataFrame,
     site_df: pd.DataFrame,
     ims: list[str],
-    pred_column_suffix: str,
     n_procs: int = 1,
     output_dir: Path = None,
     grid_spacing: str = "500e/500e",
@@ -363,67 +354,19 @@ def site_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using the given prediction and simulation data.
     """
-    assert pred_df.index.equals(
-        sim_df.index
-    ), "Prediction DataFrame and Simulation DataFrame must have the same index"
     assert (
-        "site_int_id" in pred_df.columns
-    ), "Prediction DataFrame must contain 'site_int_id' column"
-    assert all([cur_im in sim_df.columns for cur_im in ims]), "Unsupported IM"
+        "site_int_id" in res_df.columns
+    ), "Residual DataFrame must contain 'site_int_id' column"
+    assert all([cur_im in res_df.columns for cur_im in ims]), "Unsupported IM"
 
-    # Compute residuals
-    pred_keys = [f"{cur_im}{pred_column_suffix}" for cur_im in ims]
-    res_df = pd.DataFrame(
-        data=np.log(sim_df[ims].values) - pred_df[pred_keys].values,
-        index=pred_df.index,
-        columns=ims,
-    )
-
-    # Site bias
-    res_df["site_int_id"] = pred_df["site_int_id"].values
-    site_bias = res_df.groupby("site_int_id").mean()
-    site_bias["lon"] = site_df.loc[site_bias.index, "lon"].values
-    site_bias["lat"] = site_df.loc[site_bias.index, "lat"].values
-
-    # Site residual standard deviation
-    site_res_std = res_df.groupby("site_int_id").std()
-    site_res_std["lon"] = site_df.loc[site_res_std.index, "lon"].values
-    site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
-
-    # Site residual histogram
-    for cur_im in ims:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.hist(site_bias[cur_im].values, bins=50, color="blue", edgecolor="black")
-        ax.set_xlim(-0.75, 0.75)
-        ax.set_title(f"{utils.get_nice_im_name(cur_im)}")
-        ax.set_xlabel("Mean Site Residual")
-        ax.set_ylabel("Count")
-
-        ax.text(
-            0.025,
-            0.95,
-            f"Mean: {np.mean(site_bias[cur_im].values):.2f},\nStd: {np.std(site_bias[cur_im].values):.2f}",
-            transform=ax.transAxes,
-            horizontalalignment="left",
-            verticalalignment="center",
-        )
-        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-
-        fig.tight_layout()
-        plt.savefig(output_dir / f"site_residual_hist_{cur_im}.png")
-        plt.close(fig)
-
-        mlt.utils.write_to_yaml(
-            dict(im=cur_im, type="site-residual-histogram"),
-            output_dir / f"site_residual_hist_{cur_im}.yaml",
-            clobber=True,
-        )
+    # res_df["site_int_id"] = pred_df["site_int_id"].values
+    site_bias, site_res_std = analysis.get_site_bias_std(res_df, site_df)
 
     if n_procs == 1 or len(ims) == 1:
         for im in tqdm(ims):
             _gen_im_bias_res_std_plot(
                 site_df,
-                pred_df.site_int_id,
+                res_df.site_int_id,
                 site_bias,
                 site_res_std,
                 im,
@@ -439,7 +382,7 @@ def site_bias_res_std(
                 [
                     (
                         site_df,
-                        pred_df.site_int_id,
+                        res_df.site_int_id,
                         site_bias,
                         site_res_std,
                         im,

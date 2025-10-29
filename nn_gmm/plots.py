@@ -15,6 +15,7 @@ from . import analysis
 from . import constants
 from . import data
 from . import plot_utils
+from . import utils
 
 
 logger = logging.getLogger(__name__)
@@ -515,7 +516,9 @@ class BiasStdPlot:
             axis=0
         )
 
-        cv_bias_std = res_df.groupby("cv_iter", observed=True)[self.ims].mean().std(axis=0)
+        cv_bias_std = (
+            res_df.groupby("cv_iter", observed=True)[self.ims].mean().std(axis=0)
+        )
         self.ax1.fill_between(
             constants.PSA_PERIODS,
             model_bias[constants.PSA_KEYS].values
@@ -525,7 +528,9 @@ class BiasStdPlot:
             **plt_kwargs,
         )
 
-        cv_res_std_std = res_df.groupby("cv_iter", observed=True)[self.ims].std().std(axis=0)
+        cv_res_std_std = (
+            res_df.groupby("cv_iter", observed=True)[self.ims].std().std(axis=0)
+        )
         self.ax3.fill_between(
             constants.PSA_PERIODS,
             res_std[constants.PSA_KEYS].values
@@ -703,3 +708,109 @@ class GroupedBiasStdPlot(BiasStdPlot):
             )
 
         return self
+
+
+def site_bias_histogram_comparison(
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+    ims: list[str] = constants.PLOT_IMS,
+    n_bins: int = 50,
+):
+    """
+    Creates histogram comparison plots of
+    site bias between two NN-GMM models.
+    """
+    ims = ims or constants.PLOT_IMS
+
+    res_df_1, *_ = analysis.get_nn_sim_residuals(model_dir_1)
+    res_df_2, *_ = analysis.get_nn_sim_residuals(model_dir_2)
+
+    with data.DuckIMDB(
+        nn_gmm.load_config(model_dir_1 / "run_config.yaml").imdb_ffp, readonly=True
+    ) as imdb:
+        site_df = imdb.get_site_df()
+
+    site_bias_1, _ = analysis.get_site_bias_std(res_df_1, site_df)
+    site_bias_2, _ = analysis.get_site_bias_std(res_df_2, site_df)
+
+    bins = np.linspace(-0.75, 0.75, n_bins + 1)
+
+    for im in ims:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.hist(
+            site_bias_1[im],
+            bins=bins,
+            color="b",
+            alpha=0.5,
+            label=f"{model_dir_1.name}, Mean={site_bias_1[im].mean():.3f}, Std={site_bias_1[im].std():.3f}",
+            edgecolor="k",
+        )
+        ax.hist(
+            site_bias_2[im],
+            bins=bins,
+            color="r",
+            alpha=0.5,
+            label=f"{model_dir_2.name}, Mean={site_bias_2[im].mean():.3f}, Std={site_bias_2[im].std():.3f}",
+            edgecolor="k",
+        )
+        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+
+        ax.set_xlabel("Site Bias")
+        ax.set_ylabel("Count")
+        ax.set_title(f"{utils.get_nice_im_name(im)}")
+        ax.legend()
+
+        fig.tight_layout()
+        fig.savefig(output_dir / f"site_bias_comparison_{im}.png")
+        plt.close(fig)
+
+        mlt.utils.write_to_yaml(
+            dict(
+                type="site_bias_comparison",
+                model_dir_1=model_dir_1.name,
+                model_dir_2=model_dir_2.name,
+                im=im,
+            ),
+            output_dir / f"site_bias_comparison_{im}.yaml",
+        )
+
+
+def site_bias_res_std_comparison(
+    model_dirs: list[Path], output_dir: Path
+):
+    fig, ax1, ax2, ax3, ax4 = plot_utils.get_bias_residual_fig(
+        figsize=(16, 6),
+        bias_y_axis_limits=(-0.05, 0.05),
+        std_y_axis_limits=(0, 0.20),
+        bias_y_label="Mean Site Bias",
+        std_y_label="Site Bias Standard Deviation",
+    )
+
+    site_df = None
+    for model_dir in model_dirs:
+        if site_df is None:
+            with data.DuckIMDB(
+                nn_gmm.load_config(model_dir / "run_config.yaml").imdb_ffp,
+                readonly=True,
+            ) as imdb:
+                site_df = imdb.get_site_df()
+
+        res_df, *_ = analysis.get_nn_sim_residuals(model_dir)
+        site_bias, _ = analysis.get_site_bias_std(res_df, site_df)
+
+        ax1.plot(
+            constants.PSA_PERIODS,
+            np.mean(site_bias[constants.PSA_KEYS].values, axis=0),
+            label=model_dir.name,
+        )
+        ax3.plot(
+            constants.PSA_PERIODS,
+            np.std(site_bias[constants.PSA_KEYS].values, axis=0),
+            label=model_dir.name,
+        )
+
+    ax1.legend()
+    fig.savefig(output_dir / "site_bias_res_std_comparison.png")
+    plt.close(fig)
+

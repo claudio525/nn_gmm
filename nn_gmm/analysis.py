@@ -12,6 +12,24 @@ from . import nn_gmm
 
 logger = logging.getLogger(__name__)
 
+def get_site_bias_std(
+    res_df: pd.DataFrame,
+    site_df: pd.DataFrame):
+    """
+    Get the site bias and residual standard deviation 
+    for the given residuals.
+    """
+    # Site bias
+    site_bias = res_df.groupby("site_int_id").mean()
+    site_bias["lon"] = site_df.loc[site_bias.index, "lon"].values
+    site_bias["lat"] = site_df.loc[site_bias.index, "lat"].values
+
+    # Site residual standard deviation
+    site_res_std = res_df.groupby("site_int_id").std()
+    site_res_std["lon"] = site_df.loc[site_res_std.index, "lon"].values
+    site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
+
+    return site_bias, site_res_std
 
 def get_nn_sim_residuals(
     model_dir: Path,

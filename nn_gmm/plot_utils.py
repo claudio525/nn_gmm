@@ -94,6 +94,8 @@ def get_bias_residual_fig(
     sub_wspace: float = 0.03,
     bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
+    bias_y_label: str = "Model bias",
+    std_y_label: str = "Residual standard deviation"
 ):
     """
     Create a figure a bias and residual plots for
@@ -118,6 +120,14 @@ def get_bias_residual_fig(
         Space between the subplots.
         I.e. space between ax1 and ax2
         and between ax3 and ax4
+    bias_y_axis_limits : tuple of float, optional
+        Y-axis limits for the bias plots.
+    std_y_axis_limits : tuple of float, optional
+        Y-axis limits for the residual standard deviation plots.
+    bias_y_label : str, optional
+        Y-axis label for the bias plots.
+    std_y_label : str, optional
+        Y-axis label for the residual standard deviation plots.
 
     Returns
     -------
@@ -142,7 +152,7 @@ def get_bias_residual_fig(
 
     ax1 = fig.add_subplot(grid_bias[0])
     ax1.set_xlabel("Vibration Period, T(s)")
-    ax1.set_ylabel("Model bias")
+    ax1.set_ylabel(bias_y_label)
     ax1.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax1.set_xscale("log")
     ax1.axhline(0, color="black", zorder=0)
@@ -181,7 +191,7 @@ def get_bias_residual_fig(
 
     ax3 = fig.add_subplot(grid_residual[0])
     ax3.set_xlabel("Vibration Period, T(s)")
-    ax3.set_ylabel("Residual standard deviation")
+    ax3.set_ylabel(std_y_label)
     ax3.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax3.set_xscale("log")
     ax3.set_ylim(*std_y_axis_limits)

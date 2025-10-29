@@ -156,5 +156,39 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
     spatial_plot.save(output_ffp)
 
 
+@app.command("nn-gmm-compare-site-bias-histogram")
+def nn_gmm_compare_site_bias_histogram(
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+    ims: list[str] | None = None,
+):
+    """
+    Generate site bias histograms comparing two NN-GMM models
+    for specified IMs.
+
+    Model 1 is plotted at the back.
+    """
+    nng.utils.setup_logging()
+    nng.plots.site_bias_histogram_comparison(
+        model_dir_1,
+        model_dir_2,
+        output_dir,
+        ims=ims,
+    )
+
+@app.command("nn-gmm-compare-site-bias-res-std")
+def nn_gmm_compare_site_bias_res_std(
+    model_dirs: list[Path],
+    output_dir: Path,
+):
+    """
+    Generates a mean site bias and std site bias plot vs pSA period.
+    Each model is plotted as a separate line.
+    """
+    nng.utils.setup_logging()
+    nng.plots.site_bias_res_std_comparison(model_dirs, output_dir)
+    
+
 if __name__ == "__main__":
     app()
