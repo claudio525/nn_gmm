@@ -95,7 +95,8 @@ def get_bias_residual_fig(
     bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
     bias_y_label: str = "Model bias",
-    std_y_label: str = "Residual standard deviation"
+    std_y_label: str = "Residual standard deviation",
+    dpi: int = None
 ):
     """
     Create a figure a bias and residual plots for
@@ -142,7 +143,7 @@ def get_bias_residual_fig(
     ax4 : matplotlib.axes.Axes
         Axis for the non-pSA residual standard deviation plot.
     """
-    fig = plt.figure(figsize=figsize)
+    fig = plt.figure(figsize=figsize, dpi=dpi)
 
     main_grid = gridspec.GridSpec(1, 2, figure=fig, wspace=main_wspace)
 

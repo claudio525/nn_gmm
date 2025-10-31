@@ -716,6 +716,7 @@ def site_bias_histogram_comparison(
     output_dir: Path,
     ims: list[str] = constants.PLOT_IMS,
     n_bins: int = 50,
+    dpi: int = 100
 ):
     """
     Creates histogram comparison plots of
@@ -737,7 +738,7 @@ def site_bias_histogram_comparison(
     bins = np.linspace(-0.75, 0.75, n_bins + 1)
 
     for im in ims:
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=dpi)
         ax.hist(
             site_bias_1[im],
             bins=bins,
@@ -777,7 +778,7 @@ def site_bias_histogram_comparison(
 
 
 def site_bias_res_std_comparison(
-    model_dirs: list[Path], output_dir: Path
+    model_dirs: list[Path], output_dir: Path, dpi: int = 100
 ):
     fig, ax1, ax2, ax3, ax4 = plot_utils.get_bias_residual_fig(
         figsize=(16, 6),
@@ -785,6 +786,7 @@ def site_bias_res_std_comparison(
         std_y_axis_limits=(0, 0.20),
         bias_y_label="Mean Site Bias",
         std_y_label="Site Bias Standard Deviation",
+        dpi=dpi,
     )
 
     site_df = None

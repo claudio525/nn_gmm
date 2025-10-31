@@ -22,8 +22,8 @@ app = typer.Typer()
 @app.command("create-imdb")
 def create_imdb(
     db_ffp: Path = typer.Argument(..., help="Path to the database file"),
-    im_data_dir: Path = typer.Argument(
-        ..., help="Path to the Cybershake IM data directory"
+    im_data_loc: Path = typer.Argument(
+        ..., help="Path to the Cybershake IM data. Either directory of IM event directories, or IM data pickle file."
     ),
     source_info_dir: Path = typer.Argument(
         ..., help="Path to the Cybershake source info directory"
@@ -100,10 +100,16 @@ def create_imdb(
     with nng.DuckIMDB(db_ffp) as db:
         db.add_site_data(site_df)
 
+    im_data_arrays = None
+    if im_data_loc.is_file() and im_data_loc.suffix == ".pkl":
+        im_data_arrays = pd.read_pickle(im_data_loc)
+        im_events = np.sort(list(im_data_arrays.keys()))
+    else:
+        im_events = np.sort(
+            [cur_dir.stem for cur_dir in im_data_loc.iterdir() if cur_dir.is_dir()]
+        )
+
     # Get events (and sanity check)
-    im_events = np.sort(
-        [cur_dir.stem for cur_dir in im_data_dir.iterdir() if cur_dir.is_dir()]
-    )
     source_events = np.sort(
         [cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()]
     )
@@ -186,32 +192,52 @@ def create_imdb(
         # Add IM data
         im_data = []
         logging.info("Adding IM data to the database...")
-        for i, cur_event in tqdm(enumerate(events), desc="Processing events"):
+        for i, cur_event in enumerate(tqdm(events, desc="Processing events")):
             # Read the IM data
-            im_files = list((im_data_dir / cur_event / "IM").rglob("*REL*.csv"))
-            rel_im_dfs = []
-            for cur_rel_ffp in im_files:
-                cur_rel_id = (
-                    f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
-                )
-
-                if cur_rel_id not in rel_df.index:
-                    logging.warning(
-                        f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
+            if im_data_arrays is not None:
+                rel_im_dfs = []
+                for cur_rel in im_data_arrays[cur_event].realisation.values:
+                    cur_rel_id = (
+                        f"{cur_event}_{cur_rel}"
                     )
-                    continue
 
-                cur_im_df = pd.read_csv(cur_rel_ffp, index_col=0)[nng.constants.IMS]
-                cur_im_df["site_id"] = cur_im_df.index
-                cur_im_df["event_id"] = cur_event
-                cur_im_df["rel_id"] = cur_rel_id
-                cur_im_df.index = mlt.array_utils.numpy_str_join(
-                    "_", cur_rel_id, cur_im_df.index.values.astype(str)
-                )
+                    if cur_rel_id not in rel_df.index:
+                        logging.warning(
+                            f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
+                        )
+                        continue
 
-                rel_im_dfs.append(cur_im_df)
+                    cur_im_df = im_data_arrays[cur_event].sel(realisation=cur_rel).to_pandas()
+                    cur_im_df["site_id"] = cur_im_df.index
+                    cur_im_df["event_id"] = cur_event
+                    cur_im_df["rel_id"] = cur_rel_id
+
+                    rel_im_dfs.append(cur_im_df)
+            else:
+                im_files = list((im_data_loc / cur_event / "IM").rglob("*REL*.csv"))
+                rel_im_dfs = []
+                for cur_rel_ffp in im_files:
+                    cur_rel_id = (
+                        f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
+                    )
+
+                    if cur_rel_id not in rel_df.index:
+                        logging.warning(
+                            f"Realisation {cur_rel_id} not found in source data, but exists in IM data. Skipping!"
+                        )
+                        continue
+
+                    cur_im_df = pd.read_csv(cur_rel_ffp, index_col=0)[nng.constants.IMS]
+                    cur_im_df["site_id"] = cur_im_df.index
+                    cur_im_df["event_id"] = cur_event
+                    cur_im_df["rel_id"] = cur_rel_id
+
+                    rel_im_dfs.append(cur_im_df)
 
             im_df = pd.concat(rel_im_dfs, axis=0)
+            im_df.index = mlt.array_utils.numpy_str_join(
+                "_", im_df.rel_id.values.astype(str), im_df.site_id.values.astype(str)
+            )
             im_data.append(im_df)
 
             if len(im_data) >= 50 or i == (len(events) - 1):

@@ -280,7 +280,7 @@ def nn_site_bias_res_std(
     Generate site bias and site residual standard deviation plots
     using NN-GMM results for specified IMs.
     """
-    res_df, *_ = analysis.get_nn_sim_residuals(nn_dir)    
+    res_df, *_ = analysis.get_nn_sim_residuals(nn_dir)
 
     run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
     logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
@@ -394,6 +394,66 @@ def site_bias_res_std(
                 ],
             )
 
+
+def nn_site_term_map(
+    nn_dir: Path,
+    ims: list[str],
+    output_dir: Path = None,
+    n_procs: int = 1,
+    grid_spacing: str = "500e/500e",
+):
+    """
+    Generate site term maps using NN-GMM results for specified IMs.
+    I.e. map of delta_S2S
+    """
+    site_terms_ffp = nn_dir / "mera_site_term/site_res_df.parquet"
+    if not site_terms_ffp.exists():
+        raise FileNotFoundError(
+            f"Site terms file not found: {site_terms_ffp}. "
+            "Please run MERA analysis with site terms first."
+        )
+
+    run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
+    logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df()
+
+    site_res_df = pd.read_parquet(site_terms_ffp)
+    site_res_df = site_res_df.join(site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left")
+
+    if n_procs == 1:
+        for cur_im in ims:
+            _gen_im_site_term_map(site_res_df, cur_im, grid_spacing, output_dir)
+    else:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(processes=n_procs) as pool:
+            pool.starmap(
+                _gen_im_site_term_map,
+                [
+                    (site_res_df, im, grid_spacing, output_dir)
+                    for im in ims
+                ],
+            )
+
+def _gen_im_site_term_map(site_res_df: pd.DataFrame, im: str, grid_spacing: str, output_dir: Path):
+    spatial_plot = SpatialPlot()
+
+    spatial_plot.plot_ratio(
+        site_res_df,
+        im,
+        grid_spacing=grid_spacing,
+        cmap_limits=(-0.5, 0.5, 1.0 / 16),
+        cb_label=f"{utils.get_nice_im_name(im)} Site Term",
+    )
+
+    spatial_plot.plot_basin_boundaries().plot_sites(site_res_df, style="p0.015c")
+    spatial_plot.save(output_dir / f"nn_site_term_map_{im}.png")
+
+    mlt.utils.write_to_yaml(
+        dict(type="nn-site-term-map", im=im),
+        output_dir / f"nn_site_term_map_{im}.yaml",
+        clobber=True,
+    )
 
 def _gen_im_bias_res_std_plot(
     site_df: pd.DataFrame,

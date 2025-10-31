@@ -37,6 +37,24 @@ def nn_site_bias_res_std(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
     )
 
+@app.command("nn-site-term-map")
+def nn_site_term_map(
+    nn_dir: Path,
+    ims: list[str],
+    output_dir: Path,
+    n_procs: int = 1,
+    grid_spacing: str = "100e/100e",
+):
+    """
+    Generate site term maps using NN-GMM CV results for specified IMs.
+    I.e. map of delta_S2S
+    """
+    nng.utils.setup_logging()
+    nng.plots_spatial.nn_site_term_map(
+        nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
+    )
+
+
 @app.command("nn-gmm-full-ratio-map")
 def nn_gmm_full_ratio_map(
     model_dir_1: Path,
@@ -175,6 +193,7 @@ def nn_gmm_compare_site_bias_histogram(
         model_dir_2,
         output_dir,
         ims=ims,
+        dpi=300
     )
 
 @app.command("nn-gmm-compare-site-bias-res-std")
@@ -187,7 +206,7 @@ def nn_gmm_compare_site_bias_res_std(
     Each model is plotted as a separate line.
     """
     nng.utils.setup_logging()
-    nng.plots.site_bias_res_std_comparison(model_dirs, output_dir)
+    nng.plots.site_bias_res_std_comparison(model_dirs, output_dir, dpi=300)
     
 
 if __name__ == "__main__":

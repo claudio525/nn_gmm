@@ -1,9 +1,13 @@
+import multiprocessing as mp
 import time
 import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+import rpy2.robjects.conversion as cv
+from pymer4.models import Lmer
 
 from . import constants
 from .empdb import DuckEmpiricalDB
@@ -12,11 +16,10 @@ from . import nn_gmm
 
 logger = logging.getLogger(__name__)
 
-def get_site_bias_std(
-    res_df: pd.DataFrame,
-    site_df: pd.DataFrame):
+
+def get_site_bias_std(res_df: pd.DataFrame, site_df: pd.DataFrame):
     """
-    Get the site bias and residual standard deviation 
+    Get the site bias and residual standard deviation
     for the given residuals.
     """
     # Site bias
@@ -30,6 +33,7 @@ def get_site_bias_std(
     site_res_std["lat"] = site_df.loc[site_res_std.index, "lat"].values
 
     return site_bias, site_res_std
+
 
 def get_nn_sim_residuals(
     model_dir: Path,
@@ -47,18 +51,16 @@ def get_nn_sim_residuals(
     pred_df = pred_df.sort_index()
     val_record_int_ids = pred_df.index.values.astype(int)
 
-    assert record_info_df is None or np.all(val_record_int_ids == record_info_df.index.values)
+    assert record_info_df is None or np.all(
+        val_record_int_ids == record_info_df.index.values
+    )
     assert sim_df is None or np.all(val_record_int_ids == sim_df.index.values)
 
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         if sim_df is None:
-            sim_df = imdb.get_im_data(
-                run_config.ims, val_record_int_ids
-            )
+            sim_df = imdb.get_im_data(run_config.ims, val_record_int_ids)
         if record_info_df is None:
-            record_info_df = imdb.get_record_info_df(
-                record_int_ids=val_record_int_ids
-            )
+            record_info_df = imdb.get_record_info_df(record_int_ids=val_record_int_ids)
 
     record_info_df = record_info_df.sort_index()
     sim_df = sim_df.sort_index()
@@ -84,8 +86,10 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
     the specified simulation results.
     """
     with DuckEmpiricalDB(empdb_ffp, readonly=True) as empdb:
-        val_emp_df = empdb.get_gm_params_tmp_table(sim_df.index.values.astype(int)).sort_index()
-    assert val_emp_df.index.equals(sim_df.index)    
+        val_emp_df = empdb.get_gm_params_tmp_table(
+            sim_df.index.values.astype(int)
+        ).sort_index()
+    assert val_emp_df.index.equals(sim_df.index)
 
     emp_res_df = pd.DataFrame(
         data=np.log(sim_df[constants.PSA_KEYS].values)
@@ -98,21 +102,26 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
 
 
 def run_nn_mera(
-    result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4
+    result_dir: Path,
+    site_term: bool = False,
+    out_dir: Path = None,
+    n_procs: int = 4,
+    ims: list[str] = None,
 ):
     import mera
+
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
     logging.info("Getting NN residuals")
-    res_df, *_ = get_nn_sim_residuals(result_dir)
+    res_df, _, __, record_info_df = get_nn_sim_residuals(result_dir)
 
-    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
-        record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)
+    # with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+    # record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)
     res_df["rel_id"] = record_info_df.loc[res_df.index, "rel_id"]
     res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]
 
     mask = mera.mask_too_few_records(
-        res_df,
+        res_df[list(run_config.ims) + ["rel_id", "site_id"]],
         "rel_id",
         "site_id",
         min_num_records_per_event=5,
@@ -120,18 +129,89 @@ def run_nn_mera(
     )
 
     logging.info("Running MERA")
+    ims = constants.PLOT_IMS if ims is None else ims
     start = time.time()
-    mera_results = mera.run_mera(
+    event_mera_results = mera.run_mera(
         res_df,
-        # run_config.ims[:4],
-        run_config.ims,
+        ims,
         "rel_id",
         "site_id",
         mask=mask,
+        # compute_site_term=False,
         compute_site_term=site_term,
         n_procs=n_procs,
     )
     logging.info(f"Took: {time.time() - start} to run MERA")
+
+    mera_results = None
+    # if site_term:
+    #     logger.info("Computing site terms")
+    #     start_time = time.time()
+
+    #     # Compute remaining residuals
+    #     event_rem_res_df = event_mera_results.rem_res_df.copy()
+    #     event_rem_res_df["site_id"] = res_df.loc[event_rem_res_df.index, "site_id"]
+
+    #     site_terms = []
+    #     rem_residuals = []
+    #     bias_std_values = []
+    #     if n_procs == 1:
+    #         for im in ims:
+    #             cur_res_df = event_rem_res_df.loc[mask[im], [im, "site_id"]]
+
+    #             cur_rem_res, cur_site_res, cur_std_values = _run_site_mera(
+    #                 cur_res_df, im
+    #             )
+
+    #             site_terms.append(cur_site_res)
+    #             rem_residuals.append(cur_rem_res)
+    #             bias_std_values.append(cur_std_values)
+    #     else:
+    #         with mp.Pool(n_procs) as pool:
+    #             results = pool.starmap(
+    #                 _run_site_mera,
+    #                 [
+    #                     (
+    #                         event_rem_res_df.loc[mask[im], [im, "site_id"]],
+    #                         im,
+    #                     )
+    #                     for im in ims
+    #                 ],
+    #             )
+    #         rem_residuals = [res[0] for res in results]
+    #         site_terms = [res[1] for res in results]
+    #         bias_std_values = [res[2] for res in results]
+
+    #     logger.info(f"Took: {time.time() - start_time} to compute site terms")
+
+    #     rem_res_df = pd.concat(rem_residuals, axis=1)
+    #     rem_res_df["site_id"] = event_rem_res_df.loc[rem_res_df.index, "site_id"]
+    #     rem_res_df["rel_id"] = record_info_df.loc[rem_res_df.index, "rel_id"]
+    #     site_res_df = pd.concat(site_terms, axis=1)
+    #     bias_std_df = pd.concat(bias_std_values, axis=1).T
+
+    #     assert bias_std_df.index.equals(event_mera_results.bias_std_df.index)
+    #     bias_std_df["tau"] = event_mera_results.bias_std_df["tau"]
+    #     bias_std_df["bias_event"] = event_mera_results.bias_std_df["bias"]
+    #     bias_std_df["bias"] = bias_std_df["bias_event"] + bias_std_df["bias_site"]
+    #     bias_std_df["sigma"] = np.sqrt(
+    #         bias_std_df["tau"] ** 2
+    #         + bias_std_df["phi_S2S"] ** 2
+    #         + bias_std_df["phi_w"] ** 2
+    #     )
+
+    #     mera_results = mera.MeraResults(
+    #         event_mera_results.event_res_df,
+    #         None,
+    #         rem_res_df,
+    #         bias_std_df,
+    #         None,
+    #         site_res_df,
+    #         None,
+    #     )
+    
+    if mera_results is None:
+        mera_results = event_mera_results
 
     out_dir = (
         result_dir / f"mera{'_site_term' if site_term else ''}"
@@ -141,6 +221,25 @@ def run_nn_mera(
     out_dir.mkdir(exist_ok=True)
     mera_results.save_to_parquet(out_dir, save_fit=False)
     logging.info(f"Wrote MERA results to: {out_dir}")
+
+
+def _run_site_mera(res_df: pd.DataFrame, im: str):
+    site_model = Lmer(f"{im} ~ 1 + (1|site_id)", data=res_df)
+    site_model.fit(summary=False)
+
+    site_res = site_model.ranef.iloc[:, 0].rename(im)
+    rem_res = pd.Series(index=res_df.index, data=site_model.residuals, name=im)
+    bias_std_values = pd.Series(
+        index=["bias_site","phi_S2S", "phi_w"],
+        data=[
+            site_model.coefs.iloc[0, 0],
+            site_model.ranef_var.loc["site_id", "Std"],
+            site_model.ranef_var.loc["Residual", "Std"],
+        ],
+        name=im,
+    )
+
+    return rem_res, site_res, bias_std_values
 
 
 def get_mag_input_df(
