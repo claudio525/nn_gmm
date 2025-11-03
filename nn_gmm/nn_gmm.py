@@ -1042,8 +1042,10 @@ def run_model_training(
     np.save(output_dir / "train_sites.npy", train_sites)
     if val_record_ids is not None:
         np.save(output_dir / "val_record_ids.npy", val_record_ids)
-        np.save(output_dir / "val_events.npy", val_events)
-        np.save(output_dir / "val_sites.npy", val_sites)
+        if val_events is not None:
+            np.save(output_dir / "val_events.npy", val_events)
+        if val_sites is not None:
+            np.save(output_dir / "val_sites.npy", val_sites)
 
     torch.save(model, output_dir / "model.pt")
 

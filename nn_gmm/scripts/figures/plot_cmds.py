@@ -134,7 +134,7 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
     Generate map showing site locations and their site-fold they belong to
     for the given CV results.
     """
-    nng.utils.setup_logging()
+    logger = nng.utils.setup_logging()
     run_config = nng.nn_gmm.load_config(result_dir / "run_config.yaml")
 
     cv_dirs = [
@@ -148,6 +148,10 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
 
     site_df["site_fold"] = ""
     for cur_dir in cv_dirs:
+        if not (cur_dir / "val_sites.npy").exists():
+            logger.warning(f"No val_sites.npy found in {cur_dir}, skipping...")
+            continue
+
         cur_val_sites = np.load(cur_dir / "val_sites.npy")
         site_df.loc[cur_val_sites, "site_fold"] += f"{cur_dir.name},"
 

@@ -768,7 +768,7 @@ def site_bias_histogram_comparison(
 
         mlt.utils.write_to_yaml(
             dict(
-                type="site_bias_comparison",
+                type="site-bias-comparison",
                 model_dir_1=model_dir_1.name,
                 model_dir_2=model_dir_2.name,
                 im=im,
@@ -815,4 +815,12 @@ def site_bias_res_std_comparison(
     ax1.legend()
     fig.savefig(output_dir / "site_bias_res_std_comparison.png")
     plt.close(fig)
+
+    mlt.utils.write_to_yaml(
+        dict(
+            type="site-bias-res-std-comparison",
+            model_dirs=[d.name for d in model_dirs],
+        ),
+        output_dir / "site_bias_res_std_comparison.yaml",
+    )
 
