@@ -3,18 +3,19 @@ from pathlib import Path
 import torch
 import typer
 import numpy as np
+import pandas as pd
 import matplotlib
 import seaborn as sns
 
 
 import nn_gmm as nng
+import ml_tools as mlt
 
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
 if torch.mps.is_available():
     device = "mps"
-
 print(f"Using device: {device.upper()}")
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
@@ -36,6 +37,7 @@ def nn_site_bias_res_std(
     nng.plots_spatial.nn_site_bias_res_std(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
     )
+
 
 @app.command("nn-site-term-map")
 def nn_site_term_map(
@@ -193,12 +195,9 @@ def nn_gmm_compare_site_bias_histogram(
     """
     nng.utils.setup_logging()
     nng.plots.site_bias_histogram_comparison(
-        model_dir_1,
-        model_dir_2,
-        output_dir,
-        ims=ims,
-        dpi=300
+        model_dir_1, model_dir_2, output_dir, ims=ims, dpi=300
     )
+
 
 @app.command("nn-gmm-compare-site-bias-res-std")
 def nn_gmm_compare_site_bias_res_std(
@@ -211,7 +210,28 @@ def nn_gmm_compare_site_bias_res_std(
     """
     nng.utils.setup_logging()
     nng.plots.site_bias_res_std_comparison(model_dirs, output_dir, dpi=300)
-    
+
+
+@app.command("mera-basin-site-term")
+def mera_basin_site_term(
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+):
+    """
+    Generates periods vs basin site term comparison plot
+    using MERA results for two models.
+    """
+    nng.utils.setup_logging()
+    nng.plots.mera_basin_site_term_comparison(
+        model_dir_1,
+        model_dir_2,
+        output_dir,
+    )
+
+
+
+
 
 if __name__ == "__main__":
     app()

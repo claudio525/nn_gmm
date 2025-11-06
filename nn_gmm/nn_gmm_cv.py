@@ -41,7 +41,7 @@ def train_cv(
         site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
 
     if run_config.extra_basin_sites:
-        # Take all level 0 sites and level 2 & 3 sites that are in a basin
+        # Take all level 0 sites and level 2 sites that are in a basin
         site_df = utils.add_basin_column(site_df)
         site_df = site_df.loc[
             (site_df.grid_level == 0)
@@ -398,8 +398,11 @@ def _run_postprocessing(
     # for each CV directory
     if remove_cv_results:
         for cur_cv_dir in out_dirs:
-            (cur_cv_dir / "val_results.parquet").unlink()
+            (cur_cv_dir / "val_results.parquet").unlink(missing_ok=True)
+            (cur_cv_dir / "val_record_ids.npy").unlink(missing_ok=True)
             (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
+            (cur_cv_dir / "train_record_ids.npy").unlink(missing_ok=True)
+            (cur_cv_dir / "obs_results.parquet").unlink(missing_ok=True)
 
     if run_notebook:
         results_report_notebook_ffp = (

@@ -375,6 +375,12 @@ class GMMRunConfig(BaseRunConfig):
     learning_rate: float = field(kw_only=True)
     """Learning rate for training"""
 
+    lr_factor: float | None = field(kw_only=True)
+    """Learning rate reduction factor"""
+
+    lr_patience: int | None = field(kw_only=True)
+    """Learning rate reduction patience"""
+
     max_grad_norm: float | None = field(kw_only=True)
     """Maximum gradient norm for core model"""
 
@@ -662,7 +668,7 @@ class BatchResult(NamedTuple):
 
 def get_model(
     run_config: GMMRunConfig | LocAdjRunConfig,
-) -> tuple[modules.BaseNNModel, torch.optim.Optimizer | None]:
+) -> tuple[modules.BaseNNModel, torch.optim.Optimizer | None, torch.optim.lr_scheduler.LRScheduler | None]:
     """
     Get the model and optimizer for the given run configuration.
     """
@@ -678,7 +684,20 @@ def get_model(
             ),
             max_norm=run_config.max_grad_norm,
         )
-        return model, None
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            weight_decay=run_config.model_config.l2_reg,
+            lr=run_config.learning_rate,
+        )
+        if run_config.lr_factor is not None and run_config.lr_patience is not None:
+            lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                factor=run_config.lr_factor,
+                patience=run_config.lr_patience,
+            )
+            return model, optimizer, lr_scheduler
+
+        return model, optimizer, None
     elif isinstance(run_config, LocAdjRunConfig):
         # Load the base model
         base_model = torch.load(
@@ -761,7 +780,7 @@ def get_model(
         optimizer = torch.optim.Adam(
             loc_opt_configs,
         )
-        return model, optimizer
+        return model, optimizer, None
     else:
         raise ValueError("Invalid run_config type")
 
@@ -983,7 +1002,7 @@ def run_model_training(
         )
 
     # Create the model
-    model, optimizer = get_model(run_config)
+    model, optimizer, lr_scheduler = get_model(run_config)
     model.to(run_config.device)
 
     logger.info(f"Model has {modules.get_n_params(model)} trainable parameters")
@@ -993,13 +1012,12 @@ def run_model_training(
 
     metrics, best_model_state, best_model_epoch = train(
         model,
+        optimizer,
         train_dataloader,
         val_dataloader,
         run_config.n_epochs,
-        l2_reg=run_config.model_config.l2_reg if optimizer is None else None,
-        learning_rate=run_config.learning_rate if optimizer is None else None,
         use_sample_weights=run_config.use_sample_weights,
-        optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
         verbose=verbose,
     )
     metrics_df = pd.DataFrame(metrics)
@@ -1148,13 +1166,12 @@ def get_dataset_predictions(
 
 def train(
     model: modules.BaseNNModel,
+    optimizer: torch.optim.Optimizer | None,
     train_dataloader: data.CustomDataLoader,
     val_dataloader: data.CustomDataLoader | None,
     n_epochs: int,
-    l2_reg: float = 0.0,
-    learning_rate: float = 1e-3,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
     use_sample_weights: bool = False,
-    optimizer: torch.optim.Optimizer | None = None,
     verbose: bool = True,
 ):
     """Function for training a model"""
@@ -1172,13 +1189,6 @@ def train(
 
     best_val_loss = np.inf
     best_model_state, best_model_epoch = None, None
-
-    if optimizer is None:
-        optimizer = torch.optim.Adam(
-            model.parameters(),
-            weight_decay=l2_reg,
-            lr=learning_rate,
-        )
 
     for cur_epoch_ix in range(n_epochs):
         if verbose:
@@ -1237,22 +1247,25 @@ def train(
             metrics["mse_hist_val"][cur_epoch_ix] /= n_samples
             metrics["mean_sigma_hist_val"][cur_epoch_ix] /= n_samples
 
+            if lr_scheduler is not None:
+                lr_scheduler.step(metrics["w_loss_hist_val"][cur_epoch_ix])
+
             # Keep track of the best model
-            if metrics["loss_hist_val"][cur_epoch_ix] < best_val_loss:
-                best_val_loss = metrics["loss_hist_val"][cur_epoch_ix]
+            if metrics["w_loss_hist_val"][cur_epoch_ix] < best_val_loss:
+                best_val_loss = metrics["w_loss_hist_val"][cur_epoch_ix]
                 best_model_state = model.state_dict()
                 best_model_epoch = cur_epoch_ix
 
         logger.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
         logger.info(
             f"Training\t"
-            f"Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
+            f"Weighted Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
             f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
         )
         if val_dataloader is not None:
             logger.info(
                 f"Validation\t"
-                f"Loss: {metrics['loss_hist_val'][cur_epoch_ix] :.4f}, "
+                f"Weighted Loss: {metrics['w_loss_hist_val'][cur_epoch_ix] :.4f}, "
                 f"MSE: {metrics['mse_hist_val'][cur_epoch_ix]:.5f}"
             )
 

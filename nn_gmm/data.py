@@ -582,8 +582,8 @@ def get_similar_records(
         if k in fixed_inputs and k in limits:
             site_df = site_df.loc[
                 site_df[k].between(
-                    fixed_inputs[k] - limits[k][0],
-                    fixed_inputs[k] + limits[k][1],
+                    fixed_inputs[k] - limits[k],
+                    fixed_inputs[k] + limits[k],
                 )
             ]
         else:
@@ -599,16 +599,16 @@ def get_similar_records(
             elif k in event_df:
                 event_df = event_df.loc[
                     event_df[k].between(
-                        fixed_inputs[k] - limits[k][0],
-                        fixed_inputs[k] + limits[k][1],
+                        fixed_inputs[k] - limits[k],
+                        fixed_inputs[k] + limits[k],
                     )
                 ]
             # Realisation property
             else:
                 rel_df = rel_df.loc[
                     rel_df[k].between(
-                        fixed_inputs[k] - limits[k][0],
-                        fixed_inputs[k] + limits[k][1],
+                        fixed_inputs[k] - limits[k],
+                        fixed_inputs[k] + limits[k],
                     )
                 ]
         else:
@@ -634,8 +634,8 @@ def get_similar_records(
         if k in fixed_inputs and k in limits:
             site_event_df = site_event_df.loc[
                 site_event_df[k].between(
-                    fixed_inputs[k] - limits[k][0],
-                    fixed_inputs[k] + limits[k][1],
+                    fixed_inputs[k] - limits[k],
+                    fixed_inputs[k] + limits[k],
                 )
             ]
         else:

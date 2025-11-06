@@ -1414,7 +1414,7 @@ class DuckIMDB:
 
         return site_df
 
-    def get_rel_df(self, events: np.ndarray | None = None) -> pd.DataFrame:
+    def get_rel_df(self, events: np.ndarray | None = None, rel_int_ids: np.ndarray | None = None) -> pd.DataFrame:
         """
         Returns a DataFrame containing all realisation data.
 
@@ -1435,12 +1435,14 @@ class DuckIMDB:
             .df()
             .set_index("rel_int_id")
         )
-        rel_df["event_id"] = self.event_int_to_id_mapping.loc[
-            rel_df.event_int_id.values
-        ].values
 
         if events is not None:
+            rel_df["event_id"] = self.event_int_to_id_mapping.loc[
+                rel_df.event_int_id.values
+            ].values
             rel_df = rel_df[rel_df["event_id"].isin(events)]
+        if rel_int_ids is not None:
+            rel_df = rel_df[rel_df.index.isin(rel_int_ids)]
 
         return rel_df
 

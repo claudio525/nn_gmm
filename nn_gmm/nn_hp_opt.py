@@ -30,6 +30,7 @@ class HPOptConfig:
     n_layers_min: int
     n_layers_max: int
     unit_sizes: list[int]
+    last_hlayer_sizes: list[int]
     activation_fns: list[str]
     l2_regs: list[float]
     dropout_rates: list[float]
@@ -67,6 +68,7 @@ class HPOptConfig:
             n_layers_min=config_dict["n_layers_min"],
             n_layers_max=config_dict["n_layers_max"],
             unit_sizes=config_dict["unit_sizes"],
+            last_hlayer_sizes=config_dict["last_hlayer_sizes"],
             activation_fns=config_dict["activation_fns"],
             l2_regs=config_dict["l2_regs"],
             dropout_rates=config_dict["dropout_rates"],
@@ -84,6 +86,7 @@ class HPOptConfig:
             "n_layers_min": self.n_layers_min,
             "n_layers_max": self.n_layers_max,
             "unit_sizes": self.unit_sizes,
+            "last_hlayer_sizes": self.last_hlayer_sizes,
             "activation_fns": self.activation_fns,
             "l2_regs": self.l2_regs,
             "dropout_rates": self.dropout_rates,
@@ -128,8 +131,7 @@ def continue_hp_opt(study_dir: Path, n_trials: int):
     )
     study.optimize(functools.partial(objective, hp_config=hp_config), n_trials=n_trials)
 
-
-def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs: int = 1):
+def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs: int = 1, n_startup_trials: int = 25):
     """Run hyperparameter optimization using Optuna."""
     objective_fn_call = functools.partial(objective, hp_config=hp_config, n_procs=n_procs)
 
@@ -143,7 +145,7 @@ def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs:
     study = opt.create_study(
         study_name=study_name,
         direction="minimize",
-        sampler=opt.samplers.TPESampler(),
+        sampler=opt.samplers.TPESampler(n_startup_trials=n_startup_trials, n_ei_candidates=1000),
         storage="sqlite:///{}.db".format(hp_config.study_dir / study_name),
     )
     study.optimize(objective_fn_call, n_trials=n_trials)
@@ -166,12 +168,16 @@ def objective(trial: opt.Trial, hp_config: HPOptConfig, n_procs: int) -> float:
         n_procs=n_procs,
         run_notebook=False,
         remove_cv_results=True,
+
     )
 
     metrics = xr.open_dataarray(output_dir / "metrics.nc")
-    median_w_val_loss = np.median(
-        metrics.sel(metric="w_loss_hist_val").min(dim="epoch").values
-    )
+    w_val_loss_data = metrics.sel(metric="w_loss_hist_val")
+    median_w_val_loss = float(w_val_loss_data.min(dim="epoch").median())
+
+    trial.set_user_attr("median_w_val_loss", )
+    trial.set_user_attr("percentile_16_84_w_val_loss", tuple(np.percentile(w_val_loss_data.min(dim="epoch").values, [16, 84])))
+    trial.set_user_attr("median_best_epoch", float(w_val_loss_data.argmin(dim="epoch").median()))
 
     (output_dir / "val_results.parquet").unlink()
 
@@ -194,8 +200,9 @@ def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
         "n_layers", hp_config.n_layers_min, hp_config.n_layers_max
     )
     unit_size = trial.suggest_categorical("unit_size", hp_config.unit_sizes)
+    last_layer_size = trial.suggest_categorical("last_hlayer_size", hp_config.last_hlayer_sizes)
+    run_config.model_config.units = [unit_size] * (n_layers - 1) + [last_layer_size]
 
-    run_config.model_config.units = [unit_size] * n_layers
     run_config.model_config.activation = trial.suggest_categorical(
         "activation_fn", hp_config.activation_fns
     )

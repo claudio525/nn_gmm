@@ -450,7 +450,7 @@ def _gen_im_site_term_map(site_res_df: pd.DataFrame, im: str, grid_spacing: str,
     spatial_plot.save(output_dir / f"nn_site_term_map_{im}.png")
 
     mlt.utils.write_to_yaml(
-        dict(type="nn-site-term-map", im=im),
+        dict(type="nn-site-term-map", im=im, is_mera=True),
         output_dir / f"nn_site_term_map_{im}.yaml",
         clobber=True,
     )

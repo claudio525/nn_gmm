@@ -45,6 +45,8 @@ im_weights: null
 n_epochs: 100
 batch_size: 512
 learning_rate: 0.001
+lr_factor: null
+lr_patience: null
 
 max_grad_norm: null
 

@@ -205,12 +205,25 @@ VS30_WEIGHTING_BIN_NAMES = [
     for i in range(len(VS30_WEIGHTING_BINS) - 1)
 ]
 
-
 # NZ bounding box
 NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
 
 COOK_STRAIT_REGION = [172.639, 176.35, -42.427, -40.475]
 WELLINGTON_REGION = [174.74, 175, -41.44, -41.18]
+
+
+NZ_SITE_LOCATIONS = {
+    # Christchurch
+    "CHHC": {"nztm": (1569903.3253398456, 5179604.232912456), "wgs84": (172.6275, -43.5359)},
+    # Auckland
+    "AKUS": {"nztm": (1757841.5696817585, 5919949.488779474), "wgs84": (174.7705, -36.8532)},
+    # Wellington
+    "LHUS": {"nztm": (1758701.6844982852, 5433892.616015415), "wgs84": (174.8936, -41.2308)},
+    # Nelson
+    "NCBS": {"nztm": (1623761.6598632145, 5431130.954812289), "wgs84": (173.2837, -41.2709)},
+    # Hororata
+    "HORC": {"nztm": (1515968.5467490875, 5178735.2723341985),"wgs84": (171.9599, -43.5396)}
+}
 
 BASIN_BOUNDARIES_DIR = Path(__file__).parent / "resources/basin_boundaries"
 NHM_FAULT_FFP = Path(__file__).parent / "resources/NZ_FLTmodel_2010.txt"
@@ -218,7 +231,7 @@ DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-l
 AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
 
-PLOT_IMS = ["pSA_0.01", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
+PLOT_IMS = ["pSA_0.01", "pSA_0.01",  "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 
 # Default figure settings
 FIG_SIZE = (16, 10)

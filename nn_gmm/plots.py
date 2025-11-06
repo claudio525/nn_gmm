@@ -6,8 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+import seaborn as sns
 
 import ml_tools as mlt
+from mera import MeraResults
 
 from . import nn_gmm
 from . import emp_gmm
@@ -23,14 +25,23 @@ logger = logging.getLogger(__name__)
 
 def magnitude_trend_plot(
     result_dir: Path,
-    simulation_df: pd.DataFrame,
     fixed_inputs: dict,
     record_limits: dict,
-    record_int_ids: np.ndarray,
     device: str,
+    simulation_df: pd.DataFrame | None = None,
+    record_int_ids: np.ndarray | None = None,
     cv: bool = False,
+    plot_ind_cv: bool = True,
     major_line_width: float = 3.0,
     minor_line_width: float = 2.0,
+    ind_fig_size: tuple = (8, 6),
+    ims: list[str] | None = None,
+    dpi: float | None = None,
+    axs: list[plt.Axes] | None = None,
+    nn_color : str = "blue",
+    plot_empirical: bool = True,
+    legend_labels: bool = True,
+    legend: bool = True,
 ):
     """
     Create magnitude trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -39,22 +50,26 @@ def magnitude_trend_plot(
     ----------
     result_dir : Path
         NN-GMM result directory
-    simulation_df : pd.DataFrame
-        DataFrame containing simulation IM values
     fixed_inputs : dict
         Dictionary of fixed inputs for the NN-GM and empirical GM model
     record_limits : dict
         Dictionary specifying record selection limits
-    record_int_ids : np.ndarray
-        Record integer IDs which can be plotted.
-        Must be in the simulation DataFrame
     device : str
         Device to run the predictions on (e.g., "cpu" or "cuda")
+    record_int_ids : np.ndarray | None, optional
+        Record integer IDs which can be plotted.
+        Must be in the simulation DataFrame
+    simulation_df : pd.DataFrame | None, optional
+        DataFrame containing simulation IM values
+    cv: bool, optional
+        Whether the the result dir is for CV results.
     """
-
-    assert np.all(
+    assert simulation_df is None or np.all(
         np.isin(record_int_ids, simulation_df.index)
     ), "record_int_ids must be a subset of the simulation_df index"
+    assert axs is None or len(axs) == (len(ims) if ims is not None else len(constants.PLOT_IMS)), (
+        "If axs is provided, its length must match the number of ims to be plotted."
+    )
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
@@ -96,9 +111,10 @@ def magnitude_trend_plot(
                 "im": run_config.pred_std_keys,
             },
         )
-
     else:
         pred_df = nn_gmm.run_predictions_dir(result_dir, input_df, device=device)
+
+    # Get empirical GMM predictions
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
@@ -108,73 +124,126 @@ def magnitude_trend_plot(
     logger.info(f"Found {len(similar_record_ids)} similar records")
 
     # Create magnitude plots for each IM
-    plot_ims = ["pSA_0.01", "pSA_0.5", "pSA_1.0", "pSA_5.0"]
-    fig, axs = mlt.plotting.get_fig_axes(4, 2, 2, ind_figsize=(8, 6))
+    ims = constants.PLOT_IMS if ims is None else ims
 
-    for i, (ax, im) in enumerate(zip(axs, plot_ims)):
+    fig = None
+    if axs is None:
+        fig, axs = mlt.plotting.get_fig_axes(len(ims), 2, -1, ind_figsize=ind_fig_size, dpi=dpi)
+
+    for i, (ax, im) in enumerate(zip(axs, ims)):
+        if i % 2 == 1:
+            ax.yaxis.set_label_position("right")
+            ax.yaxis.set_ticks_position("right")
+
+        # Add data points
+        if simulation_df is not None:
+            ax.scatter(
+                simulation_df.loc[similar_record_ids, "magnitude"].values
+                + np.random.uniform(-0.01, 0.01, similar_record_ids.size),
+                simulation_df.loc[similar_record_ids, im],
+                s=1,
+                alpha=0.5,
+                c="gray"
+            )
+
+        # Empirical GMM predictions
+        if plot_empirical:
+            ax.plot(
+                emp_pred_df["magnitude"],
+                np.exp(emp_pred_df[f"{im}_mean"]),
+                c="g",
+                label="Empirical GMM" if legend_labels else None,
+                linewidth=major_line_width,
+            )
+            ax.plot(
+                emp_pred_df["magnitude"],
+                np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
+                c="g",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                emp_pred_df["magnitude"],
+                np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
+                c="g",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.fill_between(
+                emp_pred_df["magnitude"],
+                np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
+                np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
+                color="g",
+                alpha=0.2,
+            )
+
         # CV predictions
         # Plot the average mean prediction across all CV folds
         if cv:
             # Plot individual CV predictions
-            ax.plot(
-                mean_pred_da.coords["mag"].values,
-                np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
-                c="k",
-                linestyle="--",
-                linewidth=minor_line_width,
-            )
+            if plot_ind_cv:
+                ax.plot(
+                    mean_pred_da.coords["mag"].values,
+                    np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
+                    c="k",
+                    linestyle="--",
+                    linewidth=minor_line_width,
+                )
 
-            avg_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
-            avg_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
+            comb_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
+            
+            within_model_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
+            between_model_std = mean_pred_da.std(dim="cv").sel(im=f"{im}_pred")
+            comb_std = np.sqrt(within_model_std**2 + between_model_std**2)
             ax.plot(
                 mean_pred_da.coords["mag"].values,
-                np.exp(avg_mean + avg_std),
-                c="b",
+                np.exp(comb_mean + comb_std),
+                c=nn_color,
                 linestyle="--",
                 linewidth=minor_line_width,
             )
             ax.plot(
                 mean_pred_da.coords["mag"].values,
-                np.exp(avg_mean - avg_std),
-                c="b",
+                np.exp(comb_mean - comb_std),
+                c=nn_color,
                 linestyle="--",
                 linewidth=minor_line_width,
-                label="NN-GMM Average Std",
+                label="NN-GMM Average Std" if legend_labels else None,
             )
             ax.fill_between(
                 mean_pred_da.coords["mag"].values,
-                np.exp(avg_mean - avg_std),
-                np.exp(avg_mean + avg_std),
-                color="b",
+                np.exp(comb_mean - comb_std),
+                np.exp(comb_mean + comb_std),
+                color=nn_color,
                 alpha=0.2,
             )
 
             ax.plot(
                 mean_pred_da.coords["mag"].values,
-                np.exp(avg_mean),
-                c="b",
-                label="NN-GMM Average Mean",
+                np.exp(comb_mean),
+                c=nn_color,
+                label="NN-GMM Average Mean" if legend_labels else None,
                 linewidth=major_line_width,
             )
         else:
             ax.plot(
                 pred_df["magnitude"],
                 np.exp(pred_df[f"{im}_pred"]),
-                c="b",
+                c=nn_color,
                 label="NN-GMM",
                 linewidth=major_line_width,
             )
             ax.plot(
                 pred_df["magnitude"],
                 np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-                c="b",
+                c=nn_color,
                 linestyle="--",
                 linewidth=minor_line_width,
             )
             ax.plot(
                 pred_df["magnitude"],
                 np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-                c="b",
+                c=nn_color,
                 linestyle="--",
                 linewidth=minor_line_width,
             )
@@ -182,60 +251,22 @@ def magnitude_trend_plot(
                 pred_df["magnitude"],
                 np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
                 np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-                color="b",
+                color=nn_color,
                 alpha=0.2,
             )
 
-        # Empirical GMM predictions
-        ax.plot(
-            emp_pred_df["magnitude"],
-            np.exp(emp_pred_df[f"{im}_mean"]),
-            c="g",
-            label="Empirical GMM",
-            linewidth=major_line_width,
-        )
-        ax.plot(
-            emp_pred_df["magnitude"],
-            np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
-            c="g",
-            linestyle="--",
-            linewidth=minor_line_width,
-        )
-        ax.plot(
-            emp_pred_df["magnitude"],
-            np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
-            c="g",
-            linestyle="--",
-            linewidth=minor_line_width,
-        )
-        ax.fill_between(
-            emp_pred_df["magnitude"],
-            np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
-            np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
-            color="g",
-            alpha=0.2,
-        )
-
-        ax.scatter(
-            simulation_df.loc[similar_record_ids, "magnitude"].values
-            + np.random.uniform(-0.01, 0.01, similar_record_ids.size),
-            simulation_df.loc[similar_record_ids, im],
-            s=1,
-            alpha=0.5,
-        )
-
         # ax.set_xlim(5.25, 8.25)
-        ax.set_ylabel(im)
+        ax.set_ylabel(utils.get_nice_im_name(im))
         ax.set_xlabel("Magnitude")
-        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
         ax.set_yscale("log")
         ax.set_xlim(min_mag, max_mag)
 
-        if i == 0:
+        if i == 0 and legend:
             ax.legend()
 
-    fig.tight_layout()
-
+    if fig:
+        fig.tight_layout()
     return fig, axs
 
 
@@ -451,37 +482,78 @@ class BiasStdPlot:
 
     def __init__(
         self,
+        pSA_keys_periods: tuple[list[str], list[float]] | None = None,
         im_set: str = "pSA",
         figsize: tuple = (16, 6),
         bias_ylim: tuple = (-0.8, 0.8),
         std_ylim: tuple = (0, 0.8),
         dpi: int = 100,
+        **fig_kwargs,
     ):
-        if im_set == "pSA":
-            self.fig, self.ax1, self.ax3 = plot_utils.get_pSA_bias_residual_fig(
-                figsize=figsize,
-                bias_y_axis_limits=bias_ylim,
-                std_y_axis_limits=std_ylim,
-                dpi=dpi,
-            )
-            self.ims = constants.PSA_KEYS
-        else:
-            raise NotImplementedError()
+        """
+        Initializes the BiasStdPlot class.
 
-    def add_results(self, res_df: pd.DataFrame, **plt_kwargs):
-        """Adds NN-GMM results to the plot"""
-        model_bias, res_std = res_df[self.ims].mean(axis=0), res_df[self.ims].std(
-            axis=0
+        Parameters
+        ----------
+        pSA_keys_periods : tuple[list[str], list[float]], optional
+            Tuple containing lists of pSA keys and their corresponding periods.
+            If None, im_set is used to determine the pSA keys and periods.
+        im_set : str, optional
+            The IM set to use. Default is "pSA".
+        """
+        if pSA_keys_periods is not None:
+            self.pSA_keys, self.pSA_periods = pSA_keys_periods
+        else:
+            if im_set == "pSA":
+                self.pSA_keys = constants.PSA_KEYS
+                self.pSA_periods = constants.PSA_PERIODS
+            else:
+                raise NotImplementedError()
+
+        self.fig, self.ax1, self.ax3 = plot_utils.get_pSA_bias_residual_fig(
+            figsize=figsize,
+            bias_y_axis_limits=bias_ylim,
+            std_y_axis_limits=std_ylim,
+            dpi=dpi,
+            **fig_kwargs,
         )
 
+    def add_bias(self, model_bias: pd.Series, **plt_kwargs):
+        """Adds bias to the plot"""
         self.ax1.plot(
-            constants.PSA_PERIODS,
-            model_bias[constants.PSA_KEYS].values,
+            model_bias.index,
+            model_bias.values,
+            **plt_kwargs,
+        )
+        return self
+
+    def add_std(self, res_std: pd.Series, **plt_kwargs):
+        """Adds standard deviation to the plot"""
+        self.ax3.plot(
+            res_std.index,
+            res_std.values,
+            **plt_kwargs,
+        )
+        return self
+
+    def add_results(
+        self,
+        res_df: pd.DataFrame,
+        **plt_kwargs,
+    ):
+        """Adds NN-GMM results to the plot"""
+        model_bias, res_std = res_df[self.pSA_keys].mean(axis=0), res_df[
+            self.pSA_keys
+        ].std(axis=0)
+
+        self.ax1.plot(
+            self.pSA_periods,
+            model_bias[self.pSA_keys].values,
             **plt_kwargs,
         )
         self.ax3.plot(
-            constants.PSA_PERIODS,
-            res_std[constants.PSA_KEYS].values,
+            self.pSA_periods,
+            res_std[self.pSA_keys].values,
             **plt_kwargs,
         )
 
@@ -493,18 +565,18 @@ class BiasStdPlot:
         **plt_kwargs,
     ):
         """Adds individual NN-GMM CV results to the plot"""
-        cv_bias_df = res_df.groupby("cv_iter", observed=True)[self.ims].mean()
+        cv_bias_df = res_df.groupby("cv_iter", observed=True)[self.pSA_keys].mean()
 
         self.ax1.plot(
-            constants.PSA_PERIODS,
-            cv_bias_df[constants.PSA_KEYS].T.values,
+            self.pSA_periods,
+            cv_bias_df[self.pSA_keys].T.values,
             **plt_kwargs,
         )
 
-        cv_res_std_df = res_df.groupby("cv_iter", observed=True)[self.ims].std()
+        cv_res_std_df = res_df.groupby("cv_iter", observed=True)[self.pSA_keys].std()
         self.ax3.plot(
-            constants.PSA_PERIODS,
-            cv_res_std_df[constants.PSA_KEYS].T.values,
+            self.pSA_periods,
+            cv_res_std_df[self.pSA_keys].T.values,
             **plt_kwargs,
         )
 
@@ -512,46 +584,31 @@ class BiasStdPlot:
 
     def add_nn_gmm_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
         """Adds NN-GMM CV band to the plot"""
-        model_bias, res_std = res_df[self.ims].mean(axis=0), res_df[self.ims].std(
-            axis=0
-        )
+        model_bias, res_std = res_df[self.pSA_keys].mean(axis=0), res_df[
+            self.pSA_keys
+        ].std(axis=0)
 
         cv_bias_std = (
-            res_df.groupby("cv_iter", observed=True)[self.ims].mean().std(axis=0)
+            res_df.groupby("cv_iter", observed=True)[self.pSA_keys].mean().std(axis=0)
         )
         self.ax1.fill_between(
-            constants.PSA_PERIODS,
-            model_bias[constants.PSA_KEYS].values
-            - cv_bias_std[constants.PSA_KEYS].values,
-            model_bias[constants.PSA_KEYS].values
-            + cv_bias_std[constants.PSA_KEYS].values,
+            self.pSA_periods,
+            model_bias[self.pSA_keys].values - cv_bias_std[self.pSA_keys].values,
+            model_bias[self.pSA_keys].values + cv_bias_std[self.pSA_keys].values,
             **plt_kwargs,
         )
 
         cv_res_std_std = (
-            res_df.groupby("cv_iter", observed=True)[self.ims].std().std(axis=0)
+            res_df.groupby("cv_iter", observed=True)[self.pSA_keys].std().std(axis=0)
         )
         self.ax3.fill_between(
-            constants.PSA_PERIODS,
-            res_std[constants.PSA_KEYS].values
-            - cv_res_std_std[constants.PSA_KEYS].values,
-            res_std[constants.PSA_KEYS].values
-            + cv_res_std_std[constants.PSA_KEYS].values,
+            self.pSA_periods,
+            res_std[self.pSA_keys].values - cv_res_std_std[self.pSA_keys].values,
+            res_std[self.pSA_keys].values + cv_res_std_std[self.pSA_keys].values,
             **plt_kwargs,
         )
 
         return self
-
-    # def add_emp_gmm_results(self, emp_res_df: pd.DataFrame, **plt_kwargs):
-    #     """Adds empirical GMM results to the plot"""
-    #     emp_bias, emp_std = emp_res_df[constants.PSA_KEYS].mean(axis=0), emp_res_df[
-    #         constants.PSA_KEYS
-    #     ].std(axis=0)
-
-    #     self.ax1.plot(constants.PSA_PERIODS, emp_bias.values, **plt_kwargs)
-    #     self.ax3.plot(constants.PSA_PERIODS, emp_std.values, **plt_kwargs)
-
-    #     return self
 
     def add_legend(self, ax: plt.Axes = None):
         if ax is None:
@@ -569,13 +626,14 @@ class GroupedBiasStdPlot(BiasStdPlot):
         group_bin_edges: list[float],
         group_labels: list[str],
         group_colors: list,
+        pSA_keys_periods: tuple[list[str], list[float]] | None = None,
         im_set="pSA",
         figsize=(16, 6),
         bias_ylim=(-0.8, 0.8),
         std_ylim=(0, 0.8),
         dpi=100,
     ):
-        super().__init__(im_set, figsize, bias_ylim, std_ylim, dpi)
+        super().__init__(pSA_keys_periods, im_set, figsize, bias_ylim, std_ylim, dpi)
 
         self.group_key = group_key
         self.group_bin_key = f"{group_key}_bin"
@@ -597,10 +655,10 @@ class GroupedBiasStdPlot(BiasStdPlot):
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
-            cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
+            cur_model_bias = res_df.loc[cur_record_ids, self.pSA_keys].mean(axis=0)
             self.ax1.plot(
-                constants.PSA_PERIODS,
-                cur_model_bias[constants.PSA_KEYS].values,
+                self.pSA_periods,
+                cur_model_bias[self.pSA_keys].values,
                 c=self.group_colors[i],
                 **plt_kwargs,
                 label=(
@@ -613,10 +671,10 @@ class GroupedBiasStdPlot(BiasStdPlot):
         # Std
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
-            cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
+            cur_res_std = res_df.loc[cur_record_ids, self.pSA_keys].std(axis=0)
             self.ax3.plot(
-                constants.PSA_PERIODS,
-                cur_res_std[constants.PSA_KEYS].values,
+                self.pSA_periods,
+                cur_res_std[self.pSA_keys].values,
                 c=self.group_colors[i],
                 **plt_kwargs,
             )
@@ -624,16 +682,19 @@ class GroupedBiasStdPlot(BiasStdPlot):
         return self
 
     def add_categorial_results(
-        self, res_df: pd.DataFrame, add_legend_entries: bool, **plt_kwargs
+        self,
+        res_df: pd.DataFrame,
+        add_legend_entries: bool,
+        **plt_kwargs,
     ):
         """Adds categorial results (already grouped) to the plot"""
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[self.group_key] == cur_bin_label]
-            cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
+            cur_model_bias = res_df.loc[cur_record_ids, self.pSA_keys].mean(axis=0)
             self.ax1.plot(
-                constants.PSA_PERIODS,
-                cur_model_bias[constants.PSA_KEYS].values,
+                self.pSA_periods,
+                cur_model_bias[self.pSA_keys].values,
                 c=self.group_colors[i],
                 **plt_kwargs,
                 label=(
@@ -646,11 +707,16 @@ class GroupedBiasStdPlot(BiasStdPlot):
         # Std
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[self.group_key] == cur_bin_label]
-            cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
+            cur_res_std = res_df.loc[cur_record_ids, self.pSA_keys].std(axis=0)
             self.ax3.plot(
-                constants.PSA_PERIODS,
-                cur_res_std[constants.PSA_KEYS].values,
+                self.pSA_periods,
+                cur_res_std[self.pSA_keys].values,
                 c=self.group_colors[i],
+                label=(
+                    f"{cur_bin_label}, N={len(cur_record_ids)}"
+                    if add_legend_entries
+                    else None
+                ),
                 **plt_kwargs,
             )
 
@@ -716,7 +782,7 @@ def site_bias_histogram_comparison(
     output_dir: Path,
     ims: list[str] = constants.PLOT_IMS,
     n_bins: int = 50,
-    dpi: int = 100
+    dpi: int = 100,
 ):
     """
     Creates histogram comparison plots of
@@ -772,6 +838,7 @@ def site_bias_histogram_comparison(
                 model_dir_1=model_dir_1.name,
                 model_dir_2=model_dir_2.name,
                 im=im,
+                is_mera=False,
             ),
             output_dir / f"site_bias_comparison_{im}.yaml",
         )
@@ -820,7 +887,80 @@ def site_bias_res_std_comparison(
         dict(
             type="site-bias-res-std-comparison",
             model_dirs=[d.name for d in model_dirs],
+            is_mera=False,
         ),
         output_dir / "site_bias_res_std_comparison.yaml",
+    )
+
+
+def mera_basin_site_term_comparison(
+    model_dir_1: Path,
+    model_dir_2: Path,
+    output_dir: Path,
+):
+    # Check that MERA results exist
+    if not (mera_dir_1 := model_dir_1 / "mera_site_term").exists():
+        raise FileNotFoundError(f"MERA results directory not found: {mera_dir_1}")
+
+    if not (mera_dir_2 := model_dir_2 / "mera_site_term").exists():
+        raise FileNotFoundError(f"MERA results directory not found: {mera_dir_2}")
+
+    run_config_1 = nn_gmm.load_config(model_dir_1 / "run_config.yaml")
+    with data.DuckIMDB(
+        run_config_1.imdb_ffp,
+        readonly=True,
+    ) as imdb:
+        site_df = imdb.get_site_df().set_index("site_id")
+
+    mera_result_1 = MeraResults.load_from_parquet(mera_dir_1)
+    mera_result_2 = MeraResults.load_from_parquet(mera_dir_2)
+    assert mera_result_1.bias_std_df.index.equals(
+        mera_result_2.bias_std_df.index
+    ), "IMs do not match between the two MERA results"
+    ims = mera_result_1.bias_std_df.index.values
+    periods = [utils.get_pSA_period(im) for im in ims]
+
+    site_term_1 = mera_result_1.site_res_df
+    site_term_1.loc[:, ["lon", "lat"]] = site_df.loc[site_term_1.index, ["lon", "lat"]]
+    site_term_1 = utils.add_basin_column(site_term_1)
+    site_term_2 = mera_result_2.site_res_df
+    site_term_2.loc[:, ["lon", "lat"]] = site_df.loc[site_term_2.index, ["lon", "lat"]]
+    site_term_2 = utils.add_basin_column(site_term_2)
+
+
+    basin_labels = list(site_term_1["basin"].unique())
+    basin_colors = sns.color_palette("tab10", len(basin_labels))
+
+    bias_std_plot = (
+        GroupedBiasStdPlot(
+            "basin", None, basin_labels, basin_colors, pSA_keys_periods=(ims, periods), bias_ylim=(-0.2, 0.2), std_ylim=(0, 0.4)
+        )
+        # .add_results(site_term_1, linestyle="-", label="Model 1 - All Sites", c="k", linewidth=2.0)
+        # .add_results(site_term_2, linestyle="--", label="Model 2 - All Sites", c="k", linewidth=2.0)
+    )
+    bias_std_plot.ax1.set_ylabel("Mean Basin Site Term")
+    bias_std_plot.ax3.set_ylabel("Basin Site Term Standard Deviation")
+
+    bias_std_plot.add_categorial_results(site_term_1, True)
+    bias_std_plot.add_categorial_results(
+        site_term_2,
+        False,
+        linestyle="--",
+    )
+    bias_std_plot.add_legend(bias_std_plot.ax3)
+
+
+    bias_std_plot.fig.savefig(output_dir / "mera_basin_site_term_comparison.png")
+    plt.close(bias_std_plot.fig)
+
+    mlt.utils.write_to_yaml(
+        dict(
+            type="mera-basin-site-term-comparison",
+            model_dir_1=model_dir_1.name,
+            model_dir_2=model_dir_2.name,
+            is_mera=True,
+        ),
+        output_dir / "mera_basin_site_term_comparison.yaml",
+        clobber=True,
     )
 

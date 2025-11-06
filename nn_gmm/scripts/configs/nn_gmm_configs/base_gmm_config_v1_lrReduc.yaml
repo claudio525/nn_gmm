@@ -1,0 +1,60 @@
+seed: 42
+
+rel_imdb_ffp: nn_gmm/20251031_CS200m_rotd50_imdb.duckdb
+rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
+rel_test_events_ffp: nn_gmm/test_events.npy
+max_rrup: 300
+ignore_events: null
+extra_basin_sites: True
+
+im_set: pSA
+scale_ims: True
+
+site_inputs: 
+- vs30
+- z1p0
+- z2p5
+
+source_inputs:
+- magnitude
+- tect_type
+- rake 
+- dip
+- dtop
+- dbottom
+
+source_to_site_inputs:
+- rrup
+- rjb
+- rx
+- ry
+
+# Sample weighting
+apply_mag_sample_weighting: True
+max_mag_weight: 2.5
+apply_rrup_sample_weighting: True
+max_rrup_weight: 2.5
+apply_vs30_sample_weighting: True
+max_vs30_weight: 2.5
+total_max_weight: 5.0
+
+# IM weighting
+apply_im_weighting: False
+im_weights: null
+
+n_epochs: 100
+batch_size: 512
+learning_rate: 0.001
+lr_factor: 0.1
+lr_patience: 5
+
+max_grad_norm: null
+
+model:
+  units: [32, 32, 64]
+  use_batch_norm: True
+  activation: relu
+  dropout_rate: 0.0
+  l2_reg: 0.0001
+
+rel_results_dir: nn_gmm/results

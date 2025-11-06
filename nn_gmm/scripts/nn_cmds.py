@@ -189,12 +189,12 @@ def obs_fine_tune_cv_nn(results_dir: Path, config_ffp: Path, suffix: str = None)
 
 
 @app.command("run-hp-opt")
-def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_procs: int = 1):
+def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_procs: int = 1, n_startup_trials: int = 25):
     """Run hyperparameter optimization using Optuna."""
     hp_config = nng.nn_hp_opt.HPOptConfig.from_config(
         hp_config_ffp, base_run_config_ffp, device
     )
-    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials, n_procs=n_procs)
+    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials, n_procs=n_procs, n_startup_trials=n_startup_trials)
 
 
 @app.command("continue-hp-opt")
