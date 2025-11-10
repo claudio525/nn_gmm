@@ -399,10 +399,7 @@ def _run_postprocessing(
     if remove_cv_results:
         for cur_cv_dir in out_dirs:
             (cur_cv_dir / "val_results.parquet").unlink(missing_ok=True)
-            (cur_cv_dir / "val_record_ids.npy").unlink(missing_ok=True)
             (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
-            (cur_cv_dir / "train_record_ids.npy").unlink(missing_ok=True)
-            (cur_cv_dir / "obs_results.parquet").unlink(missing_ok=True)
 
     if run_notebook:
         results_report_notebook_ffp = (

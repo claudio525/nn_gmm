@@ -419,6 +419,12 @@ class GMMRunConfig(BaseRunConfig):
             "source_to_site_inputs": list(self.source_to_site_inputs),
             "batch_size": int(self.batch_size),
             "learning_rate": float(self.learning_rate),
+            "lr_factor": (
+                float(self.lr_factor) if self.lr_factor is not None else None
+            ),
+            "lr_patience": (
+                int(self.lr_patience) if self.lr_patience is not None else None
+            ),
             "max_grad_norm": (
                 float(self.max_grad_norm) if self.max_grad_norm is not None else None
             ),
@@ -1055,7 +1061,7 @@ def run_model_training(
     run_config.to_yaml(output_dir / "run_config.yaml")
     metrics_df.to_parquet(output_dir / "metrics.parquet")
 
-    np.save(output_dir / "train_record_ids.npy", train_record_ids)
+    # np.save(output_dir / "train_record_ids.npy", train_record_ids)
     np.save(output_dir / "train_events.npy", train_events)
     np.save(output_dir / "train_sites.npy", train_sites)
     if val_record_ids is not None:
