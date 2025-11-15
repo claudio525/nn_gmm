@@ -14,7 +14,8 @@ class ObsDataSource(StrEnum):
 class NZGMDBVersion(StrEnum):
     v4p3_final = "v4.3_final"
 
-class TectonicType(StrEnum):
+
+class ObsDataTectonicType(StrEnum):
     CRUSTAL = "crustal"
     SUBDUCTION_INTERFACE = "subduction_interface"
     SUBDUCTION_SLAB = "subduction_slab"
@@ -22,6 +23,14 @@ class TectonicType(StrEnum):
     MANTLE = "mantle"
     UNKNOWN = "unknown"
 
+OBS_TECTONIC_TO_NN_TECTONIC = {
+    ObsDataTectonicType.CRUSTAL: "ACTIVE_SHALLOW",
+    ObsDataTectonicType.SUBDUCTION_INTERFACE: "SUBDUCTION_INTERFACE",
+    ObsDataTectonicType.SUBDUCTION_SLAB: "SUBDUCTION_INTERFACE",
+    ObsDataTectonicType.OUTER_RISE: "SUBDUCTION_INTERFACE",
+    ObsDataTectonicType.MANTLE: "SUBDUCTION_INTERFACE",
+    ObsDataTectonicType.UNKNOWN: "ACTIVE_SHALLOW",
+}
 
 GMM_MAPPING = {
     oqw.constants.TectType.ACTIVE_SHALLOW: oqw.constants.GMM.Br_13,
@@ -30,11 +39,6 @@ GMM_MAPPING = {
     oqw.constants.TectType.SUBDUCTION_SLAB: oqw.constants.GMM.K_20,
 }
 
-TECT_TYPES = [
-    oqw.constants.TectType.SUBDUCTION_INTERFACE,
-    oqw.constants.TectType.ACTIVE_SHALLOW,
-    oqw.constants.TectType.VOLCANIC,
-]
 
 TECTONIC_TYPE_MAPPING = {
     "SUBDUCTION_INTERFACE": oqw.constants.TectType.SUBDUCTION_INTERFACE,
@@ -43,6 +47,8 @@ TECTONIC_TYPE_MAPPING = {
     "VOLCANIC": oqw.constants.TectType.VOLCANIC,
 }
 REVERSE_TECTONIC_TYPE_MAPPING = {v: k for k, v in TECTONIC_TYPE_MAPPING.items()}
+TECT_TYPES = list(TECTONIC_TYPE_MAPPING.keys())
+NN_TECT_TYPES = ["ACTIVE_SHALLOW", "SUBDUCTION_INTERFACE", "VOLCANIC"]
 
 PSA_KEYS = [
     "pSA_0.01",
@@ -230,8 +236,9 @@ NHM_FAULT_FFP = Path(__file__).parent / "resources/NZ_FLTmodel_2010.txt"
 DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-land-districts-SHP/nz-land-districts.shp"
 AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
+HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/cs200_hazard"
 
-PLOT_IMS = ["pSA_0.01", "pSA_0.01",  "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
+PLOT_IMS = ["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 
 # Default figure settings
 FIG_SIZE = (16, 10)
@@ -308,3 +315,26 @@ MW_RRUP_LIMITS = np.array([
     [8.0, 1055.40814061]
 ])
 
+
+
+HAZARD_REF_SITES = {
+    "3200650": "Kerikeri",
+    "AKUS": "Auckland",
+    "TBCS": "Tauranga",
+    "WKHS": "Whakatāne",
+    "GHHS": "Gisborne",
+    "TPPS": "Taupō",
+    "NPCS": "New Plymouth",
+    "NSPS": "Napier",
+    "LHUS": "Wellington",
+    "NCBS": "Nelson",
+    "MGCS": "Blenheim",
+    "02007b5": "North Alpine Fault",
+    "2200692": "Kaikōura",
+    "CHHC": "Christchurch",
+    "HORC": "Hororata",
+    "FJDS": "Franz Josef",
+    "QTPS": "Queenstown",
+    "DUNS": "Dunedin",
+    "ICCS": "Invercargill"
+}

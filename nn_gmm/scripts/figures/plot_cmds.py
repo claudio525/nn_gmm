@@ -230,8 +230,34 @@ def mera_basin_site_term(
     )
 
 
+@app.command("gen-site-hazard-plots")
+def gen_site_hazard_plots(ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None):
+    """
+    Generate site hazard plots for DS hazard results.
+    Also adds empirical DS & simulation flt hazard curves.
+    """
+    nng.utils.setup_logging()
+    nng.plots.site_hazard(ds_results_dir, output_dir, emp_ds_results_dir=emp_ds_results_dir)
+    
+    
+@app.command("pred-vs-res-std")
+def pred_vs_res_std(
+    model_dir: Path,
+):
+    """
+    Generate predicted vs residual std scatter plot
+    using CV results for all IMs.
+    """
+    nng.utils.setup_logging()
+    nng.plots.pred_vs_res_std(model_dir)
 
 
+
+@app.command("ds-location-distribution-map")
+def ds_location_distribution_map(output_dir: Path):
+    logger = nng.utils.setup_logging()
+
+    nng.plots_spatial.ds_location_distribution_map(output_dir)
 
 if __name__ == "__main__":
     app()

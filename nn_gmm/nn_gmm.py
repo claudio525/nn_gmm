@@ -1061,7 +1061,7 @@ def run_model_training(
     run_config.to_yaml(output_dir / "run_config.yaml")
     metrics_df.to_parquet(output_dir / "metrics.parquet")
 
-    # np.save(output_dir / "train_record_ids.npy", train_record_ids)
+    np.save(output_dir / "train_record_ids.npy", train_record_ids)
     np.save(output_dir / "train_events.npy", train_events)
     np.save(output_dir / "train_sites.npy", train_sites)
     if val_record_ids is not None:
@@ -1265,7 +1265,7 @@ def train(
         logger.info(f"Epoch {cur_epoch_ix + 1}/{n_epochs} completed.")
         logger.info(
             f"Training\t"
-            f"Weighted Loss: {metrics['loss_hist_train'][cur_epoch_ix]:.4f}, "
+            f"Weighted Loss: {metrics['w_loss_hist_train'][cur_epoch_ix]:.4f}, "
             f"MSE: {metrics['mse_hist_train'][cur_epoch_ix]:.5f}"
         )
         if val_dataloader is not None:

@@ -429,12 +429,12 @@ class ObservedData:
         mapping_dict = site_cols_map | event_map | event_site_map | other_map
 
         tect_type_mapping = {
-            "Crustal": constants.TectonicType.CRUSTAL,
-            "Interface": constants.TectonicType.SUBDUCTION_INTERFACE,
-            "Slab": constants.TectonicType.SUBDUCTION_SLAB,
-            "Outer-rise": constants.TectonicType.OUTER_RISE,
-            "Undetermined": constants.TectonicType.UNKNOWN,
-            np.nan: constants.TectonicType.UNKNOWN,
+            "Crustal": constants.ObsDataTectonicType.CRUSTAL,
+            "Interface": constants.ObsDataTectonicType.SUBDUCTION_INTERFACE,
+            "Slab": constants.ObsDataTectonicType.SUBDUCTION_SLAB,
+            "Outer-rise": constants.ObsDataTectonicType.OUTER_RISE,
+            "Undetermined": constants.ObsDataTectonicType.UNKNOWN,
+            np.nan: constants.ObsDataTectonicType.UNKNOWN,
         }
 
         # Determine the version if not provided
@@ -533,7 +533,7 @@ class ObservedData:
         record_df = record_df.rename(columns=mapping_dict)
 
         # Tectonic Type
-        record_df[cls.EventColEnums.TECT_TYPE] = constants.TectonicType.CRUSTAL
+        record_df[cls.EventColEnums.TECT_TYPE] = constants.ObsDataTectonicType.CRUSTAL
 
         # Drop any columns not of interest
         im_cols = list(im_map.values())
@@ -596,17 +596,17 @@ class ObservedData:
         }
 
         tect_type_mapping = {
-            0: constants.TectonicType.SUBDUCTION_INTERFACE,
-            1: constants.TectonicType.SUBDUCTION_SLAB,
-            2: constants.TectonicType.CRUSTAL,
-            3: constants.TectonicType.MANTLE,
-            4: constants.TectonicType.OUTER_RISE,
-            -444: constants.TectonicType.OUTER_RISE,
-            5: constants.TectonicType.SUBDUCTION_SLAB,
-            -666: constants.TectonicType.CRUSTAL,
-            -777: constants.TectonicType.SUBDUCTION_SLAB,
-            -888: constants.TectonicType.SUBDUCTION_INTERFACE,
-            -999: constants.TectonicType.UNKNOWN,
+            0: constants.ObsDataTectonicType.SUBDUCTION_INTERFACE,
+            1: constants.ObsDataTectonicType.SUBDUCTION_SLAB,
+            2: constants.ObsDataTectonicType.CRUSTAL,
+            3: constants.ObsDataTectonicType.MANTLE,
+            4: constants.ObsDataTectonicType.OUTER_RISE,
+            -444: constants.ObsDataTectonicType.OUTER_RISE,
+            5: constants.ObsDataTectonicType.SUBDUCTION_SLAB,
+            -666: constants.ObsDataTectonicType.CRUSTAL,
+            -777: constants.ObsDataTectonicType.SUBDUCTION_SLAB,
+            -888: constants.ObsDataTectonicType.SUBDUCTION_INTERFACE,
+            -999: constants.ObsDataTectonicType.UNKNOWN,
         }
 
         def _is_pSA(col: str):
@@ -701,7 +701,7 @@ def load_obs_nzgmdb(
     # Crustal, Mag >= 3.5 and rrup <= 300
     records_to_keep = list(
         obs_data.record_df.loc[
-            (obs_data.record_df.tect_type == constants.TectonicType.CRUSTAL)
+            (obs_data.record_df.tect_type == constants.ObsDataTectonicType.CRUSTAL)
             & (obs_data.record_df.mag >= 3.5)
             & (obs_data.record_df.rrup <= 300)
         ].index.values.astype(str)
@@ -716,7 +716,7 @@ def load_obs_nzgmdb(
         obs_data.record_df.loc[
             (
                 obs_data.record_df.tect_type
-                == constants.TectonicType.SUBDUCTION_INTERFACE
+                == constants.ObsDataTectonicType.SUBDUCTION_INTERFACE
             )
             & (obs_data.record_df.mag >= 4.5)
         ].index.values.astype(str)
@@ -730,7 +730,7 @@ def load_obs_nzgmdb(
     # Subduction Slab, Mag >= 4.5 and rrup <= 500
     sub_slabs_records_to_keep = list(
         obs_data.record_df.loc[
-            (obs_data.record_df.tect_type == constants.TectonicType.SUBDUCTION_SLAB)
+            (obs_data.record_df.tect_type == constants.ObsDataTectonicType.SUBDUCTION_SLAB)
             & (obs_data.record_df.mag >= 4.5)
         ].index.values.astype(str)
     )
@@ -812,6 +812,9 @@ def get_input_df(
             ObservedData.SiteColEnums.SITE_NZTM_Y: "nztm_y",
         }
     )[features].copy()
+
+    # Convert to supported tectonic types
+    input_df["tect_type"] = input_df["tect_type"].map(constants.OBS_TECTONIC_TO_NN_TECTONIC)
 
     if ObservedData.SiteColEnums.Z1P0 in input_df.columns:
         input_df[ObservedData.SiteColEnums.Z1P0] /= 1000.0

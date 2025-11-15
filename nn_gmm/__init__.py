@@ -9,6 +9,7 @@ from . import obs_data
 from . import plot_utils
 from . import plots_spatial
 from . import plots
+from . import hazard    
 from . import analysis
 from .nn_gmm import GMMRunConfig, LocAdjRunConfig
 from . import nn_gmm_modules
@@ -36,6 +37,7 @@ __all__ = [
     "plots",
     "plots_spatial",  
     "train_cv",
+    "hazard",
     "analysis",
     "train_loc_adj_cv",
     "LocAdjRunConfig",

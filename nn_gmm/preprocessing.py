@@ -1,15 +1,19 @@
 import logging
 from collections.abc import Sequence
 
+import numpy as np
 import pandas as pd
-
-from qcore import coordinates as coords
 
 from . import constants
 
 logger = logging.getLogger(__name__)
 
-def preprocess_site_features(site_df: pd.DataFrame, site_feature_keys: Sequence[str], keep_other_cols: bool = False):
+
+def preprocess_site_features(
+    site_df: pd.DataFrame,
+    site_feature_keys: Sequence[str],
+    keep_other_cols: bool = False,
+):
     """
     Pre-process the site features in the site DataFrame.
     Does not modify the original DataFrame.
@@ -64,7 +68,12 @@ def preprocess_source_features(
         DataFrame containing the pre-processed source features.
     """
     pre_source_df = source_df.copy()
-    pre_source_df["tect_type"] = pd.Categorical(pre_source_df["tect_type"], [str(v) for v in constants.TECT_TYPES])
+    assert np.isin(
+        pre_source_df["tect_type"].unique(), constants.NN_TECT_TYPES
+    ).all(), "Unknown tectonic type found."
+    pre_source_df["tect_type"] = pd.Categorical(
+        pre_source_df["tect_type"], constants.NN_TECT_TYPES
+    )
     pre_source_df = pre_source_df.loc[:, source_feature_keys]
 
     for cur_key in source_feature_keys:
@@ -74,7 +83,12 @@ def preprocess_source_features(
                 2 * (pre_source_df[cur_key] - cur_min) / (cur_max - cur_min) - 1
             )
         elif cur_key == "tect_type":
-            one_hot_df = pd.get_dummies(pre_source_df["tect_type"], prefix="is").astype(float)
+            one_hot_df = pd.get_dummies(pre_source_df["tect_type"], prefix="is").astype(
+                float
+            )
+            assert np.all(
+                one_hot_df.sum(axis=1).values == 1.0
+            ), "One-hot encoding failed, sum across rows not equal to 1."
             assert one_hot_df.index.equals(pre_source_df.index)
             pre_source_df = pd.concat([pre_source_df, one_hot_df], axis=1)
             pre_source_df = pre_source_df.drop(columns=["tect_type"])
@@ -98,7 +112,10 @@ def preprocess_event_site_features(
             )
         elif cur_key in ["rx", "ry"]:
             pre_site_event_df[cur_key] = (
-                2 * (pre_site_event_df[cur_key] - (-max_rrup)) / (max_rrup - (-max_rrup)) - 1
+                2
+                * (pre_site_event_df[cur_key] - (-max_rrup))
+                / (max_rrup - (-max_rrup))
+                - 1
             )
         else:
             logger.error(f"Feature {cur_key} not in pre-processing config.")

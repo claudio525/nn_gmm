@@ -884,3 +884,7 @@ def _gen_nn_gmm_full_ratio_map(
             output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_2_pred.yaml",
             clobber=True,
         )
+
+
+def ds_location_distribution_map(output_dir: Path):
+    print("wtf")
