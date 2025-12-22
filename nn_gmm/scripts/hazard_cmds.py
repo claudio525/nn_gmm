@@ -26,7 +26,13 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
 @app.command("run-site-ds-hazard")
-def run_site_ds_hazard(model_dir: Path, sites: list[str] | None = None, n_procs: int = 1):
+def run_site_ds_hazard(
+    model_dir: Path, sites: list[str] | None = None, n_procs: int = 1
+):
+    """
+    Compute DS hazard for specified sites
+    or reference sites if not provided.
+    """
     logger = nng.utils.setup_logging()
 
     if sites is not None:
@@ -39,7 +45,13 @@ def run_site_ds_hazard(model_dir: Path, sites: list[str] | None = None, n_procs:
 
 
 @app.command("run-emp-site-ds-hazard")
-def run_emp_site_ds_hazard(imdb_ffp: Path, output_dir: Path, sites: list[str] | None = None, n_procs: int = 1):
+def run_emp_site_ds_hazard(
+    imdb_ffp: Path, output_dir: Path, sites: list[str] | None = None, n_procs: int = 1
+):
+    """
+    Compute empirical DS hazard for specified
+    sites or reference sites if not provided.
+    """
     logger = nng.utils.setup_logging()
     if sites is None:
         logger.info("Running empirical DS hazard for all reference sites.")
@@ -48,6 +60,36 @@ def run_emp_site_ds_hazard(imdb_ffp: Path, output_dir: Path, sites: list[str] | 
         logger.info(f"Running empirical DS hazard for specified sites: {sites}")
 
     nng.hazard.run_emp_sites_hazard(imdb_ffp, sites, output_dir, n_procs=n_procs)
+
+
+@app.command("run-emp-ds-disagg")
+def run_emp_ds_disagg(
+    sites_ffp: Path,
+    imdb_ffp: Path,
+    output_dir: Path,
+    rps: list[int],
+    max_rrup: float = 500.0,
+    n_procs: int = 1,
+    tect_type: str | None = None,
+    n_sites: int | None = None,
+):
+    """
+    Compute empirical DS disaggregation for specified sites.
+
+    tect_type has to be either None, SUBDUCTION_SLAB or ACTIVE_SHALLOW
+    """
+    logger = nng.utils.setup_logging()
+
+    sites = np.load(sites_ffp)
+    if n_sites is not None:
+        sites = sites[:n_sites]
+    logger.info(
+        f"Running empirical DS disaggregation for {len(sites)} sites from {sites_ffp}."
+    )
+    nng.hazard.run_emp_ds_disagg(
+        sites, imdb_ffp, output_dir, np.asarray(rps), max_rrup=max_rrup, n_procs=n_procs, tect_type=tect_type
+    )
+
 
 if __name__ == "__main__":
     app()

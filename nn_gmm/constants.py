@@ -117,7 +117,7 @@ PSA_PERIODS = [
     10.0,
 ]
 
-NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595", "MMI"]
+NON_PSA_IMS = ["PGA", "PGV", "CAV", "AI", "Ds575", "Ds595"]
 IMS = PSA_KEYS + NON_PSA_IMS
 
 DB_PSA_KEYS = [
@@ -236,7 +236,7 @@ NHM_FAULT_FFP = Path(__file__).parent / "resources/NZ_FLTmodel_2010.txt"
 DISTRICT_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-land-districts-SHP/nz-land-districts.shp"
 AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz-territorial-authority-2025-SHP/territorial-authority-2025.shp"
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
-HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/cs200_hazard"
+HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/morteza_cs200_hazard"
 
 PLOT_IMS = ["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 

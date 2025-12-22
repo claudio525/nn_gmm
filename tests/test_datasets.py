@@ -17,16 +17,12 @@ if torch.cuda.is_available():
 
 
 wdata = Path(os.environ["wdata"])
-sqlite_imdb_ffp = Path(wdata / "nn_gmm/20250606_CS200m_imdb.db")
 duckdb_imdb_ffp = Path(wdata / "nn_gmm/20251009_CS200m_imdb.duckdb")
 
 
 @pytest.mark.parametrize(
     "imdb_ffp,seed",
     [
-        (sqlite_imdb_ffp, 42),
-        (sqlite_imdb_ffp, 199),
-        (sqlite_imdb_ffp, 2),
         (duckdb_imdb_ffp, 42),
         (duckdb_imdb_ffp, 199),
         (duckdb_imdb_ffp, 2),
@@ -36,8 +32,7 @@ def test_datasets(imdb_ffp: Path, seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    imdb_type = nng.IMDB if imdb_ffp.suffix == ".db" else nng.DuckIMDB
-    with imdb_type(imdb_ffp, readonly=True) as imdb:
+    with nng.DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True)
         event_df = imdb.get_event_df()
 
@@ -66,16 +61,6 @@ def test_datasets(imdb_ffp: Path, seed: int):
     site_inputs = ["vs30", "z1p0", "z2p5"]
     source_inputs = ["magnitude", "rake"]
     site_event_inputs = ["rrup", "rjb", "rx", "ry"]
-
-    # mock_run_config = Mock()
-    # mock_run_config.scale_ims = False
-    # mock_run_config.device = device
-    # mock_run_config.apply_im_weighting = False
-    # mock_run_config.site_inputs = ["vs30", "z1p0", "z2p5"]
-    # mock_run_config.source_inputs = ["magnitude", "rake"]
-    # mock_run_config.site_event_inputs = ["rrup", "rjb", "rx", "ry"]
-    # mock_run_config.using_loc_model = False
-    # mock_run_config.loc_model_inputs = None
 
     dataset_1 = nng.data.IMDBDataset(
         imdb_ffp,

@@ -93,8 +93,8 @@ def setup_logging(
         logger.addHandler(console_handler)
 
     # Suppress numba & matplotlib logging
-    logging.getLogger('numba').setLevel(logging.WARNING)
-    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger("numba").setLevel(logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
     return logger
 
@@ -192,7 +192,9 @@ def get_site_event_int_id(
     # Prime multipliers for good distribution
     p1, p2 = 73856093, 19349663
 
-    return (site_int_id.astype(np.int64) * p1) ^ (event_int_id.astype(np.int64) * p2) % 100000000
+    return (site_int_id.astype(np.int64) * p1) ^ (
+        event_int_id.astype(np.int64) * p2
+    ) % 100000000
 
 
 def get_fault(nhm_flt_ffp: Path, fault_name: str) -> sources.Fault:
@@ -212,6 +214,7 @@ def get_fault(nhm_flt_ffp: Path, fault_name: str) -> sources.Fault:
         The fault object corresponding to the given name.
     """
     import seismic_hazard_analysis as sha
+
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     if fault_name not in flt_definitions:
         raise ValueError(f"Fault '{fault_name}' not found in NHM definitions.")
@@ -234,6 +237,7 @@ def get_faults(nhm_flt_ffp: Path) -> dict[str, sources.Fault]:
         Dictionary mapping fault names to their corresponding Fault objects.
     """
     import seismic_hazard_analysis as sha
+
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
     return {
         cur_name: sha.nshm_2010.utils.get_fault_objects(cur_fault)
@@ -303,4 +307,20 @@ def add_basin_column(site_df: pd.DataFrame) -> pd.DataFrame:
     return site_df
 
 
+def get_ds_source_data():
+    """Load DS source and ERF data."""
+    import seismic_hazard_analysis as sha
 
+    background_ffp = constants.HAZARD_RESOURCES_DIR / "NZBCK211_OpenSHA.txt"
+    ds_erf_ffp = constants.HAZARD_RESOURCES_DIR / "NZ_DSmodel_2010.txt"
+
+    ds_erf_df = pd.read_csv(ds_erf_ffp, index_col="rupture_name").sort_index()
+    ds_source_df = sha.nshm_2010.get_ds_source_df(background_ffp).sort_index()
+
+    # Use numerical index to save memory/disk space
+    ds_source_df["rupture_name"] = ds_source_df.index.astype(str)
+    ds_erf_df["rupture_name"] = ds_erf_df.index.astype(str)
+    ds_source_df.index = np.arange(ds_source_df.shape[0])
+    ds_erf_df.index = np.arange(ds_erf_df.shape[0])
+
+    return ds_source_df, ds_erf_df

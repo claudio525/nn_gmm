@@ -38,7 +38,7 @@ def magnitude_trend_plot(
     ims: list[str] | None = None,
     dpi: float | None = None,
     axs: list[plt.Axes] | None = None,
-    nn_color : str = "blue",
+    nn_color: str = "blue",
     plot_empirical: bool = True,
     legend_labels: bool = True,
     legend: bool = True,
@@ -67,9 +67,9 @@ def magnitude_trend_plot(
     assert simulation_df is None or np.all(
         np.isin(record_int_ids, simulation_df.index)
     ), "record_int_ids must be a subset of the simulation_df index"
-    assert axs is None or len(axs) == (len(ims) if ims is not None else len(constants.PLOT_IMS)), (
-        "If axs is provided, its length must match the number of ims to be plotted."
-    )
+    assert axs is None or len(axs) == (
+        len(ims) if ims is not None else len(constants.PLOT_IMS)
+    ), "If axs is provided, its length must match the number of ims to be plotted."
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
@@ -128,7 +128,9 @@ def magnitude_trend_plot(
 
     fig = None
     if axs is None:
-        fig, axs = mlt.plotting.get_fig_axes(len(ims), 2, -1, ind_figsize=ind_fig_size, dpi=dpi)
+        fig, axs = mlt.plotting.get_fig_axes(
+            len(ims), 2, -1, ind_figsize=ind_fig_size, dpi=dpi
+        )
 
     for i, (ax, im) in enumerate(zip(axs, ims)):
         if i % 2 == 1:
@@ -143,7 +145,7 @@ def magnitude_trend_plot(
                 simulation_df.loc[similar_record_ids, im],
                 s=1,
                 alpha=0.5,
-                c="gray"
+                c="gray",
             )
 
         # Empirical GMM predictions
@@ -191,7 +193,7 @@ def magnitude_trend_plot(
                 )
 
             comb_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
-            
+
             within_model_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
             between_model_std = mean_pred_da.std(dim="cv").sel(im=f"{im}_pred")
             comb_std = np.sqrt(within_model_std**2 + between_model_std**2)
@@ -847,6 +849,8 @@ def site_bias_histogram_comparison(
 def site_bias_res_std_comparison(
     model_dirs: list[Path], output_dir: Path, dpi: int = 100
 ):
+    """Generates a site bias and site residual
+    standard deviation comparison plot wrt. pSA"""
     fig, ax1, ax2, ax3, ax4 = plot_utils.get_bias_residual_fig(
         figsize=(16, 6),
         bias_y_axis_limits=(-0.05, 0.05),
@@ -927,13 +931,18 @@ def mera_basin_site_term_comparison(
     site_term_2.loc[:, ["lon", "lat"]] = site_df.loc[site_term_2.index, ["lon", "lat"]]
     site_term_2 = utils.add_basin_column(site_term_2)
 
-
     basin_labels = list(site_term_1["basin"].unique())
     basin_colors = sns.color_palette("tab10", len(basin_labels))
 
     bias_std_plot = (
         GroupedBiasStdPlot(
-            "basin", None, basin_labels, basin_colors, pSA_keys_periods=(ims, periods), bias_ylim=(-0.2, 0.2), std_ylim=(0, 0.4)
+            "basin",
+            None,
+            basin_labels,
+            basin_colors,
+            pSA_keys_periods=(ims, periods),
+            bias_ylim=(-0.2, 0.2),
+            std_ylim=(0, 0.4),
         )
         # .add_results(site_term_1, linestyle="-", label="Model 1 - All Sites", c="k", linewidth=2.0)
         # .add_results(site_term_2, linestyle="--", label="Model 2 - All Sites", c="k", linewidth=2.0)
@@ -949,7 +958,6 @@ def mera_basin_site_term_comparison(
     )
     bias_std_plot.add_legend(bias_std_plot.ax3)
 
-
     bias_std_plot.fig.savefig(output_dir / "mera_basin_site_term_comparison.png")
     plt.close(bias_std_plot.fig)
 
@@ -964,3 +972,188 @@ def mera_basin_site_term_comparison(
         clobber=True,
     )
 
+
+def site_hazard(
+    ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None
+):
+    # Load Cybershake fault hazard
+    cs_flt_hazard = pd.read_pickle(
+        constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+    )
+
+    # Load empirical DS hazard results
+    # emp_ds_hazard = pd.read_pickle(constants.HAZARD_RESOURCES_DIR / "ds/DS_hazard_data.pkl")
+
+    # Load NN-GMM DS hazard results
+    nn_ds_hazard = {
+        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
+        for cur_ffp in ds_results_dir.glob("*.pkl")
+    }
+
+    # Load empirical DS hazard results
+    if emp_ds_results_dir is not None:
+        emp_ds_hazard = {
+            cur_ffp.stem: pd.read_pickle(emp_ds_results_dir / f"{cur_ffp.stem}.pkl")
+            for cur_ffp in emp_ds_results_dir.glob("*.pkl")
+        }
+
+    for site, hazard_result in nn_ds_hazard.items():
+        logger.info(f"Creating hazard plots for site: {site}")
+        for cur_im in constants.PLOT_IMS:
+            _create_hazard_plot(
+                hazard_result,
+                site,
+                cur_im,
+                output_dir / f"{site}_hazard_{cur_im}.png",
+                cs_flt_hazard=cs_flt_hazard[cur_im],
+                emp_ds_hazard=(
+                    emp_ds_hazard.get(site) if emp_ds_results_dir is not None else None
+                ),
+            )
+
+
+def _create_hazard_plot(
+    nn_ds_hazard: dict[str, dict[str, pd.Series]],
+    site: str,
+    im: str,
+    output_ffp: Path,
+    cs_flt_hazard: pd.DataFrame = None,
+    emp_ds_hazard: dict[str, pd.Series] | None = None,
+    dpi: int = 300,
+    figsize: tuple = (8, 6),
+):
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+    im_levels = nn_ds_hazard["total"][im].index.values
+
+    ax.plot(im_levels, nn_ds_hazard["total"][im].values, label="NN-GMM DS Total", color="b")
+    ax.plot(im_levels, nn_ds_hazard["crustal"][im].values, label="NN-GMM DS Crustal", color="b", linestyle="--")
+    ax.plot(im_levels, nn_ds_hazard["subduction"][im].values, label="NN-GMM DS Subduction", color="b", linestyle=":")
+
+    if cs_flt_hazard is not None:
+        ax.plot(
+            cs_flt_hazard.columns.values,
+            cs_flt_hazard.loc[site].values,
+            label="Cybershake Fault Hazard",
+            color="r",
+        )
+
+    if emp_ds_hazard is not None:
+        assert np.allclose(emp_ds_hazard["total"][im].index.values, im_levels), "Empirical DS hazard IM levels do not match NN-GMM DS hazard IM levels"
+        ax.plot(
+            im_levels,
+            emp_ds_hazard["total"][im].values,
+            label="Empirical DS Total",
+            color="g",
+        )
+        ax.plot(
+            im_levels,
+            emp_ds_hazard["crustal"][im].values,
+            label="Empirical DS Crustal",
+            color="g",
+            linestyle="--",
+        )
+        ax.plot(
+            im_levels,
+            emp_ds_hazard["subduction"][im].values,
+            label="Empirical DS Subduction",
+            color="g",
+            linestyle=":",
+        )
+
+    ax.set_xlabel(f"{im} (g)")
+    ax.set_ylabel("Annual Exceedance Probability")
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_ylim(1e-4, 10)
+    ax.legend()
+
+    ax.text(
+        0.5,
+        0.975,
+        site,
+        transform=ax.transAxes,
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+    )
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close(fig)
+
+    mlt.utils.write_to_yaml(
+        dict(
+            type="site-hazard-plot",
+            site=site,
+            im=im,
+        ),
+        output_ffp.with_suffix(".yaml"),
+        clobber=True,
+    )
+
+
+def pred_vs_res_std(model_dir: Path):
+    """
+    Creates a predicted vs residual standard deviation plot
+    with respect to pSA
+    """
+    run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
+
+    res_df, pred_df, *_ = analysis.get_nn_sim_residuals(model_dir)
+
+    res_stds = res_df.groupby("cv_iter")[run_config.ims].std()
+    res_stds_mean = res_stds.mean()
+    res_stds_std = res_stds.std()
+
+    pred_stds = pred_df.groupby("cv_iter")[run_config.pred_std_keys].mean()
+    pred_stds.columns = run_config.ims
+    pred_stds_mean = pred_stds.mean()
+    pred_stds_std = pred_stds.std()
+
+    assert np.all(res_stds.columns == pred_stds.columns)
+
+    output_ffp = model_dir / "plots/pred_vs_res_std.png"
+    fig, ax = plt.subplots(figsize=(16, 6))
+
+    ax.plot(
+        run_config.pSA_periods, pred_stds_mean.values, label="Predicted Std", color="b"
+    )
+    ax.fill_between(
+        run_config.pSA_periods,
+        pred_stds_mean.values - pred_stds_std.values,
+        pred_stds_mean.values + pred_stds_std.values,
+        color="b",
+        alpha=0.5,
+    )
+
+    ax.plot(
+        run_config.pSA_periods, res_stds_mean.values, label="Residual Std", color="r"
+    )
+    ax.fill_between(
+        run_config.pSA_periods,
+        res_stds_mean.values - res_stds_std.values,
+        res_stds_mean.values + res_stds_std.values,
+        color="r",
+        alpha=0.5,
+    )
+
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_xlabel("Period (s)")
+    ax.set_ylabel("Standard Deviation")
+    ax.set_xlim(0.01, 10)
+    ax.set_xscale("log")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_ffp)
+    plt.close(fig)
+
+    mlt.utils.write_to_yaml(
+        dict(
+            type="pred-vs-res-std-plot",
+        ),
+        model_dir / "plots/pred_vs_res_std.yaml",
+        clobber=True,
+    )
