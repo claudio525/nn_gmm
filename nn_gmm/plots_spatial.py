@@ -15,7 +15,7 @@ import ml_tools as mlt
 
 from . import nn_gmm
 from .imdb import DuckIMDB
-from .empdb import EmpiricalDB
+from .empdb import DuckEmpiricalDB
 from . import constants
 from . import utils
 from . import loc_pre
@@ -320,7 +320,7 @@ def emp_gmm_bias_res_std(
         record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
         sim_df = imdb.get_im_data(run_config.ims, record_int_ids).sort_index()
 
-    with EmpiricalDB(empdb_ffp, readonly=True) as empdb:
+    with DuckEmpiricalDB(empdb_ffp, readonly=True) as empdb:
         emp_pred_df = empdb.get_gm_params_tmp_table(
             record_int_ids, incl_std=False
         ).sort_index()

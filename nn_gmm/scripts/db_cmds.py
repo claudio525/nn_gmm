@@ -5,12 +5,14 @@ import pandas as pd
 import numpy as np
 import typer
 from tqdm import tqdm
+import xarray as xr
 
 import ml_tools as mlt
 import nn_gmm as nng
 from qcore import coordinates as coords
 from qcore import nhm
-
+import workflow.realisations as wr
+from source_modelling import sources
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", level=logging.INFO
@@ -23,7 +25,8 @@ app = typer.Typer()
 def create_imdb(
     db_ffp: Path = typer.Argument(..., help="Path to the database file"),
     im_data_loc: Path = typer.Argument(
-        ..., help="Path to the Cybershake IM data. Either directory of IM event directories, or IM data pickle file."
+        ...,
+        help="Path to the Cybershake IM data. Either directory of IM event directories, or IM data pickle file.",
     ),
     source_info_dir: Path = typer.Argument(
         ..., help="Path to the Cybershake source info directory"
@@ -197,9 +200,7 @@ def create_imdb(
             if im_data_arrays is not None:
                 rel_im_dfs = []
                 for cur_rel in im_data_arrays[cur_event].realisation.values:
-                    cur_rel_id = (
-                        f"{cur_event}_{cur_rel}"
-                    )
+                    cur_rel_id = f"{cur_event}_{cur_rel}"
 
                     if cur_rel_id not in rel_df.index:
                         logging.warning(
@@ -207,7 +208,9 @@ def create_imdb(
                         )
                         continue
 
-                    cur_im_df = im_data_arrays[cur_event].sel(realisation=cur_rel).to_pandas()
+                    cur_im_df = (
+                        im_data_arrays[cur_event].sel(realisation=cur_rel).to_pandas()
+                    )
                     cur_im_df["site_id"] = cur_im_df.index
                     cur_im_df["event_id"] = cur_event
                     cur_im_df["rel_id"] = cur_rel_id
@@ -245,6 +248,169 @@ def create_imdb(
                 im_data = []
 
     logger.info(f"Database {db_ffp} created successfully.")
+
+
+@app.command("imdb-add-ds-simulations")
+def imdb_add_ds_sims(
+    db_ffp: Path = typer.Argument(..., help="Path to the IMDB file"),
+    ds_im_dir: Path = typer.Argument(..., help="Path to the DS IM data directory"),
+    ds_rel_info_dir: Path = typer.Argument(
+        ..., help="Path to the DS realisation info directory"
+    ),
+):
+    """
+    Add DS point source simulations to an existing IMDB.
+    """
+    logger = nng.utils.setup_logging()
+    im_dirs = {
+        cur_dir.stem: cur_dir for cur_dir in ds_im_dir.iterdir() if cur_dir.is_dir()
+    }
+    events = np.array(list(im_dirs.keys()))
+
+    # Realisation info files
+    rel_ffps = {
+        event: path
+        for event in events
+        if (path := ds_rel_info_dir / event / "realisation.json").exists()
+    }
+    assert len(rel_ffps) == len(events), "Some realisation info files are missing!"
+
+    with nng.DuckIMDB(db_ffp) as db:
+        db_event_columns = db.event_table_columns
+        db_rel_columns = db.realisation_table_columns
+
+        max_event_int_id = db.max_event_int_id
+        assert max_event_int_id is not None, "Database has no events!"
+        max_rel_int_id = db.max_rel_int_id
+        assert max_rel_int_id is not None, "Database has no realisations!"
+
+        db_site_df = db.get_site_df()
+        db_site_ids = db_site_df["site_id"].values.astype(str)
+
+    site_coords = np.concatenate([db_site_df[["lat", "lon"]].values, np.zeros((db_site_df.shape[0], 1))], axis=1)
+
+    event_int_id = max_event_int_id + 1
+    rel_int_id = max_rel_int_id + 1
+    event_data, rel_data = {}, {}
+    im_dfs, site_event_dfs = [], []
+    for event in events:
+        rel_ffp = rel_ffps[event]
+        source_config = wr.SourceConfig.read_from_realisation(rel_ffp)
+
+        # Event data
+        event_data[event] = {}
+        event_data[event]["event_int_id"] = event_int_id
+        event_data[event]["event_id"] = event
+        event_data[event]["magnitude"] = wr.Magnitudes.read_from_realisation(
+            rel_ffp
+        ).magnitudes[event]
+        event_data[event]["sim_type"] = 1  # Point source
+        event_data[event]["fault_type"] = "DS_POINT_SOURCE"
+        event_data[event]["tect_type"] = "SUBDUCTION_SLAB"
+        event_data[event]["dip"] = source_config.source_geometries[event].dip
+        event_data[event]["dtop"] = (
+            source_config.source_geometries[event].coordinates[2] / 1000
+        )
+        event_data[event]["dbottom"] = event_data[event]["dtop"]
+        event_data[event]["length"] = source_config.source_geometries[event].length
+        event_data[event]["plane_count"] = 0
+        event_data[event]["dip_dir"] = source_config.source_geometries[event].dip_dir
+        event_int_id += 1
+
+        # Realisation data
+        rel_data[event] = {}
+        rel_data[event]["rel_int_id"] = rel_int_id
+        rel_data[event]["rel_id"] = f"{event}_REL01"
+        rel_data[event]["event_int_id"] = event_data[event]["event_int_id"]
+        rel_data[event]["magnitude"] = event_data[event]["magnitude"]
+        rel_data[event]["rake"] = wr.Rakes.read_from_realisation(rel_ffp).rakes[event]
+        rel_data[event]["shypo"], rel_data[event]["dhypo"] = 0.5, 0.5
+        rel_data[event]["hypo_lat"] = source_config.source_geometries[
+            event
+        ].coordinates[0]
+        rel_data[event]["hypo_lon"] = source_config.source_geometries[
+            event
+        ].coordinates[1]
+        rel_data[event]["hypo_depth"] = (
+            source_config.source_geometries[event].coordinates[2] / 1000
+        )
+        rel_int_id += 1
+
+        # IM data
+        im_ffp = im_dirs[event] / "intensity_measures.h5"
+        im_ds = xr.load_dataset(im_ffp)
+        site_ids = im_ds.coords["station"].values.astype(str)
+        assert np.isin(
+            site_ids, db_site_ids
+        ).all(), "Some sites in IM data do not exist in the database!"
+        im_df = pd.DataFrame(index=site_ids, columns=nng.constants.IMS, data=np.nan)
+        im_df["event_int_id"] = event_data[event]["event_int_id"]
+        im_df["rel_int_id"] = rel_data[event]["rel_int_id"]
+        for im in nng.constants.IMS:
+            if im.startswith("pSA"):
+                period = nng.utils.get_pSA_period(im)
+                im_df[im] = (
+                    im_ds["pSA"].sel(component="rotd50", period=period).to_pandas()
+                )
+            else:
+                component = "rotd50" if im in ["PGA", "PGV"] else "geom"
+                im_df[im] = im_ds.sel(component=component)[im].to_pandas()
+
+        im_df["site_id"] = im_df.index
+        im_dfs.append(im_df)
+
+        # Site-to-source distances
+        source_coords = np.array(
+            [
+                rel_data[event]["hypo_lat"],
+                rel_data[event]["hypo_lon"],
+                rel_data[event]["hypo_depth"] * 1000,
+            ]
+        )
+        site_mask = np.isin(db_site_ids, site_ids)
+        assert site_mask.sum() == im_df.shape[0], "Site count mismatch!"
+        rrup = coords.distance_between_wgs_depth_coordinates(source_coords[None,:], site_coords[site_mask]) / 1000
+        rjb = coords.distance_between_wgs_depth_coordinates(source_coords[None, :2], site_coords[site_mask, :2]) / 1000
+        site_event_df = pd.DataFrame(
+            index=db_site_ids[site_mask],
+            data={"rrup": rrup, "rjb": rjb},
+        )
+        site_event_df["rx"], site_event_df["ry"] = 0, 0
+        site_event_df["event_id"] = event
+        site_event_df["site_id"] = site_event_df.index
+        site_event_dfs.append(site_event_df)
+
+    # Combine
+    event_df = pd.DataFrame.from_dict(event_data, orient="index")
+    assert np.isin(db_event_columns, event_df.columns).all(), "Missing event columns!"
+    rel_df = pd.DataFrame.from_dict(rel_data, orient="index").sort_values("rel_id")
+    assert np.isin(db_rel_columns, rel_df.columns).all(), "Missing realisation columns!"
+    im_df = pd.concat(im_dfs, axis=0, ignore_index=True)
+    assert np.isin(["event_int_id", "rel_int_id", "site_id"] + nng.constants.IMS, im_df.columns).all(), "Missing record IM columns!"
+    site_event_df = pd.concat(
+        site_event_dfs,
+        axis=0,
+        ignore_index=True,
+    )
+
+    # Add to database
+    with nng.DuckIMDB(db_ffp) as db:
+        db.add_event_data(event_df)
+        logger.info(
+            f"Added {event_df.shape[0]} DS point source events to the database."
+        )
+        db.add_realisation_data(rel_df)
+        logger.info(
+            f"Added {rel_df.shape[0]} DS point source realisations to the database."
+        )
+        db.add_site_event_data(site_event_df)
+        logger.info(
+            f"Added site-event distance data for {site_event_df.shape[0]} DS point source event-site pairs to the database."
+        )
+        db.add_record_im_data(im_df)
+        logger.info(
+            f"Added IM data for {im_df.shape[0]} DS point source records to the database."
+        )
 
 
 @app.command("create-empirical-db")

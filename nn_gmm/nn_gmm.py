@@ -399,7 +399,7 @@ class GMMRunConfig(BaseRunConfig):
             + len(self.source_to_site_inputs)
         )
         if "tect_type" in self.source_inputs:
-            n_inputs += 2
+            n_inputs += len(constants.NN_TECT_TYPES) - 1  # One-hot encoding
 
         return n_inputs
 
@@ -942,6 +942,11 @@ def run_model_training(
     source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
     source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
+
+    logger.info(f"Number of active shallow sources: {(source_df.tect_type == 'ACTIVE_SHALLOW').sum()}")
+    logger.info(f"Number of volcanic sources: {(source_df.tect_type == 'VOLCANIC').sum()}")
+    logger.info(f"Number of subduction interface sources: {(source_df.tect_type == 'SUBDUCTION_INTERFACE').sum()}")
+    logger.info(f"Number of subduction slab sources: {(source_df.tect_type == 'SUBDUCTION_SLAB').sum()}")
 
     # Add sample weights
     _add_sample_weights(

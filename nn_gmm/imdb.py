@@ -96,6 +96,21 @@ class DuckIMDB:
             ).fetchall()
             self._event_table_columns = np.array([row[0] for row in result])
         return self._event_table_columns
+    
+    @property
+    def max_event_int_id(self) -> int:
+        """
+        Returns the maximum event_int_id in the events table.
+
+        Returns
+        -------
+        int
+            Maximum event_int_id.
+        """
+        result = self._conn.execute(
+            "SELECT MAX(event_int_id) FROM events"
+        ).fetchone()
+        return result[0] if result[0] is not None else None
 
     @property
     def realisation_table_columns(self) -> np.ndarray:
@@ -113,6 +128,21 @@ class DuckIMDB:
             ).fetchall()
             self._realisation_table_columns = np.array([row[0] for row in result])
         return self._realisation_table_columns
+    
+    @property
+    def max_rel_int_id(self) -> int:
+        """
+        Returns the maximum rel_int_id in the realisations table.
+
+        Returns
+        -------
+        int
+            Maximum rel_int_id.
+        """
+        result = self._conn.execute(
+            "SELECT MAX(rel_int_id) FROM realisations"
+        ).fetchone()
+        return result[0] if result[0] is not None else None
 
     @property
     def site_table_columns(self) -> np.ndarray:
@@ -163,6 +193,7 @@ class DuckIMDB:
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'record_ims' ORDER BY ordinal_position"
             ).fetchall()
             self._record_im_table_columns = np.array([row[0] for row in result])
+
         return self._record_im_table_columns
 
     @property
@@ -682,9 +713,13 @@ class DuckIMDB:
             DataFrame containing the IM data to add
         """
         im_df = im_df.rename(columns=constants.PSA_KEYS_TO_DB)
-        im_df["event_int_id"] = self.event_to_int_id_mapping.loc[im_df.event_id].values
-        im_df["site_int_id"] = self.site_to_int_id_mapping.loc[im_df.site_id].values
-        im_df["rel_int_id"] = self.rel_to_int_id_mapping.loc[im_df.rel_id].values
+        if "event_int_id" not in im_df.columns:
+            im_df["event_int_id"] = self.event_to_int_id_mapping.loc[im_df.event_id].values
+        if "site_int_id" not in im_df.columns:
+            im_df["site_int_id"] = self.site_to_int_id_mapping.loc[im_df.site_id].values
+        if "rel_int_id" not in im_df.columns:
+            im_df["rel_int_id"] = self.rel_to_int_id_mapping.loc[im_df.rel_id].values
+
         im_df["record_int_id"] = self._get_record_int_id(
             im_df.event_int_id.values, im_df.rel_int_id.values, im_df.site_int_id.values
         )
@@ -710,7 +745,9 @@ class DuckIMDB:
         median_info : pd.Series
             Series containing event metadata.
         """
-        event_df["event_int_id"] = np.arange(1, len(event_df) + 1, dtype=int)
+        if "event_int_id" not in event_df.columns:
+            assert self.max_event_int_id is None
+            event_df["event_int_id"] = np.arange(1, len(event_df) + 1, dtype=int)
         event_df = event_df[self.event_table_columns]
 
         self._conn.execute(
@@ -724,22 +761,31 @@ class DuckIMDB:
     def add_realisation_data(self, rel_df: pd.DataFrame) -> None:
         """
         Add realisation data to the 'realisations' table.
-        Note: All realisation data must belong to the same event.
 
         Parameters
         ----------
         rel_df : pd.DataFrame
-            DataFrame containing realisation data. All rows
-            must belong to the same event.
+            DataFrame containing realisation data. 
+            Index needs to be rel_id.
         """
-
         # Get event_int_id for the realisations
-        rel_df["event_int_id"] = self.event_to_int_id_mapping.loc[
-            rel_df.event_id
-        ].values
+        if "event_int_id" not in rel_df.columns:
+            assert "event_id" in rel_df.columns, "Must have event_id column in rel_df"
+            rel_df["event_int_id"] = self.event_to_int_id_mapping.loc[
+                rel_df.event_id
+            ].values
 
-        rel_df = rel_df.sort_index().reset_index().rename(columns={"index": "rel_id"})
-        rel_df["rel_int_id"] = np.arange(1, len(rel_df) + 1, dtype=int)
+        # Use index as rel_id if not already present
+        # (Assumes multi-index??)
+        if "rel_id" not in rel_df.columns:
+            assert self.max_rel_int_id is None
+            rel_df = rel_df.sort_index().reset_index().rename(columns={"index": "rel_id"})
+
+        # Assign rel_int_id if not already present
+        if "rel_int_id" not in rel_df.columns:
+            assert self.max_rel_int_id is None
+            rel_df["rel_int_id"] = np.arange(1, len(rel_df) + 1, dtype=int)
+
         rel_df = rel_df[self.realisation_table_columns]
 
         self._conn.execute(
@@ -751,6 +797,7 @@ class DuckIMDB:
 
         logger.info(f"Inserted realisation data for {len(rel_df)} realisations.")
 
+    
     def _get_record_int_id(
         self, event_int_id: np.ndarray, rel_int_id: np.ndarray, site_int_id: np.ndarray
     ) -> np.ndarray:

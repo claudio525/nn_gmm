@@ -647,6 +647,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         self, res_df: pd.DataFrame, add_legend_entries: bool, **plt_kwargs
     ):
         """Groups the results and adds to the plot"""
+        res_df = res_df.copy()
         res_df[self.group_bin_key] = pd.cut(
             res_df[self.group_key],
             bins=self.group_bin_edges,
@@ -654,33 +655,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
             include_lowest=True,
         )
 
-        # Bias
-        for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
-            cur_model_bias = res_df.loc[cur_record_ids, self.pSA_keys].mean(axis=0)
-            self.ax1.plot(
-                self.pSA_periods,
-                cur_model_bias[self.pSA_keys].values,
-                c=self.group_colors[i],
-                **plt_kwargs,
-                label=(
-                    f"{cur_bin_label}, N={len(cur_record_ids)}"
-                    if add_legend_entries
-                    else None
-                ),
-            )
-
-        # Std
-        for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
-            cur_res_std = res_df.loc[cur_record_ids, self.pSA_keys].std(axis=0)
-            self.ax3.plot(
-                self.pSA_periods,
-                cur_res_std[self.pSA_keys].values,
-                c=self.group_colors[i],
-                **plt_kwargs,
-            )
-
+        self._plot_groups(res_df, self.group_bin_key, add_legend_entries, **plt_kwargs)
         return self
 
     def add_categorial_results(
@@ -690,9 +665,13 @@ class GroupedBiasStdPlot(BiasStdPlot):
         **plt_kwargs,
     ):
         """Adds categorial results (already grouped) to the plot"""
+        self._plot_groups(res_df, self.group_key, add_legend_entries, **plt_kwargs)
+        return self
+    
+    def _plot_groups(self, res_df: pd.DataFrame, key: str, add_legend_entries: bool, **plt_kwargs):
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_key] == cur_bin_label]
+            cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_model_bias = res_df.loc[cur_record_ids, self.pSA_keys].mean(axis=0)
             self.ax1.plot(
                 self.pSA_periods,
@@ -708,24 +687,18 @@ class GroupedBiasStdPlot(BiasStdPlot):
 
         # Std
         for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_key] == cur_bin_label]
+            cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_res_std = res_df.loc[cur_record_ids, self.pSA_keys].std(axis=0)
             self.ax3.plot(
                 self.pSA_periods,
                 cur_res_std[self.pSA_keys].values,
                 c=self.group_colors[i],
-                label=(
-                    f"{cur_bin_label}, N={len(cur_record_ids)}"
-                    if add_legend_entries
-                    else None
-                ),
                 **plt_kwargs,
             )
 
-        return self
-
     def add_nn_gmm_grouped_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
         """Adds grouped NN-GMM CV band to the plot"""
+        res_df = res_df.copy()
         res_df[self.group_bin_key] = pd.cut(
             res_df[self.group_key],
             bins=self.group_bin_edges,
@@ -733,9 +706,18 @@ class GroupedBiasStdPlot(BiasStdPlot):
             include_lowest=True,
         )
 
+        self._plot_nn_gmm_grouped_cv_band(res_df, self.group_bin_key, **plt_kwargs)
+        return self
+    
+    def add_nn_gmm_categorial_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
+        """Adds categorial NN-GMM CV band to the plot"""
+        self._plot_nn_gmm_grouped_cv_band(res_df, self.group_key, **plt_kwargs)
+        return self
+    
+    def _plot_nn_gmm_grouped_cv_band(self, res_df: pd.DataFrame, key: str, **plt_kwargs):
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
             cur_cv_bias_std = (
                 res_df.loc[cur_record_ids]
@@ -756,7 +738,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
 
         # Std
         for i, cur_bin_label in enumerate(self.group_labels):
-            cur_record_ids = res_df.index[res_df[self.group_bin_key] == cur_bin_label]
+            cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
             cur_cv_res_std_std = (
                 res_df.loc[cur_record_ids]
@@ -774,8 +756,6 @@ class GroupedBiasStdPlot(BiasStdPlot):
                 color=self.group_colors[i],
                 **plt_kwargs,
             )
-
-        return self
 
 
 def site_bias_histogram_comparison(

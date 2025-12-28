@@ -86,7 +86,7 @@ def train_cv(
             event_df["mag_bin"],
         )
     ]
-
+    # and sites wrt. vs30
     vs30_split = StratifiedKFold(
         n_splits=n_site_folds, shuffle=True, random_state=run_config.seed
     )
