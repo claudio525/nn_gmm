@@ -12,6 +12,7 @@ import typer
 import nn_gmm as nng
 from mera import MeraResults
 import ml_tools as mlt
+from qcore import nhm
 
 
 device = "cpu"
@@ -129,167 +130,81 @@ def mag_rrup_scatter(
     plt.savefig(output_dir / f"rrup_vs_mag.{nng.constants.FIG_FORMAT}")
 
 
-@app.command("nzgmdb-mag-rrup-scatter")
-def nzgmdb_mag_rrup_scatter(
-    nzgmdb_ffp: Path, output_dir: Path, n_rrup_bins: int = 20, n_mag_bins: int = 20
-):
-    """
-    Creates a scatter of rrup vs magnitude
-    with the marginal distributions on the sides
-    """
-    nng.utils.setup_logging()
-    _fig_settings()
-
-    obs_data = nng.obs_data.ObservedData.from_nzgmdb_flat(nzgmdb_ffp)
-    obs_data = obs_data.to_event_site_index()
-
-    # Load basic filtered data
-    filtered_obs_data = nng.obs_data.load_obs_nzgmdb(
-        nzgmdb_ffp, apply_mag_distance_filter=True
-    )
-
-    fig, axs = plt.subplot_mosaic(
-        [["histx", "."], ["scatter", "histy"]],
-        width_ratios=(4, 1),
-        height_ratios=(1, 4),
-        layout="constrained",
-        figsize=nng.constants.FIG_SIZE,
-        dpi=nng.constants.FIG_DPI,
-    )
-    ax_scatter = axs["scatter"]
-    ax_histx = axs["histx"]
-    ax_histy = axs["histy"]
-
-    # Scatter plot
-    ax_scatter.scatter(
-        obs_data.record_df["rrup"],
-        obs_data.record_df["mag"],
-        s=2.0,
-        c="grey",
-        alpha=0.75,
-        label=f"All (N={obs_data.n_records:,})",
-    )
-    ax_scatter.scatter(
-        filtered_obs_data.record_df["rrup"],
-        filtered_obs_data.record_df["mag"],
-        s=2.0,
-        c="red",
-        alpha=0.75,
-        label=f"Filtered (N={filtered_obs_data.n_records:,})",
-    )
-    ax_scatter.plot(
-        nng.constants.MW_RRUP_LIMITS[:, 1],
-        nng.constants.MW_RRUP_LIMITS[:, 0],
-        c="blue",
-        label="Magnitude-distance filter",
-        linewidth=nng.constants.FIG_LINEWIDTH,
-    )
-
-    ax_scatter.set_xlabel("Source-to-site distance, $R_{rup}$ (km)")
-    ax_scatter.set_ylabel("Magnitude, $M_{W}$")
-    ax_scatter.legend()
-    ax_scatter.set_xscale("log")
-    ax_scatter.set_xlim(0.1, 1000)
-    ax_scatter.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
-
-    ax_histx.hist(
-        filtered_obs_data.record_df["rrup"],
-        bins=np.logspace(np.log10(0.1), np.log10(1000), n_rrup_bins),
-        color="red",
-        edgecolor="black",
-    )
-    ax_histx.set_xscale("log")
-    ax_histx.set_xlim(0.1, 1000)
-    ax_histx.spines[["top", "right"]].set_visible(False)
-    ax_histx.set_xticklabels([])
-    ax_histx.set_yscale("log")
-
-    ax_histy.hist(
-        filtered_obs_data.record_df["mag"],
-        bins=n_mag_bins,
-        color="red",
-        orientation="horizontal",
-        edgecolor="black",
-    )
-    ax_histy.set_ylim(ax_scatter.get_ylim())
-    ax_histy.spines[["top", "right"]].set_visible(False)
-    ax_histy.set_yticklabels([])
-    ax_histy.set_xscale("log")
-
-    plt.savefig(output_dir / f"nzgmdb_rrup_vs_mag.{nng.constants.FIG_FORMAT}")
-
-
 @app.command("fault-basin-map")
 def fault_basin_map(output_dir: Path):
     """
     Plot fault and basin map of NZ
     """
-    logger = nng.utils.setup_logging()
+    nng.utils.setup_logging()
 
     spatial_plots = (
         nng.plots_spatial.SpatialPlot()
-        .plot_faults(pen="1p,black")
+        .plot_fault_traces(pen="1p,black")
         .plot_basin_boundaries(pen="0.5p,red")
     )
 
     spatial_plots.save(output_dir / f"nz_faults_and_basins.{nng.constants.FIG_FORMAT}")
 
 
-@app.command("nzgmdb-map")
-def nzgmdb_map(nzgmdb_ffp: Path, output_dir: Path):
+@app.command("fault-map")
+def fault_map(output_dir: Path, imdb_ffp: Path):
     """
-    Plot historic events and strong motion stations from NZGMDB
+    Plot fault map of NZ
     """
-    obs_data = nng.obs_data.load_obs_nzgmdb(nzgmdb_ffp)
+    nng.utils.setup_logging()
 
-    event_df = obs_data.event_df.copy()
-    event_df = event_df[event_df.mag >= 4.0]
+    with nng.DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+    
+    # Ignore point sources
+    event_df = event_df.loc[event_df.fault_type != "DS_POINT_SOURCE"]
 
-    # Split historic events into magnitude bins
-    mag_bins = [4, 5, 6, 9]
-    labels = ["blue", "orange", "red"]
-    event_df.loc[:, "mag_bin"] = pd.cut(
-        event_df.mag, bins=mag_bins, include_lowest=True, labels=labels
+    region = [165.4, 179.6, -47.4, -36.2]
+
+    spatial_plot = nng.plots_spatial.SpatialPlot(
+        plot_topo=True, plot_highways=True, region=region
     )
 
-    spatial_plot = nng.plots_spatial.SpatialPlot()
-
-    # Plot the historic events
-    for i, (_, cur_row) in enumerate(event_df.sort_values("mag").iterrows()):
-        spatial_plot.fig.meca(
-            spec={
-                "strike": cur_row.strike,
-                "dip": cur_row.dip,
-                "rake": cur_row.rake,
-                "magnitude": cur_row.mag,
-                "depth": cur_row.depth,
-            },
-            scale=f"{0.04 * cur_row.mag}c",
-            longitude=cur_row.lon,
-            latitude=cur_row.lat,
-            pen="0.05p,black,solid",
-            compressionfill=cur_row.mag_bin,
-        )
-
-    spatial_plot.plot_sites(
-        obs_data.site_df, style="t0.2c", pen="0.1p,black,solid", fill="green3"
+    # Plot simulated crustal faults
+    spatial_plot.plot_fault_traces(
+        event_df.loc[event_df.tect_type == "ACTIVE_SHALLOW"].event_id.values.astype(
+            str
+        ),
+        label="Simulated Active Shallow Sources",
+        pen="0.75p,red",
     )
 
-    legend_spec = io.StringIO()
-    legend_spec.write("H 12p,Helvetica-Bold Historic Events\n")
-    legend_spec.write("D 0.1i 1p\n")
-    legend_spec.write("S 0.1i c 0.15c blue 0.05p,black 0.4i Magnitude 4.0-5.0\n")
-    legend_spec.write("S 0.1i c 0.20c orange 0.05p,black 0.4i Magnitude 5.0-6.0\n")
-    legend_spec.write("S 0.1i c 0.25c red 0.05p,black 0.4i Magnitude 6.0+\n")
-
-    spatial_plot.fig.legend(
-        spec=legend_spec,
-        box="+gwhite+p1p",
+    # Plot simulated crustal faults
+    spatial_plot.plot_fault_traces(
+        event_df.loc[event_df.tect_type == "VOLCANIC"].event_id.values.astype(
+            str
+        ),
+        label="Simulated Volcanic Sources",
+        pen="0.75p,maroon",
     )
 
-    spatial_plot.save(
-        output_dir / f"nzgmdb_events_and_stations.{nng.constants.FIG_FORMAT}"
+    # Plot simulated subduction faults
+    spatial_plot.plot_fault_traces(
+        event_df.loc[event_df.tect_type == "SUBDUCTION_INTERFACE"].event_id.values.astype(
+            str
+        ),
+        label="Simulated Subduction Interface Sources",
+        pen="0.75p,blue",
     )
+
+    # Not simulated faults from NHM
+    nhm_df = nhm.load_nhm_df(str(nng.constants.NHM_FAULT_FFP))
+    not_simulated_faults = nhm_df.loc[~nhm_df.name.isin(event_df.event_id)].name.values.astype(str)
+    spatial_plot.plot_fault_traces( 
+        not_simulated_faults,
+        label="Sources not Simulated",
+        pen="0.5p,black",
+    )
+
+    # Add legend
+    spatial_plot.fig.legend(position="JTL+jTL+o0.2c", box="+gwhite+p1p")
+    
+    spatial_plot.save(output_dir / f"nz_faults.{nng.constants.FIG_FORMAT}")
 
 
 @app.command("mera-model-bias-std")
@@ -485,8 +400,6 @@ def model_trends(
         pass
     else:
         raise ValueError(f"Unknown trend type: {config['type']}")
-
-    print("wtf")
 
 
 if __name__ == "__main__":

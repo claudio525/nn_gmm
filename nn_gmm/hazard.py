@@ -2,6 +2,7 @@ import logging
 import multiprocessing as mp
 import pickle
 from pathlib import Path
+from functools import partial
 
 import pandas as pd
 import numpy as np
@@ -12,6 +13,7 @@ import oq_wrapper as oqw
 from . import constants
 from . import nn_gmm
 from .imdb import DuckIMDB
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ EMP_GMM_MAPPING = {
 }
 
 
-def run_sites_hazard(
+def run_sites_ds_hazard(
     model_dir: Path, sites: list[str], device: str, n_procs: int = 1
 ) -> None:
     """
@@ -39,8 +41,6 @@ def run_sites_hazard(
     n_procs : int, optional
         Number of processes to use for parallel computation. Default is 1.
     """
-    import seismic_hazard_analysis as sha
-
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True).set_index("site_id")
@@ -53,7 +53,7 @@ def run_sites_hazard(
         hazard_results = {}
         for cur_site in sites:
             logger.info(f"Running DS hazard for site: {cur_site}")
-            hazard_results[cur_site] = _run_site_hazard(
+            hazard_results[cur_site] = _run_site_ds_hazard(
                 model_dir, site_df.loc[cur_site], ds_source_df, ds_erf_df, device
             )
     else:
@@ -62,7 +62,7 @@ def run_sites_hazard(
         )
         with mp.Pool(n_procs) as p:
             hazard_results = p.starmap(
-                _run_site_hazard,
+                _run_site_ds_hazard,
                 [
                     (model_dir, site_df.loc[cur_site], ds_source_df, ds_erf_df, device)
                     for cur_site in sites
@@ -76,15 +76,67 @@ def run_sites_hazard(
             pickle.dump(cur_hazard, f)
 
 
-def _run_site_hazard(
+def compute_uniform_grid_ds_hazard(
+    imdb_ffp: Path, model_dir: Path, device: str, n_procs: int = 1
+):
+    run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
+
+    # Get the sites
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(
+            add_nztm=True, min_grid_level=0, max_grid_level=0
+        ).set_index("site_id")
+    sites = site_df.index.values.astype(str)
+
+    # Load DS source data
+    ds_source_df, ds_erf_df = nn_gmm.utils.get_ds_source_data()
+
+    if n_procs == 1:
+        hazard_results = {}
+        for cur_site, cur_row in site_df.iterrows():
+            logger.info(f"Running DS hazard for site: {cur_site}")
+            hazard_results[cur_site] = _run_site_ds_hazard(
+                model_dir,
+                cur_row,
+                ds_source_df,
+                ds_erf_df,
+                device,
+                tect_type_hazard=False,
+            )
+    else:
+        logger.info(
+        f"Running DS hazard for {len(sites)} sites using {n_procs} processes..."
+        )
+        with mp.Pool(n_procs) as p:
+            hazard_results = p.starmap(
+                _run_site_ds_hazard,
+                [
+                    (model_dir, site_df.loc[cur_site], ds_source_df, ds_erf_df, device, False)
+                    for cur_site in sites
+                ],
+            )
+        hazard_results = {site: result for site, result in zip(sites, hazard_results)}
+
+    # Save per IM
+    (out_dir := model_dir / "ds_hazard/uniform_grid").mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving hazard results in {out_dir}")
+    for im in run_config.ims:
+        im_hazard_df = pd.concat([hazard_results[cur_site]["total"][im] for cur_site in sites], axis=1)
+        im_hazard_df.columns = sites
+
+        im_hazard_df.to_parquet(out_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet")
+
+
+def _run_site_ds_hazard(
     model_dir: Path,
     site_series: pd.Series,
     ds_source_df: pd.DataFrame,
     ds_erf_df: pd.DataFrame,
     device: str,
+    tect_type_hazard: bool = True,
 ) -> dict[str, dict[str, pd.Series]]:
     """
-    Run hazard calculations for a single site.
+    Run DS hazard calculations for a single site using a NN-GMM model.
 
     Returns
     -------
@@ -117,11 +169,10 @@ def _run_site_hazard(
         )
         / 1000
     )
-    # Use Rjb for rx and ry, in the past we have used zero for this.
-    # Using Rjb gives the same result (when using Br13 and ZA06)
-    # as using zero, and makes more sense.
-    rupture_df["rx"] = rupture_df["rjb"]
-    rupture_df["ry"] = rupture_df["rjb"]
+
+    # Same as what is done for training for DS point sources
+    rupture_df["rx"] = 0
+    rupture_df["ry"] = 0
 
     # Apply max-rrup limit
     rupture_df = rupture_df.loc[rupture_df.rrup <= run_config.max_rrup]
@@ -133,13 +184,11 @@ def _run_site_hazard(
 
     # Rename columns to match expected input names
     rupture_df = rupture_df.rename(
-        columns={"mag": "magnitude", "tectonic_type": "tect_type", "dbot": "dbottom"}
-    )
-
-    # Convert tectonic type
-    rupture_df["tect_type"] = rupture_df["tect_type"].cat.rename_categories(
-        {
-            "SUBDUCTION_SLAB": "SUBDUCTION_INTERFACE",
+        columns={
+            "mag": "magnitude",
+            "tectonic_type": "tect_type",
+            "dbot": "dbottom",
+            "depth": "hypo_depth",
         }
     )
 
@@ -163,49 +212,51 @@ def _run_site_hazard(
         std_col_suffix="_pred_std",
     )
 
-    crustal_ids = rupture_df.loc[
-        rupture_df.tect_type == "ACTIVE_SHALLOW"
-    ].index.values.astype(str)
-    crustal_hazard_results = sha.nshm_2010.compute_gmm_hazard(
-        pred_df.loc[crustal_ids],
-        ds_erf_df.loc[crustal_ids].annual_rec_prob,
-        run_config.ims,
-        mean_col_suffix="_pred",
-        std_col_suffix="_pred_std",
-    )
+    crustal_hazard_results = None
+    if tect_type_hazard:
+        crustal_ids = rupture_df.loc[
+            rupture_df.tect_type == "ACTIVE_SHALLOW"
+        ].index.values
+        crustal_hazard_results = sha.nshm_2010.compute_gmm_hazard(
+            pred_df.loc[crustal_ids],
+            ds_erf_df.loc[crustal_ids].annual_rec_prob,
+            run_config.ims,
+            mean_col_suffix="_pred",
+            std_col_suffix="_pred_std",
+        )
 
-    subduction_ids = rupture_df.loc[
-        rupture_df.tect_type == "SUBDUCTION_INTERFACE"
-    ].index.values.astype(str)
-    subduction_hazard_results = sha.nshm_2010.compute_gmm_hazard(
-        pred_df.loc[subduction_ids],
-        ds_erf_df.loc[subduction_ids].annual_rec_prob,
-        run_config.ims,
-        mean_col_suffix="_pred",
-        std_col_suffix="_pred_std",
-    )
+    subduction_slab_hazard_results = None
+    if tect_type_hazard:
+        subduction_slab_ids = rupture_df.loc[
+            rupture_df.tect_type == "SUBDUCTION_SLAB"
+        ].index.values
+        subduction_slab_hazard_results = sha.nshm_2010.compute_gmm_hazard(
+            pred_df.loc[subduction_slab_ids],
+            ds_erf_df.loc[subduction_slab_ids].annual_rec_prob,
+            run_config.ims,
+            mean_col_suffix="_pred",
+            std_col_suffix="_pred_std",
+        )
 
     return {
         "total": total_hazard_results,
         "crustal": crustal_hazard_results,
-        "subduction": subduction_hazard_results,
+        "subduction_slab": subduction_slab_hazard_results,
     }
 
 
-def run_emp_sites_hazard(
+def run_emp_sites_ds_hazard(
     imdb_ffp: Path, sites: list[str], output_dir: Path, n_procs: int = 1
 ) -> None:
+    """Compute empirical DS hazard for multiple sites."""
     import seismic_hazard_analysis as sha
 
     with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(add_nztm=True).set_index("site_id")
 
     # Load the ERF file
-    background_ffp = (
-        constants.HAZARD_RESOURCES_DIR
-        / "NZBCK2015_Chch50yearsAftershock_OpenSHA_modType4.txt"
-    )
-    ds_erf_ffp = constants.HAZARD_RESOURCES_DIR / "NZ_DSmodel_2015.txt"
+    background_ffp = constants.HAZARD_RESOURCES_DIR / "NZBCK211_OpenSHA.txt"
+    ds_erf_ffp = constants.HAZARD_RESOURCES_DIR / "NZ_DSmodel_2010.txt"
 
     ds_erf_df = pd.read_csv(ds_erf_ffp, index_col="rupture_name")
     ds_source_df = sha.nshm_2010.get_ds_source_df(background_ffp)
@@ -214,18 +265,30 @@ def run_emp_sites_hazard(
         hazard_results = {}
         for cur_site in sites:
             logger.info(f"Running empirical DS hazard for site: {cur_site}")
-            hazard_results[cur_site] = run_emp_site_hazard(
-                site_df.loc[cur_site], ds_source_df, ds_erf_df
+            hazard_results[cur_site] = _run_emp_site_ds_hazard(
+                site_df.loc[cur_site],
+                ds_source_df,
+                ds_erf_df,
             )
     else:
         logger.info(
             f"Running empirical DS hazard for {len(sites)} sites using {n_procs} processes..."
         )
         with mp.Pool(n_procs) as p:
+            fn_call = partial(
+                _run_emp_site_ds_hazard,
+                ds_source_df=ds_source_df,
+                ds_erf_df=ds_erf_df,
+                tect_type_hazard=False,
+            )
             hazard_results = p.starmap(
-                run_emp_site_hazard,
+                fn_call,
                 [
-                    (site_df.loc[cur_site], ds_source_df, ds_erf_df)
+                    (
+                        site_df.loc[cur_site],
+                        ds_source_df,
+                        ds_erf_df,
+                    )
                     for cur_site in sites
                 ],
             )
@@ -236,10 +299,69 @@ def run_emp_sites_hazard(
         with (output_dir / f"{cur_site}.pkl").open("wb") as f:
             pickle.dump(cur_hazard, f)
 
+def compute_uniform_grid_emp_ds_hazard(
+    imdb_ffp: Path,
+    output_dir: Path,
+    n_procs: int = 1,
+):
+    # Get the sites
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(
+            add_nztm=True, min_grid_level=0, max_grid_level=0
+        ).set_index("site_id")
+    sites = site_df.index.values.astype(str)
 
-def run_emp_site_hazard(
-    site_series: pd.Series, ds_source_df: pd.DataFrame, ds_erf_df: pd.DataFrame
+    # Load DS source data
+    ds_source_df, ds_erf_df = nn_gmm.utils.get_ds_source_data()
+
+    if n_procs == 1:
+        hazard_results = {}
+        for cur_site, cur_row in site_df.iterrows():
+            logger.info(f"Running empirical DS hazard for site: {cur_site}")
+            hazard_results[cur_site] = _run_emp_site_ds_hazard(
+                cur_row,
+                ds_source_df,
+                ds_erf_df,
+                tect_type_hazard=False,
+            )
+    else:
+        logger.info(
+        f"Running DS hazard for {len(sites)} sites using {n_procs} processes..."
+        )
+        with mp.Pool(n_procs) as p:
+            fn_call = partial(
+                _run_emp_site_ds_hazard,
+                ds_source_df=ds_source_df,
+                ds_erf_df=ds_erf_df,
+                tect_type_hazard=False,
+            )
+            hazard_results = p.starmap(
+                fn_call,
+                [
+                    (site_df.loc[cur_site],)
+                    for cur_site in sites
+                ],
+            )
+        hazard_results = {site: result for site, result in zip(sites, hazard_results)}
+
+    # Save per IM
+    (out_dir := output_dir / "ds_hazard/uniform_grid").mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving hazard results in {out_dir}")
+    for im in constants.PSA_KEYS:
+        im_hazard_df = pd.concat([hazard_results[cur_site]["total"][im] for cur_site in sites], axis=1)
+        im_hazard_df.columns = sites
+
+        im_hazard_df.to_parquet(out_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet")
+
+
+def _run_emp_site_ds_hazard(
+    site_series: pd.Series,
+    ds_source_df: pd.DataFrame,
+    ds_erf_df: pd.DataFrame,
+    max_rrup: float | None = 300.0,
+    tect_type_hazard: bool = True,
 ) -> dict[str, dict[str, pd.DataFrame]]:
+    """Compute empirical DS hazard for a single site."""
     import seismic_hazard_analysis as sha
 
     site_properties = {
@@ -258,35 +380,38 @@ def run_emp_site_hazard(
         site_properties,
         EMP_GMM_MAPPING,
         constants.PSA_KEYS,
-        max_rrup=300.0,
+        max_rrup=max_rrup,
     )
 
-    crustal_ids = ds_source_df.loc[
-        ds_source_df.tectonic_type == "ACTIVE_SHALLOW"
-    ].index.values.astype(str)
-    crustal_hazard = sha.nshm_2010.compute_gmm_ds_hazard(
-        ds_source_df.loc[crustal_ids],
-        ds_erf_df.loc[crustal_ids],
-        site_nztm_values,
-        site_properties,
-        EMP_GMM_MAPPING,
-        constants.PSA_KEYS,
-        max_rrup=300.0,
-    )
+    crustal_hazard = None
+    if tect_type_hazard:
+        crustal_ids = ds_source_df.loc[
+            ds_source_df.tectonic_type == "ACTIVE_SHALLOW"
+        ].index.values.astype(str)
+        crustal_hazard = sha.nshm_2010.compute_gmm_ds_hazard(
+            ds_source_df.loc[crustal_ids],
+            ds_erf_df.loc[crustal_ids],
+            site_nztm_values,
+            site_properties,
+            EMP_GMM_MAPPING,
+            constants.PSA_KEYS,
+            max_rrup=max_rrup,
+        )
 
-    subduction_ids = ds_source_df.loc[
-        (ds_source_df.tectonic_type == "SUBDUCTION_INTERFACE")
-        | (ds_source_df.tectonic_type == "SUBDUCTION_SLAB")
-    ].index.values.astype(str)
-    subduction_hazard = sha.nshm_2010.compute_gmm_ds_hazard(
-        ds_source_df.loc[subduction_ids],
-        ds_erf_df.loc[subduction_ids],
-        site_nztm_values,
-        site_properties,
-        EMP_GMM_MAPPING,
-        constants.PSA_KEYS,
-        max_rrup=300.0,
-    )
+    subduction_hazard = None
+    if tect_type_hazard:
+        subduction_ids = ds_source_df.loc[
+            ds_source_df.tectonic_type == "SUBDUCTION_SLAB"
+        ].index.values.astype(str)
+        subduction_hazard = sha.nshm_2010.compute_gmm_ds_hazard(
+            ds_source_df.loc[subduction_ids],
+            ds_erf_df.loc[subduction_ids],
+            site_nztm_values,
+            site_properties,
+            EMP_GMM_MAPPING,
+            constants.PSA_KEYS,
+            max_rrup=max_rrup,
+        )
 
     return {
         "total": ds_hazard,
@@ -305,6 +430,7 @@ def run_emp_ds_disagg(
     n_procs: int = 1,
     tect_type: str | None = None,
 ) -> None:
+    """Compute empirical DS disaggregation for multiple sites."""
     import seismic_hazard_analysis as sha
 
     logger.info("Running empirical DS disaggregation...")
@@ -315,9 +441,7 @@ def run_emp_ds_disagg(
     ds_source_df, ds_erf_df = nn_gmm.utils.get_ds_source_data()
     if tect_type is not None:
         logger.info(f"Filtering DS sources for tectonic type: {tect_type}")
-        ds_source_df = ds_source_df.loc[
-            ds_source_df.tectonic_type == tect_type
-        ]
+        ds_source_df = ds_source_df.loc[ds_source_df.tectonic_type == tect_type]
         ds_erf_df = ds_erf_df.loc[ds_source_df.index]
 
     with DuckIMDB(imdb_ffp, readonly=True) as imdb:
@@ -359,9 +483,7 @@ def run_emp_ds_disagg(
                     for site in site_ids
                 ],
             )
-        disagg_contrs = {
-            site: result for site, result in zip(site_ids, disagg_results)
-        }
+        disagg_contrs = {site: result for site, result in zip(site_ids, disagg_results)}
 
 
 def _run_site_emp_ds_disagg(
@@ -435,9 +557,13 @@ def _run_site_emp_ds_disagg(
         disagg_hz = sha.hazard.hazard_curve(
             disagg_gm_prob, ds_erf_df["annual_rec_prob"]
         )
-        im_disagg_contr = sha.disagg.disagg_exceedance_multi(
-            disagg_gm_prob, ds_erf_df["annual_rec_prob"], disagg_hz
-        ).astype(np.float32).sort_index()
+        im_disagg_contr = (
+            sha.disagg.disagg_exceedance_multi(
+                disagg_gm_prob, ds_erf_df["annual_rec_prob"], disagg_hz
+            )
+            .astype(np.float32)
+            .sort_index()
+        )
         im_disagg_contr.columns = rps
         disagg_contr[im] = im_disagg_contr
 
@@ -452,4 +578,3 @@ def _run_site_emp_ds_disagg(
     )
 
     disagg_contr_da.to_netcdf(output_dir / f"{site_series.name}.nc")
-

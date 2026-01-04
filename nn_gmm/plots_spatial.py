@@ -1,3 +1,4 @@
+from functools import partial
 import multiprocessing as mp
 import logging
 from pathlib import Path
@@ -42,14 +43,14 @@ class SpatialPlot:
         "topo_cmap_max": 3000,
         "topo_cmap_inc": 10,
         "highway_pen_width": 0.1,
+        "frame_args": ["f"],
     }
 
     DEFAULT_CONFIG_OPTIONS = dict(
         MAP_FRAME_TYPE="plain",
-        FORMAT_GEO_MAP="ddd.xx",
-        MAP_GRID_PEN="1p,gray",
-        MAP_TICK_PEN_PRIMARY="1p,black",
-        MAP_FRAME_PEN="1p,black",
+        # FORMAT_GEO_MAP="ddd.xx",
+        MAP_TICK_PEN_PRIMARY="0.5p,black",
+        MAP_FRAME_PEN="0.5p,black",
         MAP_FRAME_AXES="wsne",
     )
 
@@ -66,6 +67,9 @@ class SpatialPlot:
             if config_options is None
             else self.DEFAULT_CONFIG_OPTIONS | config_options
         )
+
+        if "region" not in fig_kwargs:
+            fig_kwargs["region"] = constants.NZ_BOUNDING_BOX
 
         self.fig = plotting.gen_region_fig(
             **fig_kwargs,
@@ -139,7 +143,7 @@ class SpatialPlot:
         assert "lat" in im_df.columns, "im_df must contain 'lat' column"
 
         plot_grid_kwargs = {
-            "cb_label": im,
+            "cb_label": utils.get_nice_im_name(im),
             "plot_contours": False,
             "reverse_cmap": True,
             "cmap": "hot",
@@ -170,21 +174,29 @@ class SpatialPlot:
 
         return self
 
-    def plot_faults(self, faults: tuple[str] | list[str] | None = None, **plot_kwargs):
+    def plot_fault_traces(
+        self,
+        faults: tuple[str] | list[str] | None = None,
+        label: str | None = None,
+        **plot_kwargs,
+    ):
         """Adds fault traces to the existing figure."""
         plot_kwargs = {"pen": "0.5p,darkgray"} | plot_kwargs
 
         nhm_data = nhm.load_nhm(str(constants.NHM_FAULT_FFP))
 
         # Plot the fault traces
+        label_added = False
         for cur_name, cur_fault in nhm_data.items():
             if faults is None or cur_name in faults:
                 cur_trace = cur_fault.trace
                 self.fig.plot(
                     x=cur_trace[:, 0],
                     y=cur_trace[:, 1],
+                    label=label if label_added is False else None,
                     **plot_kwargs,
                 )
+                label_added = True
 
         return self
 
@@ -206,6 +218,113 @@ class SpatialPlot:
 
     def save(self, output_ffp: Path, dpi: int = 900):
         self.fig.savefig(output_ffp, dpi=dpi, anti_alias=True)
+
+
+def nn_gmm_hazard_map(
+    imdb_ffp: Path,
+    hazard_results_dir: Path,
+    ims: list[str],
+    rps: list[int],
+    output_dir: Path,
+    n_procs: int = 1,
+):
+    """Create NZ-wide hazard maps for specified IMs at a given return period."""
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df().set_index("site_id")
+
+    if n_procs == 1:
+        for im in ims:
+            _nn_gm_hazard_map(site_df, hazard_results_dir, im, rps, output_dir)
+    else:
+        mp_func = partial(
+            _nn_gm_hazard_map,
+            site_df,
+            hazard_results_dir,
+            rps=rps,
+            output_dir=output_dir,
+            is_mp=True,
+        )
+        with mp.Pool(n_procs) as pool:
+            logger.info(f"Using {n_procs} processes to generate hazard maps.")
+            list(tqdm(pool.imap_unordered(mp_func, ims), total=len(ims)))
+
+
+def _nn_gm_hazard_map(
+    site_df: pd.DataFrame,
+    hazard_results_dir: Path,
+    im: str,
+    rps: list[int],
+    output_dir: Path,
+    is_mp: bool = False,
+):
+    if is_mp:
+        import pygmt
+
+        reload(pygmt)
+
+    import seismic_hazard_analysis as sha
+
+    # Hazard map IM limits mapping
+    # IM_LIMITS_MAPPING = {
+    #     475: {
+    #         "pSA_0.01": (0.0, 1.0, 0.05),
+    #         "pSA_0.1": (0.0, 2.5, 0.125),
+    #         "pSA_0.5": (0.0, 1.5, 0.075),
+    #         "pSA_1.0": (0.0, 0.8, 0.04),
+    #         "pSA_3.0": (0.0, 0.6, 0.03),
+    #         "pSA_5.0": (0.0, 0.25, 0.0125),
+    #         "pSA_10.0": (0.0, 0.025, 0.00125),
+    #     },
+    #     975: {
+    #         "pSA_0.01": (0.0, 1.0, 0.05),
+    #         "pSA_0.1": (0.0, 2.5, 0.125),
+    #         "pSA_0.5": (0.0, 1.5, 0.075),
+    #         "pSA_1.0": (0.0, 0.8, 0.04),
+    #         "pSA_3.0": (0.0, 0.6, 0.03),
+    #         "pSA_5.0": (0.0, 0.25, 0.0125),
+    #         "pSA_10.0": (0.0, 0.025, 0.00125),
+    #     },
+    #     2475: {
+    #         "pSA_0.01": (0.0, 1.0, 0.05),
+    #         "pSA_0.1": (0.0, 2.5, 0.125),
+    #         "pSA_0.5": (0.0, 1.5, 0.075),
+    #         "pSA_1.0": (0.0, 0.8, 0.04),
+    #         "pSA_3.0": (0.0, 0.6, 0.03),
+    #         "pSA_5.0": (0.0, 0.25, 0.0125),
+    #         "pSA_10.0": (0.0, 0.025, 0.00125),
+    #     }
+    # }
+
+    excd_values = [sha.utils.rp_to_prob(rp) for rp in rps]
+
+    hazard_df = pd.read_parquet(
+        hazard_results_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet"
+    )
+
+    results_df = pd.DataFrame(index=hazard_df.columns, columns=rps, dtype=float)
+    results_df["lon"] = site_df.loc[hazard_df.columns, "lon"]
+    results_df["lat"] = site_df.loc[hazard_df.columns, "lat"]
+
+    for site in hazard_df.columns:
+        results_df.loc[site, rps] = sha.utils.exceedance_to_im(
+            np.array(excd_values),
+            hazard_df.index.values.astype(float),
+            hazard_df[site].values,
+        )
+
+    for rp in rps:
+        plot = SpatialPlot(title=f"RP={rp}").plot_im_values(
+            results_df, rp, im, grid_spacing="250e/250e"
+        )
+
+        out_ffp = output_dir / f"hazard_map_{utils.get_im_filename(im)}_rp{rp}.png"
+        plot.save(out_ffp)
+
+        mlt.utils.write_to_yaml(
+            dict(type="nn-hazard-map", im=im, rp=rp),
+            out_ffp.with_suffix(".yaml"),
+            clobber=True,
+        )
 
 
 def basin_site_map(
@@ -419,7 +538,9 @@ def nn_site_term_map(
         site_df = imdb.get_site_df()
 
     site_res_df = pd.read_parquet(site_terms_ffp)
-    site_res_df = site_res_df.join(site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left")
+    site_res_df = site_res_df.join(
+        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left"
+    )
 
     if n_procs == 1:
         for cur_im in ims:
@@ -429,13 +550,13 @@ def nn_site_term_map(
         with ctx.Pool(processes=n_procs) as pool:
             pool.starmap(
                 _gen_im_site_term_map,
-                [
-                    (site_res_df, im, grid_spacing, output_dir)
-                    for im in ims
-                ],
+                [(site_res_df, im, grid_spacing, output_dir) for im in ims],
             )
 
-def _gen_im_site_term_map(site_res_df: pd.DataFrame, im: str, grid_spacing: str, output_dir: Path):
+
+def _gen_im_site_term_map(
+    site_res_df: pd.DataFrame, im: str, grid_spacing: str, output_dir: Path
+):
     spatial_plot = SpatialPlot()
 
     spatial_plot.plot_ratio(
@@ -454,6 +575,7 @@ def _gen_im_site_term_map(site_res_df: pd.DataFrame, im: str, grid_spacing: str,
         output_dir / f"nn_site_term_map_{im}.yaml",
         clobber=True,
     )
+
 
 def _gen_im_bias_res_std_plot(
     site_df: pd.DataFrame,
@@ -621,8 +743,6 @@ def _gen_im_bias_res_std_plot(
             fill="black",
         )
 
-    res_std_metadata = dict(im=im, type="site-res-std")
-
     if output_dir is not None:
         bias_fig.savefig(output_dir / f"{im}_site_bias.png", dpi=900, anti_alias=True)
         res_std_fig.savefig(
@@ -632,7 +752,9 @@ def _gen_im_bias_res_std_plot(
             bias_metadata, output_dir / f"{im}_site_bias.yaml", clobber=True
         )
         mlt.utils.write_to_yaml(
-            res_std_metadata, output_dir / f"{im}_site_res_std.yaml", clobber=True
+            dict(im=im, type="site-res-std"),
+            output_dir / f"{im}_site_res_std.yaml",
+            clobber=True,
         )
     else:
         return bias_fig, res_std_fig
@@ -670,7 +792,7 @@ def record_event_distribution_map(
         cb_label="Number of events",
     )
 
-    event_plot.plot_faults().plot_basin_boundaries(pen="0.25p,black").plot_sites(
+    event_plot.plot_fault_traces().plot_basin_boundaries(pen="0.25p,black").plot_sites(
         site_df, style="p0.02c"
     )
     event_plot.save(output_dir / "event_map.png")
@@ -690,7 +812,7 @@ def record_event_distribution_map(
         cb_label="Number of records",
     )
 
-    record_plot.plot_faults().plot_basin_boundaries(pen="0.25p,black").plot_sites(
+    record_plot.plot_fault_traces().plot_basin_boundaries(pen="0.25p,black").plot_sites(
         site_df, style="p0.02c"
     )
     record_plot.save(output_dir / "record_map.png")
@@ -884,7 +1006,3 @@ def _gen_nn_gmm_full_ratio_map(
             output_dir / f"{prefix}_{utils.get_im_filename(im)}_model_2_pred.yaml",
             clobber=True,
         )
-
-
-def ds_location_distribution_map(output_dir: Path):
-    print("wtf")

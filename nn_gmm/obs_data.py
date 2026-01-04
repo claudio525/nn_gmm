@@ -803,15 +803,19 @@ def get_input_df(
     if hasattr(run_config, "loc_inputs"):
         features += run_config.loc_inputs
 
-    input_df = obs_data.record_df.rename(
+    record_df = obs_data.record_df.copy()
+    record_df["is_point_source"] = False
+
+    input_df = record_df.rename(
         columns={
             ObservedData.EventColEnums.MAG: "magnitude",
             ObservedData.EventColEnums.ZTOR: "dtop",
             ObservedData.EventColEnums.ZBOR: "dbottom",
             ObservedData.SiteColEnums.SITE_NZTM_X: "nztm_x",
             ObservedData.SiteColEnums.SITE_NZTM_Y: "nztm_y",
+            ObservedData.EventColEnums.DEPTH: "hypo_depth",
         }
-    )[features].copy()
+    )[features]
 
     # Convert to supported tectonic types
     input_df["tect_type"] = input_df["tect_type"].map(constants.OBS_TECTONIC_TO_NN_TECTONIC)

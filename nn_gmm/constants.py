@@ -182,6 +182,7 @@ MIN_MAX_PRE_PROCESS_CONFIG = {
     "dip": (0, 90),
     "dtop": (0, 15),
     "dbottom": (5, 40),
+    "hypo_depth": (0, 90),
     "vs30": (100, 1500),
     "z1p0": (0, 1.5),
     "z2p5": (0, 12.5),
@@ -192,7 +193,7 @@ MIN_MAX_PRE_PROCESS_CONFIG = {
 }
 
 # Sample weighting
-MAG_WEIGHTING_BINS = np.array([5.5, 6.5, 7.25, 8.5])
+MAG_WEIGHTING_BINS = np.array([5.0, 6.5, 7.25, 8.5])
 MAG_WEIGHTING_BIN_NAMES = [
     f"{MAG_WEIGHTING_BINS[i]:.2f}_{MAG_WEIGHTING_BINS[i + 1]:.2f}"
     for i in range(len(MAG_WEIGHTING_BINS) - 1)
@@ -213,10 +214,9 @@ DETPH_WEIGHTING_BIN_NAMES = [
     for i in range(len(DETPH_WEIGHTING_BINS) - 1)
 ]
 
-
-
 # NZ bounding box
-NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
+# NZ_BOUNDING_BOX = [166, 179, -47.5, -34.0]
+NZ_BOUNDING_BOX = [166.3, 179, -47.4, -36.0]
 
 COOK_STRAIT_REGION = [172.639, 176.35, -42.427, -40.475]
 WELLINGTON_REGION = [174.74, 175, -41.44, -41.18]

@@ -667,8 +667,10 @@ class GroupedBiasStdPlot(BiasStdPlot):
         """Adds categorial results (already grouped) to the plot"""
         self._plot_groups(res_df, self.group_key, add_legend_entries, **plt_kwargs)
         return self
-    
-    def _plot_groups(self, res_df: pd.DataFrame, key: str, add_legend_entries: bool, **plt_kwargs):
+
+    def _plot_groups(
+        self, res_df: pd.DataFrame, key: str, add_legend_entries: bool, **plt_kwargs
+    ):
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
@@ -708,13 +710,15 @@ class GroupedBiasStdPlot(BiasStdPlot):
 
         self._plot_nn_gmm_grouped_cv_band(res_df, self.group_bin_key, **plt_kwargs)
         return self
-    
+
     def add_nn_gmm_categorial_cv_band(self, res_df: pd.DataFrame, **plt_kwargs):
         """Adds categorial NN-GMM CV band to the plot"""
         self._plot_nn_gmm_grouped_cv_band(res_df, self.group_key, **plt_kwargs)
         return self
-    
-    def _plot_nn_gmm_grouped_cv_band(self, res_df: pd.DataFrame, key: str, **plt_kwargs):
+
+    def _plot_nn_gmm_grouped_cv_band(
+        self, res_df: pd.DataFrame, key: str, **plt_kwargs
+    ):
         # Bias
         for i, cur_bin_label in enumerate(self.group_labels):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
@@ -961,9 +965,6 @@ def site_hazard(
         constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
     )
 
-    # Load empirical DS hazard results
-    # emp_ds_hazard = pd.read_pickle(constants.HAZARD_RESOURCES_DIR / "ds/DS_hazard_data.pkl")
-
     # Load NN-GMM DS hazard results
     nn_ds_hazard = {
         cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
@@ -1006,40 +1007,42 @@ def _create_hazard_plot(
 
     im_levels = nn_ds_hazard["total"][im].index.values
 
-    ax.plot(im_levels, nn_ds_hazard["total"][im].values, label="NN-GMM DS Total", color="b")
-    ax.plot(im_levels, nn_ds_hazard["crustal"][im].values, label="NN-GMM DS Crustal", color="b", linestyle="--")
-    ax.plot(im_levels, nn_ds_hazard["subduction"][im].values, label="NN-GMM DS Subduction", color="b", linestyle=":")
+    ax.plot(im_levels, nn_ds_hazard["total"][im].values, label="NN-GMM DS", color="b")
+    # ax.plot(im_levels, nn_ds_hazard["crustal"][im].values, label="NN-GMM DS Crustal", color="b", linestyle="--")
+    # ax.plot(im_levels, nn_ds_hazard["subduction_slab"][im].values, label="NN-GMM DS Subduction", color="b", linestyle=":")
 
     if cs_flt_hazard is not None:
         ax.plot(
             cs_flt_hazard.columns.values,
             cs_flt_hazard.loc[site].values,
             label="Cybershake Fault Hazard",
-            color="r",
+            color="k",
         )
 
     if emp_ds_hazard is not None:
-        assert np.allclose(emp_ds_hazard["total"][im].index.values, im_levels), "Empirical DS hazard IM levels do not match NN-GMM DS hazard IM levels"
+        assert np.allclose(
+            emp_ds_hazard["total"][im].index.values, im_levels
+        ), "Empirical DS hazard IM levels do not match NN-GMM DS hazard IM levels"
         ax.plot(
             im_levels,
             emp_ds_hazard["total"][im].values,
-            label="Empirical DS Total",
+            label="Empirical DS",
             color="g",
         )
-        ax.plot(
-            im_levels,
-            emp_ds_hazard["crustal"][im].values,
-            label="Empirical DS Crustal",
-            color="g",
-            linestyle="--",
-        )
-        ax.plot(
-            im_levels,
-            emp_ds_hazard["subduction"][im].values,
-            label="Empirical DS Subduction",
-            color="g",
-            linestyle=":",
-        )
+        # ax.plot(
+        #     im_levels,
+        #     emp_ds_hazard["crustal"][im].values,
+        #     label="Empirical DS Crustal",
+        #     color="g",
+        #     linestyle="--",
+        # )
+        # ax.plot(
+        #     im_levels,
+        #     emp_ds_hazard["subduction"][im].values,
+        #     label="Empirical DS Subduction",
+        #     color="g",
+        #     linestyle=":",
+        # )
 
     ax.set_xlabel(f"{im} (g)")
     ax.set_ylabel("Annual Exceedance Probability")
@@ -1047,6 +1050,7 @@ def _create_hazard_plot(
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_ylim(1e-4, 10)
+    ax.set_xlim(im_levels.min(), im_levels.max())
     ax.legend()
 
     ax.text(
@@ -1072,6 +1076,141 @@ def _create_hazard_plot(
         output_ffp.with_suffix(".yaml"),
         clobber=True,
     )
+
+
+def site_uhs(
+    ds_results_dir: Path,
+    output_dir: Path,
+    rps: list[float | int],
+    emp_ds_results_dir: Path | None = None,
+):
+    import seismic_hazard_analysis as sha
+
+    sites = [item.stem for item in ds_results_dir.glob("*.pkl")]
+
+    excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
+
+    # Cybershake fault UHS
+    logger.info(f"Computing fault UHS for {len(sites)} sites")
+    cs_flt_hazard = pd.read_pickle(
+        constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+    )
+    flt_uhs = {}
+    for site in sites:
+        cur_flt_hazard = {
+            cur_im: cs_flt_hazard[cur_im].loc[site] for cur_im in constants.PSA_KEYS
+        }
+        flt_uhs[site] = sha.uhs.compute_uhs(cur_flt_hazard, excd_rates, rps=rps)
+
+    # Convert to DataArray
+    flt_uhs = xr.DataArray(
+        dims=["site", "im", "rp"],
+        coords={
+            "site": list(flt_uhs.keys()),
+            "im": constants.PSA_KEYS,
+            "rp": rps,
+        },
+        data=np.stack([flt_uhs[site].values for site in flt_uhs.keys()]),
+    )
+
+    # NN-GMM DS UHS
+    logger.info(f"Computing NN-GMM DS UHS for {len(sites)} sites")
+    nn_ds_uhs = xr.DataArray(
+        dims=["site", "im", "rp"],
+        coords={
+            "site": sites,
+            "im": constants.PSA_KEYS,
+            "rp": rps,
+        },
+        data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
+    )
+    nn_ds_hazard = {
+        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
+        for cur_ffp in ds_results_dir.glob("*.pkl")
+    }
+    for site in sites:
+        nn_ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
+            {cur_im: nn_ds_hazard[site]["total"][cur_im] for cur_im in constants.PSA_KEYS},
+            excd_rates,
+            rps=rps,
+        )
+
+    # Empirical DS UHS
+    emp_ds_uhs = None
+    if emp_ds_results_dir is not None:
+        logger.info(f"Computing Empirical DS UHS for {len(sites)} sites")
+        emp_ds_uhs = xr.DataArray(
+            dims=["site", "im", "rp"],
+            coords={
+                "site": sites,
+                "im": constants.PSA_KEYS,
+                "rp": rps,
+            },
+            data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
+        )
+        emp_ds_hazard = {
+            cur_ffp.stem: pd.read_pickle(emp_ds_results_dir / f"{cur_ffp.stem}.pkl")
+            for cur_ffp in emp_ds_results_dir.glob("*.pkl")
+        }
+        for site in sites:
+            emp_ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
+                {
+                    cur_im: emp_ds_hazard[site]["total"][cur_im]
+                    for cur_im in constants.PSA_KEYS
+                },
+                excd_rates,
+                rps=rps,
+            )
+
+    # Create UHS plots
+    logger.info(f"Creating UHS plots for {len(sites)} sites")
+    assert flt_uhs.coords["im"].values.tolist() == constants.PSA_KEYS
+    assert nn_ds_uhs.coords["im"].values.tolist() == constants.PSA_KEYS
+    for site in sites:
+        for rp in rps:
+            output_ffp = output_dir / f"{site}_uhs_rp{int(rp)}.png"
+
+            fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+
+            ax.plot(constants.PSA_PERIODS, flt_uhs.sel(site=site, rp=rp), label="Cybershake Fault Hazard", color="k")
+            ax.plot(constants.PSA_PERIODS, nn_ds_uhs.sel(site=site, rp=rp), label="NN-GMM DS Hazard", color="b")
+
+            if emp_ds_uhs is not None:
+                ax.plot(constants.PSA_PERIODS, emp_ds_uhs.sel(site=site, rp=rp), label="Empirical DS Hazard", color="g")
+
+            ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+            ax.set_xlabel("Period (s)")
+            ax.set_ylabel("pSA (g)")
+            ax.set_yscale("log")
+            ax.set_xscale("log")
+            ax.set_xlim(0.01, 10)
+            ax.set_ylim(1e-4, 10)
+            ax.legend(loc="lower left")
+
+            ax.text(
+                0.5,
+                0.975,
+                f"{site}, {int(rp)}-year RP",
+                transform=ax.transAxes,
+                horizontalalignment="center",
+                verticalalignment="top",
+                fontweight="bold",
+            )
+
+            fig.tight_layout()
+            fig.savefig(output_dir / output_ffp)
+            plt.close(fig)
+
+            mlt.utils.write_to_yaml(
+                dict(
+                    type="site-uhs-plot",
+                    site=site,
+                    rp=rp,
+                ),
+                output_ffp.with_suffix(".yaml"),
+                clobber=True,
+            )
+
 
 
 def pred_vs_res_std(model_dir: Path):

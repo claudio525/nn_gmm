@@ -92,6 +92,8 @@ def preprocess_source_features(
             assert one_hot_df.index.equals(pre_source_df.index)
             pre_source_df = pd.concat([pre_source_df, one_hot_df], axis=1)
             pre_source_df = pre_source_df.drop(columns=["tect_type"])
+        elif cur_key == "is_point_source":
+            pre_source_df[cur_key] = pre_source_df[cur_key].astype(float)
         else:
             logger.error(f"Feature {cur_key} not in pre-processing config.")
             raise ValueError(f"Feature {cur_key} not in pre-processing config.")

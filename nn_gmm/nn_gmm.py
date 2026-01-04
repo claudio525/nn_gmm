@@ -74,16 +74,28 @@ class BaseRunConfig:
     """Whether to apply Rrup-based sample weighting"""
 
     max_rrup_weight: float
-    """Maximum weight for Rrup-based sample weighting"""
+    """Maximum additional weight for Rrup-based sample weighting"""
 
     apply_vs30_sample_weighting: bool
     """Whether to apply Vs30-based sample weighting"""
 
     max_vs30_weight: float
-    """Maximum weight for Vs30-based sample weighting"""
+    """Maximum additional weight for Vs30-based sample weighting"""
+
+    apply_tect_type_sample_weighting: bool
+    """Whether to apply tectonic type-based sample weighting"""
+
+    max_tect_type_weight: float
+    """Maximum additional weight for tectonic type-based sample weighting"""
+
+    apply_depth_sample_weighting: bool
+    """Whether to apply depth-based sample weighting"""
+
+    max_depth_weight: float
+    """Maximum additional weight for depth-based sample weighting"""
 
     total_max_weight: float
-    """Maximum total weight allowed for any sample"""
+    """Maximum additional weight allowed for any sample"""
 
     apply_im_weighting: bool
     """Whether to apply IM-based sample weighting"""
@@ -219,6 +231,10 @@ class BaseRunConfig:
             "max_rrup_weight": float(self.max_rrup_weight),
             "apply_vs30_sample_weighting": self.apply_vs30_sample_weighting,
             "max_vs30_weight": float(self.max_vs30_weight),
+            "apply_tect_type_sample_weighting": self.apply_tect_type_sample_weighting,
+            "max_tect_type_weight": float(self.max_tect_type_weight),
+            "apply_depth_sample_weighting": self.apply_depth_sample_weighting,
+            "max_depth_weight": float(self.max_depth_weight),
             "total_max_weight": float(self.total_max_weight),
             "apply_im_weighting": bool(self.apply_im_weighting),
             "im_weights": self.im_weights,
@@ -674,7 +690,11 @@ class BatchResult(NamedTuple):
 
 def get_model(
     run_config: GMMRunConfig | LocAdjRunConfig,
-) -> tuple[modules.BaseNNModel, torch.optim.Optimizer | None, torch.optim.lr_scheduler.LRScheduler | None]:
+) -> tuple[
+    modules.BaseNNModel,
+    torch.optim.Optimizer | None,
+    torch.optim.lr_scheduler.LRScheduler | None,
+]:
     """
     Get the model and optimizer for the given run configuration.
     """
@@ -942,17 +962,26 @@ def run_model_training(
     source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
     source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
+    source_df["is_point_source"] = event_df.loc[source_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
 
-    logger.info(f"Number of active shallow sources: {(source_df.tect_type == 'ACTIVE_SHALLOW').sum()}")
-    logger.info(f"Number of volcanic sources: {(source_df.tect_type == 'VOLCANIC').sum()}")
-    logger.info(f"Number of subduction interface sources: {(source_df.tect_type == 'SUBDUCTION_INTERFACE').sum()}")
-    logger.info(f"Number of subduction slab sources: {(source_df.tect_type == 'SUBDUCTION_SLAB').sum()}")
+    logger.info(
+        f"Number of active shallow sources: {(source_df.tect_type == 'ACTIVE_SHALLOW').sum()}"
+    )
+    logger.info(
+        f"Number of volcanic sources: {(source_df.tect_type == 'VOLCANIC').sum()}"
+    )
+    logger.info(
+        f"Number of subduction interface sources: {(source_df.tect_type == 'SUBDUCTION_INTERFACE').sum()}"
+    )
+    logger.info(
+        f"Number of subduction slab sources: {(source_df.tect_type == 'SUBDUCTION_SLAB').sum()}"
+    )
 
     # Add sample weights
-    _add_sample_weights(
+    record_info_df = _add_sample_weights(
         run_config,
         record_info_df,
-        event_df,
+        source_df,
         site_df,
         site_event_df,
     )
@@ -1468,7 +1497,9 @@ def get_mag_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFra
 
     mag_bin_counts = record_info_df.mag_bin.value_counts().sort_index()
 
-    mag_bin_weights = np.clip(mag_bin_counts.max() / mag_bin_counts, 1, max_weight) - 1
+    mag_bin_weights = np.clip(
+        (mag_bin_counts.max() / mag_bin_counts) - 1, 0.0, max_weight
+    )
     record_info_df["mag_weight"] = record_info_df.mag_bin.map(mag_bin_weights).astype(
         np.float16
     )
@@ -1489,8 +1520,8 @@ def get_rrup_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFr
 
     rrup_bin_counts = record_info_df.rrup_bin.value_counts().sort_index()
 
-    rrup_bin_weights = (
-        np.clip(rrup_bin_counts.max() / rrup_bin_counts, 1, max_weight) - 1
+    rrup_bin_weights = np.clip(
+        (rrup_bin_counts.max() / rrup_bin_counts) - 1, 0.0, max_weight
     )
     record_info_df["rrup_weight"] = record_info_df.rrup_bin.map(
         rrup_bin_weights
@@ -1512,12 +1543,54 @@ def get_vs30_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFr
 
     vs30_bin_counts = record_info_df.vs30_bin.value_counts().sort_index()
 
-    vs30_bin_weights = (
-        np.clip(vs30_bin_counts.max() / vs30_bin_counts, 1, max_weight) - 1
+    vs30_bin_weights = np.clip(
+        (vs30_bin_counts.max() / vs30_bin_counts) - 1, 0.0, max_weight
     )
     record_info_df["vs30_weight"] = record_info_df.vs30_bin.map(
         vs30_bin_weights
     ).astype(np.float16)
+
+    return record_info_df
+
+
+def get_depth_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFrame:
+    """
+    Computes the additional sample weight due to depth,
+    to be added to the base weight of one.
+    """
+    record_info_df["depth_bin"] = pd.cut(
+        record_info_df["hypo_depth"],
+        constants.DETPH_WEIGHTING_BINS,
+        labels=constants.DETPH_WEIGHTING_BIN_NAMES,
+    )
+
+    depth_bin_counts = record_info_df.depth_bin.value_counts().sort_index()
+
+    depth_bin_weights = np.clip(
+        (depth_bin_counts.max() / depth_bin_counts) - 1, 0.0, max_weight
+    )
+    record_info_df["depth_weight"] = record_info_df.depth_bin.map(
+        depth_bin_weights
+    ).astype(np.float16)
+
+    return record_info_df
+
+
+def get_tect_type_weights(
+    record_info_df: pd.DataFrame, max_weight: int
+) -> pd.DataFrame:
+    """
+    Computes the additional sample weight due to tectonic type,
+    to be added to the base weight of one.
+    """
+    tect_type_counts = record_info_df["tect_type"].value_counts().sort_index()
+
+    tect_type_weights = np.clip(
+        (tect_type_counts.max() / tect_type_counts) - 1, 0.0, max_weight
+    )
+    record_info_df["tect_type_weight"] = (
+        record_info_df["tect_type"].map(tect_type_weights).astype(np.float16)
+    )
 
     return record_info_df
 
@@ -1615,14 +1688,14 @@ def run_predictions(
 def _add_sample_weights(
     run_config: GMMRunConfig,
     record_info_df: pd.DataFrame,
-    event_df: pd.DataFrame,
+    source_df: pd.DataFrame,
     site_df: pd.DataFrame,
     site_event_df: pd.DataFrame,
 ):
     record_info_df.loc[:, "sample_weight"] = np.float32(1.0)
     if run_config.use_sample_weights:
-        record_info_df.loc[:, "magnitude"] = event_df.loc[
-            record_info_df.event_int_id
+        record_info_df.loc[:, "magnitude"] = source_df.loc[
+            record_info_df.rel_int_id
         ].magnitude.values.astype(np.float32)
         record_info_df.loc[:, "rrup"] = site_event_df.loc[
             record_info_df.site_event_int_id
@@ -1630,6 +1703,12 @@ def _add_sample_weights(
         record_info_df.loc[:, "vs30"] = site_df.loc[
             record_info_df.site_int_id
         ].vs30.values.astype(np.float32)
+        record_info_df.loc[:, "tect_type"] = source_df.loc[
+            record_info_df.rel_int_id
+        ].tect_type.values.astype(str)
+        record_info_df.loc[:, "hypo_depth"] = source_df.loc[
+            record_info_df.rel_int_id
+        ].hypo_depth.values.astype(np.float32)
 
         if run_config.apply_mag_sample_weighting:
             record_info_df = get_mag_weights(
@@ -1643,16 +1722,28 @@ def _add_sample_weights(
             record_info_df = get_vs30_weights(
                 record_info_df, max_weight=run_config.max_vs30_weight
             )
+        if run_config.apply_tect_type_sample_weighting:
+            record_info_df = get_tect_type_weights(
+                record_info_df, max_weight=run_config.max_tect_type_weight
+            )
+        if run_config.apply_depth_sample_weighting:
+            record_info_df = get_depth_weights(
+                record_info_df, max_weight=run_config.max_depth_weight
+            )
 
         record_info_df["sample_weight"] += np.clip(
             record_info_df.get("mag_weight", 0).values
             + record_info_df.get("rrup_weight", 0).values
-            + record_info_df.get("vs30_weight", 0).values,
+            + record_info_df.get("vs30_weight", 0).values
+            + record_info_df.get("tect_type_weight", 0).values
+            + record_info_df.get("depth_weight", 0).values,
             0,
-            run_config.total_max_weight - 1,
+            run_config.total_max_weight,
         )
 
         assert not record_info_df["sample_weight"].isna().any()
+
+    return record_info_df
 
 
 def load_config(config_ffp: Path) -> GMMRunConfig | LocAdjRunConfig:

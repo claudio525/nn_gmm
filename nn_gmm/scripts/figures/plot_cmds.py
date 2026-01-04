@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Annotated
 
 import torch
 import typer
@@ -180,6 +181,25 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
     spatial_plot.save(output_ffp)
 
 
+@app.command("nn-gmm-hazard-map")
+def nn_gmm_hazard_map(
+    imdb_ffp: Path,
+    hazard_results_dir: Path,
+    output_dir: Path,
+    ims: Annotated[list[str], typer.Option(default=...)],
+    rps: Annotated[list[int], typer.Option(default=...)],
+    n_procs: int = 1,
+):
+    """
+    Generate hazard maps using NN-GMM DS hazard results for specified IMs
+    at a given return period.
+    """
+    nng.utils.setup_logging()
+    nng.plots_spatial.nn_gmm_hazard_map(
+        imdb_ffp, hazard_results_dir, ims, rps, output_dir, n_procs=n_procs
+    )
+
+
 @app.command("nn-gmm-compare-site-bias-histogram")
 def nn_gmm_compare_site_bias_histogram(
     model_dir_1: Path,
@@ -231,15 +251,36 @@ def mera_basin_site_term(
 
 
 @app.command("gen-site-hazard-plots")
-def gen_site_hazard_plots(ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None):
+def gen_site_hazard_plots(
+    ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None
+):
     """
     Generate site hazard plots for DS hazard results.
     Also adds empirical DS & simulation flt hazard curves.
     """
     nng.utils.setup_logging()
-    nng.plots.site_hazard(ds_results_dir, output_dir, emp_ds_results_dir=emp_ds_results_dir)
-    
-    
+    nng.plots.site_hazard(
+        ds_results_dir, output_dir, emp_ds_results_dir=emp_ds_results_dir
+    )
+
+
+@app.command("gen-site-uhs-plots")
+def gen_site_uhs_plots(
+    ds_results_dir: Path,
+    output_dir: Path,
+    rps: list[float],
+    emp_ds_results_dir: Path | None = None,
+):
+    """
+    Generate site UHS plots for DS hazard results.
+    Also adds empirical DS & simulation flt UHS curves.
+    """
+    nng.utils.setup_logging()
+    nng.plots.site_uhs(
+        ds_results_dir, output_dir, rps=rps, emp_ds_results_dir=emp_ds_results_dir
+    )
+
+
 @app.command("pred-vs-res-std")
 def pred_vs_res_std(
     model_dir: Path,
@@ -251,13 +292,6 @@ def pred_vs_res_std(
     nng.utils.setup_logging()
     nng.plots.pred_vs_res_std(model_dir)
 
-
-
-@app.command("ds-location-distribution-map")
-def ds_location_distribution_map(output_dir: Path):
-    logger = nng.utils.setup_logging()
-
-    nng.plots_spatial.ds_location_distribution_map(output_dir)
 
 if __name__ == "__main__":
     app()

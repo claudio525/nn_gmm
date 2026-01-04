@@ -1,15 +1,9 @@
-import pickle
-import time
-import logging
 from pathlib import Path
 
-import pandas as pd
 import numpy as np
 import torch
 import typer
-import xarray as xr
 
-import ml_tools as mlt
 import nn_gmm as nng
 
 torch.multiprocessing.set_start_method("spawn", force=True)
@@ -24,6 +18,20 @@ print(f"Using device: {device.upper()}")
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
+
+@app.command("compute-uniform-grid-ds-hazard")
+def compute_uniform_grid_ds_hazard(imdb_ffp: Path,
+                                   model_dir: Path,
+                                   n_procs: int = 1,
+):
+    """
+    Compute DS hazard on a uniform grid using a NN-GMM model.
+    """
+    nng.utils.setup_logging()
+
+    nng.hazard.compute_uniform_grid_ds_hazard(
+        imdb_ffp, model_dir, device, n_procs=n_procs
+    )
 
 @app.command("run-site-ds-hazard")
 def run_site_ds_hazard(
@@ -41,7 +49,7 @@ def run_site_ds_hazard(
         logger.info("Running DS hazard for all reference sites.")
         sites = list(nng.constants.HAZARD_REF_SITES.keys())
 
-    nng.hazard.run_sites_hazard(model_dir, sites, device, n_procs=n_procs)
+    nng.hazard.run_sites_ds_hazard(model_dir, sites, device, n_procs=n_procs)
 
 
 @app.command("run-emp-site-ds-hazard")
@@ -59,7 +67,22 @@ def run_emp_site_ds_hazard(
     else:
         logger.info(f"Running empirical DS hazard for specified sites: {sites}")
 
-    nng.hazard.run_emp_sites_hazard(imdb_ffp, sites, output_dir, n_procs=n_procs)
+    nng.hazard.run_emp_sites_ds_hazard(imdb_ffp, sites, output_dir, n_procs=n_procs)
+
+@app.command("compute-uniform-grid-emp-ds-hazard")
+def compute_uniform_grid_emp_ds_hazard(
+    imdb_ffp: Path,
+    output_dir: Path,
+    n_procs: int = 1,
+):
+    """
+    Compute empirical DS hazard on a uniform grid.
+    """
+    nng.utils.setup_logging()
+
+    nng.hazard.compute_uniform_grid_emp_ds_hazard(
+        imdb_ffp, output_dir, n_procs=n_procs
+    )
 
 
 @app.command("run-emp-ds-disagg")

@@ -1,6 +1,6 @@
 seed: 42
 
-rel_imdb_ffp: nn_gmm/20251031_CS200m_rotd50_imdb.duckdb
+rel_imdb_ffp: nn_gmm/20251222_CS200_DSSlab_rotd50_imdb.duckdb
 rel_nzgmdb_ffp: gm_datasets/nz_gmdb/v4.3_final/custom/mod_ground_motion_im_table_rotd50_flat.csv
 rel_test_events_ffp: nn_gmm/test_events.npy
 max_rrup: 300
@@ -22,6 +22,8 @@ source_inputs:
 - dip
 - dtop
 - dbottom
+- hypo_depth
+- is_point_source
 
 source_to_site_inputs:
 - rrup
@@ -31,12 +33,17 @@ source_to_site_inputs:
 
 # Sample weighting
 apply_mag_sample_weighting: True
-max_mag_weight: 2.5
+max_mag_weight: 2.0
 apply_rrup_sample_weighting: True
-max_rrup_weight: 2.5
+max_rrup_weight: 2.0
 apply_vs30_sample_weighting: True
-max_vs30_weight: 2.5
-total_max_weight: 5.0
+max_vs30_weight: 2.0
+apply_tect_type_sample_weighting: True
+max_tect_type_weight: 2.0
+apply_depth_sample_weighting: True
+max_depth_weight: 2.0
+
+total_max_weight: 10.0
 
 # IM weighting
 apply_im_weighting: False

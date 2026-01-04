@@ -323,4 +323,7 @@ def get_ds_source_data():
     ds_source_df.index = np.arange(ds_source_df.shape[0])
     ds_erf_df.index = np.arange(ds_erf_df.shape[0])
 
+    # DS source are point sources
+    ds_source_df["is_point_source"] = True
+
     return ds_source_df, ds_erf_df

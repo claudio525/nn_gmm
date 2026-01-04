@@ -173,21 +173,6 @@ def run_mera(
     )
 
 
-@app.command("obs-fine-tune-cv-nn")
-def obs_fine_tune_cv_nn(results_dir: Path, config_ffp: Path, suffix: str = None):
-    """Fine-tune the CV-trained NN models using observed data."""
-    nng.utils.setup_logging()
-
-    # Create output directory
-    output_dir = (
-        results_dir / f"obs_fine_tune/{mlt.utils.create_run_name(suffix=suffix)}"
-    )
-    output_dir.mkdir(parents=True, exist_ok=False)
-
-    tune_config = nng.nn_gmm_obs.FineTuneConfig.from_yaml(config_ffp, device=device)
-    nng.nn_gmm_obs.obs_fine_tune_cv(results_dir, tune_config, output_dir)
-
-
 @app.command("run-hp-opt")
 def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_procs: int = 1, n_startup_trials: int = 25):
     """Run hyperparameter optimization using Optuna."""

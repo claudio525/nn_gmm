@@ -1,41 +1,73 @@
 #!/usr/bin/env zsh
 
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v5.yaml 2 2 --n-epochs 10 --id-suffix cv_v5_10Epochs_2E2Folds_512batchSize_1000Sites --n-procs 4 --n-sites 1000 --remove-cv-results --batch-size 512 && \
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v1.yaml 3 4 --n-epochs 25 --id-suffix cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 && \
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 25 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 
+function log_gpu_mem {
+    echo "timestamp, used_memory, utilization" > $1
+    while true; do
+        echo "$(date -Iseconds),$(nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader,nounits)" >> $1
+        sleep 1
+    done
+}
 
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_config_v3.yaml 3 4 --n-epochs 25 --id-suffix cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512 
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4
+function csnotify {
+   curl -d $1 ntfy.sh/W7T2QKNDH9Z4E3VJPRY8XACUL
+}
 
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 10 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v2.yaml 3 4 --n-epochs 10 --id-suffix cv_v2_25Epochs_3E4Folds_512batchSize_1000Sites --n-procs 4 --remove-cv-results --batch-size 512 --n-sites 1000
 
-python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/nn_gmm_config_v3.yaml 3 4 --n-epochs 10 --id-suffix cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 --remove-cv-results --batch-size 512
+log_gpu_mem gpu_memory_usage.log &
+bg_pid=$!
 
-## Render CV result analysis notebook 
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_v1.yaml 6 6 --n-epochs 25 --id-suffix cv_v1_25Epochs_6E6Folds --n-procs 9 --remove-cv-results && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
+
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_v1.yaml 6 6 --n-epochs 500 --id-suffix cv_v1_500Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
+# python nn_cmds.py train-loc-adj-cv ./configs/nn_gmm_configs/loc_adj_config_v1.yaml --n-epochs 25 --id-suffix cv_locAdjV1_25Epochs_6E6Folds --rel-base-model-dir nn_gmm/results/1231_1247_cv_v1_25Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete." || csnotify "GMM CV training failed. "
+# python nn_cmds.py train-loc-adj-cv ./configs/nn_gmm_configs/loc_adj_config_v2.yaml --n-epochs 25 --id-suffix cv_locAdjV2_25Epochs_6E6Folds --rel-base-model-dir nn_gmm/results/1231_1247_cv_v1_25Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete 2/2." || csnotify "GMM CV training failed 2/2."
+
+python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0101_2126_cv_locAdjV1_25Epochs_6E6Folds --site-term --n-procs 3 && csnotify "MERA run complete 1/2." || csnotify "MERA run failed 1/2."
+python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0102_0309_cv_locAdjV2_25Epochs_6E6Folds --site-term --n-procs 3 && csnotify "MERA run complete 2/2." || csnotify "MERA run failed 2/2."
+
+# python nn_cmds.py train-full-gmm ./configs/nn_gmm_configs/base_gmm_config_v1.yaml --n-epochs 3 --id-suffix full_v1_3Epochs && csnotify "Full GMM model training complete." || csnotify "Full GMM model training failed."
+# python nn_cmds.py train-full-loc-adj-model ./configs/nn_gmm_configs/loc_adj_config_v2.yaml --n-epochs 5 --id-suffix full_locAdjV2_5Epochs --rel-base-model-dir nn_gmm/results/1111_0941_full_v1_3Epochs && csnotify "Full loc-adj model training complete." || csnotify "Full loc-adj model training failed."
+
+kill $bg_pid
+wait $bg_pid 2>/dev/null
+
+
+
+# python nn_cmds.py train-full-gmm ./configs/nn_gmm_configs/nn_gmm_config_v3_locSiteCond.yaml --n-epochs 20 --id-suffix full_v3_locSiteCond_20Epochs 
+
+
+# dirs=(
+#     /home/claudy/dev/work/data/nn_gmm/results/1101_1435_cv_v1_25Epochs_6E6Folds
+# )
+
+# ## Render CV outlier
+# notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/explore
+
+# for cur_dir in "${dirs[@]}"; do
+#     echo "Processing: $cur_dir"
+#     quarto render $notebook_dir/cv_outlier_analysis.ipynb --execute --to html -P results_dir:$cur_dir && \
+#     mv $notebook_dir/cv_outlier_analysis.html $cur_dir/cv_outlier_analysis.html
+# done
+
+# csnotify "CV outlier analysis notebooks rendering complete."
+
+
+# Render CV result analysis notebook 
 # notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/result_notebooks
-# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0917_1111_cv_v2_25Epochs_3E4Folds_512batchSize
+# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/1107_1533_cv_v1_25Epochs_6E6Folds_lrReduc
 # quarto render $notebook_dir/cv_result_analysis.ipynb --execute --to html  -P result_dir:$cur_dir && \
-# mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html
+# mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html ; csnotify "CV result analysis notebook rendering complete."
+
+# Render exploratory notebook for outlier analysis
+# notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/result_notebooks
+# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/1107_1954_cv_v1_25Epochs_6E6Folds_HP1104-1103_trial57_lrReduc
+# quarto render $notebook_dir/cv_result_analysis.ipynb --execute --to html  -P result_dir:$cur_dir && \
+# mv $notebook_dir/cv_result_analysis.html $cur_dir/cv_result_analysis.html ; csnotify "CV result analysis notebook rendering complete."
 
 
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0908_1938_cv_v5_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v5_25Epochs.log
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0910_1421_cv_v1_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v1_25Epochs.log
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0911_0917_cv_v2_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v2_25Epochs.log
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize --n-procs 4 2>&1 | tee run_mera_v3_25Epochs.log
-
-# ./plot_spatial.sh /home/claudy/dev/work/data/nn_gmm/results/0912_1844_cv_v3_25Epochs_3E4Folds_512batchSize
-
-
-# Basin & site map
-# python plot_cmds.py basin-site-map /Users/claudy/dev/work/data/nn_gmm/20250606_CS200m_imdb.db /Users/claudy/dev/work/tmp/spatial/basin_sites_level_REAL.png --site-level -1 --basin-dir /Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries &
-# python plot_cmds.py basin-site-map /Users/claudy/dev/work/data/nn_gmm/20250606_CS200m_imdb.db /Users/claudy/dev/work/tmp/spatial/basin_sites_level_0.png --site-level 0 --basin-dir /Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries &
-# wait
-
-# python plot_cmds.py basin-site-map /Users/claudy/dev/work/data/nn_gmm/20250606_CS200m_imdb.db /Users/claudy/dev/work/tmp/spatial/basin_sites_level_1.png --site-level 1 --basin-dir /Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries &
-# python plot_cmds.py basin-site-map /Users/claudy/dev/work/data/nn_gmm/20250606_CS200m_imdb.db /Users/claudy/dev/work/tmp/spatial/basin_sites_level_2.png --site-level 2 --basin-dir /Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries &
-# wait 
-
-# python plot_cmds.py basin-site-map /Users/claudy/dev/work/data/nn_gmm/20250606_CS200m_imdb.db /Users/claudy/dev/work/tmp/spatial/basin_sites_level_3.png --site-level 3 --basin-dir /Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries &
+# notebook_dir=/home/claudy/dev/work/code/nn_gmm/nn_gmm/explore
+# cur_dir=/home/claudy/dev/work/data/nn_gmm/results/0930_1813_cv_v3_locSiteCond_25Epochs_3E4Folds_seed72
+# quarto render $notebook_dir/cv_outlier_analysis.ipynb --execute --to html  -P results_dir:$cur_dir && \
+# mv $notebook_dir/cv_outlier_analysis.html $cur_dir/cv_outlier_analysis.html
 
 
