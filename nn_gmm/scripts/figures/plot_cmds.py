@@ -53,7 +53,7 @@ def nn_site_term_map(
     I.e. map of delta_S2S
     """
     nng.utils.setup_logging()
-    nng.plots_spatial.nn_site_term_map(
+    nng.plots_spatial.nn_site_term_maps(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
     )
 
@@ -180,23 +180,76 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
 
     spatial_plot.save(output_ffp)
 
+@app.command("cv-mean-pred-std-map")
+def cv_mean_pred_std_map(
+    cv_model_results_dir: Path,
+    output_dir: Path,
+    ims: list[str],
+    n_procs: int = 1,
+    grid_spacing: str = "250e/250e",
+):
+    """
+    Generate mean predicted standard deviation map
+    using NN-GMM CV results.
+    """
+    nng.utils.setup_logging()
+    nng.plots_spatial.cv_mean_pred_std_maps(
+        cv_model_results_dir,
+        output_dir,
+        ims,
+        n_procs=n_procs,
+        grid_spacing=grid_spacing,
+    )
 
-@app.command("nn-gmm-hazard-map")
-def nn_gmm_hazard_map(
+@app.command("hazard-map")
+def hazard_maps(
     imdb_ffp: Path,
     hazard_results_dir: Path,
     output_dir: Path,
     ims: Annotated[list[str], typer.Option(default=...)],
     rps: Annotated[list[int], typer.Option(default=...)],
     n_procs: int = 1,
+    add_flt_hazard: bool = False,
 ):
     """
-    Generate hazard maps using NN-GMM DS hazard results for specified IMs
+    Generate hazard maps using uniform grid DS hazard results for specified IMs
     at a given return period.
     """
     nng.utils.setup_logging()
-    nng.plots_spatial.nn_gmm_hazard_map(
-        imdb_ffp, hazard_results_dir, ims, rps, output_dir, n_procs=n_procs
+    nng.plots_spatial.hazard_maps(
+        imdb_ffp,
+        hazard_results_dir,
+        ims,
+        rps,
+        output_dir,
+        n_procs=n_procs,
+        add_flt_hazard=add_flt_hazard,
+    )
+
+
+@app.command("ds-hazard-ratio-map")
+def ds_hazard_ratio_map(
+    imdb_ffp: Path,
+    hazard_results_dir_1: Path,
+    hazard_results_dir_2: Path,
+    output_dir: Path,
+    cb_label_suffix: str,
+    filename_prefix: str,
+    ims: Annotated[list[str], typer.Option(default=...)],
+    rps: Annotated[list[int], typer.Option(default=...)],
+    n_procs: int = 1,
+):
+    nng.utils.setup_logging()
+    nng.plots_spatial.ds_hazard_ratio_maps(
+        imdb_ffp,
+        hazard_results_dir_1,
+        hazard_results_dir_2,
+        output_dir,
+        cb_label_suffix,
+        filename_prefix,
+        ims,
+        rps,
+        n_procs=n_procs,
     )
 
 

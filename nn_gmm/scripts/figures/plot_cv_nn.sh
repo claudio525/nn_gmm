@@ -14,12 +14,15 @@ out_dir=$model_dir/plots
 mkdir -p $out_dir
 
 # Generate spatial site bias/residual std plots
-python plot_cmds.py nn-site-bias-res-std $model_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 4 --grid-spacing 100e/100e
+python plot_cmds.py nn-site-bias-res-std $model_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 4 --grid-spacing 250e/250e
 
 # Generate spatial site-term maps
 if [ -d "$model_dir/mera_site_term" ]; then
-    python plot_cmds.py nn-site-term-map $model_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 4 --grid-spacing 100e/100e
+    python plot_cmds.py nn-site-term-maps $model_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 $out_dir --n-procs 4 --grid-spacing 250e/250e
 fi
+
+# Generate spatial mean predicted std plots
+python plot_cmds.py cv-mean-pred-std-map $model_dir $out_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 --n-procs 4 --grid-spacing 250e/250e
 
 # Generate spatial site folds map
 # python plot_cmds.py site-folds-map $model_dir $out_dir/site_folds_map.png

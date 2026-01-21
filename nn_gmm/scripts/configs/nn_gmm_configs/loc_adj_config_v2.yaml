@@ -7,13 +7,6 @@ loc_inputs:
 rel_pre_loc_emb_model_dir: nn_gmm/results/loc_models/0929_1130_optimized_siteCond_25Epochs
 loc_emb_dim: null
 loc_emb_model_config: null
-# loc_emb_dim: 128
-# loc_emb_model_config:
-#   units: [32, 32, 32, 32]
-#   activation: "leaky_relu"
-#   use_batch_norm: False
-#   dropout_rate: 0.0
-#   l2_reg: 0.0005
 
 adj_model_config:
   units: []

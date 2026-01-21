@@ -334,7 +334,7 @@ def _run_adj_helper(
         verbose=False,
     )
 
-        # Explicit GPU cleanup
+    # Explicit GPU cleanup
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()

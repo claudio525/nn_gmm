@@ -327,3 +327,9 @@ def get_ds_source_data():
     ds_source_df["is_point_source"] = True
 
     return ds_source_df, ds_erf_df
+
+def rp_to_poe_string(rp: int) -> str:
+    """Convert return period to nice PoE string."""
+    import seismic_hazard_analysis as sha
+    poe = sha.utils.rp_to_prob(rp, 50)
+    return f"{int(np.round(poe * 100.0))}% in 50 Years"

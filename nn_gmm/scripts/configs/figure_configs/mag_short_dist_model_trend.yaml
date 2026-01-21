@@ -9,6 +9,7 @@ fixed_inputs:
     dtop: 0
     dbottom: 15
     hypo_depth: 8.5
+    is_point_source: False
     rrup: 30    
     rjb: 30
     rx: 30

@@ -1,9 +1,11 @@
+import gc
 import logging
 import multiprocessing as mp
 import pickle
 from pathlib import Path
 from functools import partial
 
+import torch
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -22,6 +24,101 @@ EMP_GMM_MAPPING = {
     oqw.constants.TectType.SUBDUCTION_SLAB: oqw.constants.GMMLogicTree.NSHM2022,
     oqw.constants.TectType.SUBDUCTION_INTERFACE: oqw.constants.GMMLogicTree.NSHM2022,
 }
+
+def compute_nn_ds_uhs(ds_results_dir: Path, rps: list[int], sites: list[str] | None = None):
+    """Compute NN-GMM DS UHS for all sites in the specified results directory."""
+    import seismic_hazard_analysis as sha
+    sites = [item.stem for item in ds_results_dir.glob("*.pkl")] if sites is None else sites
+    excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
+
+    logger.info(f"Computing NN-GMM DS UHS for {len(sites)} sites")
+    nn_ds_uhs = xr.DataArray(
+        dims=["site", "im", "rp"],
+        coords={
+            "site": sites,
+            "im": constants.PSA_KEYS,
+            "rp": rps,
+        },
+        data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
+    )
+    nn_ds_hazard = {
+        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
+        for cur_ffp in ds_results_dir.glob("*.pkl")
+    }
+    for site in sites:
+        if site not in nn_ds_hazard:
+            logger.warning(f"No DS hazard results found for site {site}, skipping UHS computation.")
+            continue
+
+        nn_ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
+            {
+                cur_im: nn_ds_hazard[site]["total"][cur_im]
+                for cur_im in constants.PSA_KEYS
+            },
+            excd_rates,
+            rps=rps,
+        )
+
+    return nn_ds_uhs
+
+def compute_emp_ds_uhs(ds_results_dir: Path, rps: list[int], sites: list[str] | None = None):
+    import seismic_hazard_analysis as sha
+    sites = [item.stem for item in ds_results_dir.glob("*.pkl")] if sites is None else sites
+    excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
+
+    logger.info(f"Computing Empirical DS UHS for {len(sites)} sites")
+    ds_uhs = xr.DataArray(
+        dims=["site", "im", "rp"],
+        coords={
+            "site": sites,
+            "im": constants.PSA_KEYS,
+            "rp": rps,
+        },
+        data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
+    )
+    emp_ds_hazard = {
+        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
+        for cur_ffp in ds_results_dir.glob("*.pkl")
+    }
+    for site in sites:
+        ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
+            {
+                cur_im: emp_ds_hazard[site]["total"][cur_im]
+                for cur_im in constants.PSA_KEYS
+            },
+            excd_rates,
+            rps=rps,
+        )
+
+    return ds_uhs
+
+def compute_cs_flt_uhs(sites: list[str], rps: list[int]):
+    import seismic_hazard_analysis as sha
+    excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
+
+    logger.info(f"Computing Cybershake fault UHS for {len(sites)} sites")
+    cs_flt_hazard = pd.read_pickle(
+        constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+    )
+    uhs_da = {}
+    for site in sites:
+        cur_flt_hazard = {
+            cur_im: cs_flt_hazard[cur_im].loc[site] for cur_im in constants.PSA_KEYS
+        }
+        uhs_da[site] = sha.uhs.compute_uhs(cur_flt_hazard, excd_rates, rps=rps)
+
+    # Convert to DataArray
+    uhs_da = xr.DataArray(
+        dims=["site", "im", "rp"],
+        coords={
+            "site": list(uhs_da.keys()),
+            "im": constants.PSA_KEYS,
+            "rp": rps,
+        },
+        data=np.stack([uhs_da[site].values for site in uhs_da.keys()]),
+    )
+
+    return uhs_da
 
 
 def run_sites_ds_hazard(
@@ -238,6 +335,14 @@ def _run_site_ds_hazard(
             std_col_suffix="_pred_std",
         )
 
+    # Explicit GPU cleanup
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    # Force garbage collection
+    gc.collect()
+
     return {
         "total": total_hazard_results,
         "crustal": crustal_hazard_results,
@@ -345,13 +450,13 @@ def compute_uniform_grid_emp_ds_hazard(
         hazard_results = {site: result for site, result in zip(sites, hazard_results)}
 
     # Save per IM
-    (out_dir := output_dir / "ds_hazard/uniform_grid").mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving hazard results in {out_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving hazard results in {output_dir}")
     for im in constants.PSA_KEYS:
         im_hazard_df = pd.concat([hazard_results[cur_site]["total"][im] for cur_site in sites], axis=1)
         im_hazard_df.columns = sites
 
-        im_hazard_df.to_parquet(out_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet")
+        im_hazard_df.to_parquet(output_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet")
 
 
 def _run_emp_site_ds_hazard(

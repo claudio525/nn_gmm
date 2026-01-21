@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import NamedTuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,6 +17,7 @@ from . import constants
 from . import data
 from . import plot_utils
 from . import utils
+from . import hazard
 
 
 logger = logging.getLogger(__name__)
@@ -489,7 +489,6 @@ class BiasStdPlot:
         figsize: tuple = (16, 6),
         bias_ylim: tuple = (-0.8, 0.8),
         std_ylim: tuple = (0, 0.8),
-        dpi: int = 100,
         **fig_kwargs,
     ):
         """
@@ -516,7 +515,6 @@ class BiasStdPlot:
             figsize=figsize,
             bias_y_axis_limits=bias_ylim,
             std_y_axis_limits=std_ylim,
-            dpi=dpi,
             **fig_kwargs,
         )
 
@@ -626,22 +624,45 @@ class GroupedBiasStdPlot(BiasStdPlot):
         self,
         group_key: str,
         group_bin_edges: list[float],
-        group_labels: list[str],
+        group_keys: list[str],
         group_colors: list,
+        group_labels: list[str] | None = None,
         pSA_keys_periods: tuple[list[str], list[float]] | None = None,
         im_set="pSA",
         figsize=(16, 6),
         bias_ylim=(-0.8, 0.8),
         std_ylim=(0, 0.8),
-        dpi=100,
+        **fig_kwargs,
     ):
-        super().__init__(pSA_keys_periods, im_set, figsize, bias_ylim, std_ylim, dpi)
+        """
+        Initializes the GroupedBiasStdPlot class.
+
+        Parameters
+        ----------
+        group_key : str
+            The key to group the results by.
+        group_bin_edges : list[float]
+            The bin edges for grouping.
+        group_keys : list[str]
+            The keys for each group.
+        group_colors : list
+            The colors for each group.
+        pSA_keys_periods : tuple[list[str], list[float]], optional
+            Tuple containing lists of pSA keys and their corresponding periods.
+            If None, im_set is used to determine the pSA keys and periods.
+        im_set : str, optional
+            The IM set to use. Default is "pSA".
+        """
+        super().__init__(
+            pSA_keys_periods, im_set, figsize, bias_ylim, std_ylim, **fig_kwargs
+        )
 
         self.group_key = group_key
         self.group_bin_key = f"{group_key}_bin"
         self.group_bin_edges = group_bin_edges
-        self.group_labels = group_labels
+        self.group_keys = group_keys
         self.group_colors = group_colors
+        self.group_labels = group_labels
 
     def add_grouped_results(
         self, res_df: pd.DataFrame, add_legend_entries: bool, **plt_kwargs
@@ -651,7 +672,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         res_df[self.group_bin_key] = pd.cut(
             res_df[self.group_key],
             bins=self.group_bin_edges,
-            labels=self.group_labels,
+            labels=self.group_keys,
             include_lowest=True,
         )
 
@@ -672,7 +693,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         self, res_df: pd.DataFrame, key: str, add_legend_entries: bool, **plt_kwargs
     ):
         # Bias
-        for i, cur_bin_label in enumerate(self.group_labels):
+        for i, cur_bin_label in enumerate(self.group_keys):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_model_bias = res_df.loc[cur_record_ids, self.pSA_keys].mean(axis=0)
             self.ax1.plot(
@@ -681,20 +702,25 @@ class GroupedBiasStdPlot(BiasStdPlot):
                 c=self.group_colors[i],
                 **plt_kwargs,
                 label=(
-                    f"{cur_bin_label}, N={len(cur_record_ids)}"
+                    f"{cur_bin_label if self.group_labels is None else self.group_labels[i]} (N={len(cur_record_ids):,})"
                     if add_legend_entries
                     else None
                 ),
             )
 
         # Std
-        for i, cur_bin_label in enumerate(self.group_labels):
+        for i, cur_bin_label in enumerate(self.group_keys):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_res_std = res_df.loc[cur_record_ids, self.pSA_keys].std(axis=0)
             self.ax3.plot(
                 self.pSA_periods,
                 cur_res_std[self.pSA_keys].values,
                 c=self.group_colors[i],
+                label=(
+                    f"{cur_bin_label if self.group_labels is None else self.group_labels[i]} (N={len(cur_record_ids):,})"
+                    if add_legend_entries
+                    else None
+                ),
                 **plt_kwargs,
             )
 
@@ -704,7 +730,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         res_df[self.group_bin_key] = pd.cut(
             res_df[self.group_key],
             bins=self.group_bin_edges,
-            labels=self.group_labels,
+            labels=self.group_keys,
             include_lowest=True,
         )
 
@@ -720,7 +746,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
         self, res_df: pd.DataFrame, key: str, **plt_kwargs
     ):
         # Bias
-        for i, cur_bin_label in enumerate(self.group_labels):
+        for i, cur_bin_label in enumerate(self.group_keys):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_model_bias = res_df.loc[cur_record_ids, constants.PSA_KEYS].mean(axis=0)
             cur_cv_bias_std = (
@@ -741,7 +767,7 @@ class GroupedBiasStdPlot(BiasStdPlot):
             )
 
         # Std
-        for i, cur_bin_label in enumerate(self.group_labels):
+        for i, cur_bin_label in enumerate(self.group_keys):
             cur_record_ids = res_df.index[res_df[key] == cur_bin_label]
             cur_res_std = res_df.loc[cur_record_ids, constants.PSA_KEYS].std(axis=0)
             cur_cv_res_std_std = (
@@ -1084,87 +1110,24 @@ def site_uhs(
     rps: list[float | int],
     emp_ds_results_dir: Path | None = None,
 ):
-    import seismic_hazard_analysis as sha
-
     sites = [item.stem for item in ds_results_dir.glob("*.pkl")]
 
-    excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
-
     # Cybershake fault UHS
-    logger.info(f"Computing fault UHS for {len(sites)} sites")
-    cs_flt_hazard = pd.read_pickle(
-        constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
-    )
-    flt_uhs = {}
-    for site in sites:
-        cur_flt_hazard = {
-            cur_im: cs_flt_hazard[cur_im].loc[site] for cur_im in constants.PSA_KEYS
-        }
-        flt_uhs[site] = sha.uhs.compute_uhs(cur_flt_hazard, excd_rates, rps=rps)
-
-    # Convert to DataArray
-    flt_uhs = xr.DataArray(
-        dims=["site", "im", "rp"],
-        coords={
-            "site": list(flt_uhs.keys()),
-            "im": constants.PSA_KEYS,
-            "rp": rps,
-        },
-        data=np.stack([flt_uhs[site].values for site in flt_uhs.keys()]),
-    )
+    cs_flt_uhs = hazard.compute_cs_flt_uhs(sites, rps)
 
     # NN-GMM DS UHS
-    logger.info(f"Computing NN-GMM DS UHS for {len(sites)} sites")
-    nn_ds_uhs = xr.DataArray(
-        dims=["site", "im", "rp"],
-        coords={
-            "site": sites,
-            "im": constants.PSA_KEYS,
-            "rp": rps,
-        },
-        data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
-    )
-    nn_ds_hazard = {
-        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
-        for cur_ffp in ds_results_dir.glob("*.pkl")
-    }
-    for site in sites:
-        nn_ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
-            {cur_im: nn_ds_hazard[site]["total"][cur_im] for cur_im in constants.PSA_KEYS},
-            excd_rates,
-            rps=rps,
-        )
+    nn_ds_uhs = hazard.compute_nn_ds_uhs(ds_results_dir, rps, sites=sites)
 
     # Empirical DS UHS
     emp_ds_uhs = None
     if emp_ds_results_dir is not None:
-        logger.info(f"Computing Empirical DS UHS for {len(sites)} sites")
-        emp_ds_uhs = xr.DataArray(
-            dims=["site", "im", "rp"],
-            coords={
-                "site": sites,
-                "im": constants.PSA_KEYS,
-                "rp": rps,
-            },
-            data=np.full((len(sites), len(constants.PSA_KEYS), len(rps)), np.nan),
+        emp_ds_uhs = hazard.compute_emp_ds_uhs(
+            emp_ds_results_dir, rps, sites=sites
         )
-        emp_ds_hazard = {
-            cur_ffp.stem: pd.read_pickle(emp_ds_results_dir / f"{cur_ffp.stem}.pkl")
-            for cur_ffp in emp_ds_results_dir.glob("*.pkl")
-        }
-        for site in sites:
-            emp_ds_uhs.loc[site, :, :] = sha.uhs.compute_uhs(
-                {
-                    cur_im: emp_ds_hazard[site]["total"][cur_im]
-                    for cur_im in constants.PSA_KEYS
-                },
-                excd_rates,
-                rps=rps,
-            )
 
     # Create UHS plots
     logger.info(f"Creating UHS plots for {len(sites)} sites")
-    assert flt_uhs.coords["im"].values.tolist() == constants.PSA_KEYS
+    assert cs_flt_uhs.coords["im"].values.tolist() == constants.PSA_KEYS
     assert nn_ds_uhs.coords["im"].values.tolist() == constants.PSA_KEYS
     for site in sites:
         for rp in rps:
@@ -1172,11 +1135,26 @@ def site_uhs(
 
             fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
 
-            ax.plot(constants.PSA_PERIODS, flt_uhs.sel(site=site, rp=rp), label="Cybershake Fault Hazard", color="k")
-            ax.plot(constants.PSA_PERIODS, nn_ds_uhs.sel(site=site, rp=rp), label="NN-GMM DS Hazard", color="b")
+            ax.plot(
+                constants.PSA_PERIODS,
+                cs_flt_uhs.sel(site=site, rp=rp),
+                label="Cybershake Fault Hazard",
+                color="k",
+            )
+            ax.plot(
+                constants.PSA_PERIODS,
+                nn_ds_uhs.sel(site=site, rp=rp),
+                label="NN-GMM DS Hazard",
+                color="b",
+            )
 
             if emp_ds_uhs is not None:
-                ax.plot(constants.PSA_PERIODS, emp_ds_uhs.sel(site=site, rp=rp), label="Empirical DS Hazard", color="g")
+                ax.plot(
+                    constants.PSA_PERIODS,
+                    emp_ds_uhs.sel(site=site, rp=rp),
+                    label="Empirical DS Hazard",
+                    color="g",
+                )
 
             ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
             ax.set_xlabel("Period (s)")
@@ -1210,7 +1188,6 @@ def site_uhs(
                 output_ffp.with_suffix(".yaml"),
                 clobber=True,
             )
-
 
 
 def pred_vs_res_std(model_dir: Path):
@@ -1258,10 +1235,11 @@ def pred_vs_res_std(model_dir: Path):
         alpha=0.5,
     )
 
-    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax.set_xlabel("Period (s)")
     ax.set_ylabel("Standard Deviation")
     ax.set_xlim(0.01, 10)
+    ax.set_ylim(0, 0.6)
     ax.set_xscale("log")
     ax.legend()
 

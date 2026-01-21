@@ -3,6 +3,7 @@ import multiprocessing as mp
 import logging
 from pathlib import Path
 from importlib import reload
+import warnings
 
 import torch
 import pandas as pd
@@ -25,6 +26,26 @@ from . import analysis
 
 logger = logging.getLogger(__name__)
 
+DS_HAZARD_IM_LIMITS_MAPPING = {
+    "pSA_0.01": (0.0, 0.75, 0.075),
+    "pSA_0.1": (0.0, 1.5, 0.15),
+    "pSA_0.5": (0.0, 1.5, 0.15),
+    "pSA_1.0": (0.0, 0.75, 0.075),
+    "pSA_3.0": (0.0, 0.5, 0.05),
+    "pSA_5.0": (0.0, 0.25, 0.025),
+    "pSA_10.0": (0.0, 0.05, 0.005),
+}
+
+TOTAL_HAZARD_IM_LIMITS_MAPPING = {
+    "pSA_0.01": (0.0, 2.0, 0.2),
+    "pSA_0.1": (0.0, 2.5, 0.25),
+    "pSA_0.5": (0.0, 2.5, 0.25),
+    "pSA_1.0": (0.0, 2.0, 0.2),
+    "pSA_3.0": (0.0, 1.0, 0.1),
+    "pSA_5.0": (0.0, 0.3, 0.03),
+    "pSA_10.0": (0.0, 0.2, 0.02),
+}
+
 
 class SpatialPlot:
 
@@ -39,7 +60,7 @@ class SpatialPlot:
     }
 
     DEFAULT_PLT_KWARGS = {
-        "topo_cmap_min": 0,
+        "topo_cmap_min": -1000,
         "topo_cmap_max": 3000,
         "topo_cmap_inc": 10,
         "highway_pen_width": 0.1,
@@ -52,6 +73,8 @@ class SpatialPlot:
         MAP_TICK_PEN_PRIMARY="0.5p,black",
         MAP_FRAME_PEN="0.5p,black",
         MAP_FRAME_AXES="wsne",
+        FONT_ANNOT_PRIMARY=constants.GMT_FIG_FONT_ANNOT_PRIMARY,
+        FONT_LABEL=constants.GMT_FIG_FONT_LABEL,
     )
 
     def __init__(
@@ -120,7 +143,7 @@ class SpatialPlot:
         im_df: pd.DataFrame,
         key: str,
         im: str | None = None,
-        grid_spacing: str = "500e/500e",
+        grid_spacing: str = "250e/250e",
         **plot_grid_kwargs,
     ):
         """
@@ -142,25 +165,45 @@ class SpatialPlot:
         assert "lon" in im_df.columns, "im_df must contain 'lon' column"
         assert "lat" in im_df.columns, "im_df must contain 'lat' column"
 
+        self.plot_values(
+            im_df, key, utils.get_nice_im_name(im), self.IM_LIMITS_MAPPING[im], grid_spacing, **plot_grid_kwargs
+        )
+        return self
+    
+    def plot_values(
+        self,
+        value_df: pd.DataFrame,
+        key: str,
+        cb_label: str,
+        cb_limits: tuple[float, float, float],
+        grid_spacing: str = "250e/250e",
+        **plot_grid_kwargs,
+        ):
+        """
+        Plots the given values on a spatial grid using the hot colormap.
+        Generalized version of plot_im_values.
+        """
+        assert "lon" in value_df.columns, "value_df must contain 'lon' column"
+        assert "lat" in value_df.columns, "value_df must contain 'lat' column"
+
         plot_grid_kwargs = {
-            "cb_label": utils.get_nice_im_name(im),
+            "cb_label": cb_label,
             "plot_contours": False,
             "reverse_cmap": True,
             "cmap": "hot",
-            "cmap_limits": self.IM_LIMITS_MAPPING[im],
+            "cmap_limits": cb_limits,
             "cmap_limit_colors": ("white", "black"),
         } | plot_grid_kwargs
 
-        im_grid = plotting.create_grid(im_df, key, grid_spacing=grid_spacing)
-
+        grid = plotting.create_grid(value_df, key, grid_spacing=grid_spacing)
         plotting.plot_grid(
             self.fig,
-            im_grid,
+            grid,
             **plot_grid_kwargs,
         )
 
         return self
-
+    
     def plot_basin_boundaries(
         self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs
     ):
@@ -220,42 +263,62 @@ class SpatialPlot:
         self.fig.savefig(output_ffp, dpi=dpi, anti_alias=True)
 
 
-def nn_gmm_hazard_map(
+def ds_hazard_ratio_maps(
     imdb_ffp: Path,
-    hazard_results_dir: Path,
+    hazard_results_dir_1: Path,
+    hazard_results_dir_2: Path,
+    output_dir: Path,
+    cb_label_suffix: str,
+    filename_prefix: str,
     ims: list[str],
     rps: list[int],
-    output_dir: Path,
     n_procs: int = 1,
 ):
-    """Create NZ-wide hazard maps for specified IMs at a given return period."""
+    """Create NZ-wide DS hazard ratio maps for specified IMs and return periods."""
     with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df().set_index("site_id")
 
     if n_procs == 1:
         for im in ims:
-            _nn_gm_hazard_map(site_df, hazard_results_dir, im, rps, output_dir)
+            hazard_ratio_map(
+                site_df,
+                hazard_results_dir_1,
+                hazard_results_dir_2,
+                im,
+                rps,
+                output_dir,
+                cb_label_suffix,
+                filename_prefix,
+            )
     else:
         mp_func = partial(
-            _nn_gm_hazard_map,
+            hazard_ratio_map,
             site_df,
-            hazard_results_dir,
+            hazard_results_dir_1,
+            hazard_results_dir_2,
             rps=rps,
             output_dir=output_dir,
+            cb_label_suffix=cb_label_suffix,
+            filename_prefix=filename_prefix,
             is_mp=True,
         )
         with mp.Pool(n_procs) as pool:
-            logger.info(f"Using {n_procs} processes to generate hazard maps.")
+            logger.info(f"Using {n_procs} processes to generate hazard ratio maps.")
             list(tqdm(pool.imap_unordered(mp_func, ims), total=len(ims)))
 
 
-def _nn_gm_hazard_map(
+def hazard_ratio_map(
     site_df: pd.DataFrame,
-    hazard_results_dir: Path,
+    hazard_results_dir_1: Path,
+    hazard_results_dir_2: Path,
     im: str,
     rps: list[int],
     output_dir: Path,
+    cb_label_suffix: str,
+    filename_prefix: str,
     is_mp: bool = False,
+    grid_spacing: str = "250e/250e",
+    cb_max: float = 2.0,
 ):
     if is_mp:
         import pygmt
@@ -264,64 +327,227 @@ def _nn_gm_hazard_map(
 
     import seismic_hazard_analysis as sha
 
-    # Hazard map IM limits mapping
-    # IM_LIMITS_MAPPING = {
-    #     475: {
-    #         "pSA_0.01": (0.0, 1.0, 0.05),
-    #         "pSA_0.1": (0.0, 2.5, 0.125),
-    #         "pSA_0.5": (0.0, 1.5, 0.075),
-    #         "pSA_1.0": (0.0, 0.8, 0.04),
-    #         "pSA_3.0": (0.0, 0.6, 0.03),
-    #         "pSA_5.0": (0.0, 0.25, 0.0125),
-    #         "pSA_10.0": (0.0, 0.025, 0.00125),
-    #     },
-    #     975: {
-    #         "pSA_0.01": (0.0, 1.0, 0.05),
-    #         "pSA_0.1": (0.0, 2.5, 0.125),
-    #         "pSA_0.5": (0.0, 1.5, 0.075),
-    #         "pSA_1.0": (0.0, 0.8, 0.04),
-    #         "pSA_3.0": (0.0, 0.6, 0.03),
-    #         "pSA_5.0": (0.0, 0.25, 0.0125),
-    #         "pSA_10.0": (0.0, 0.025, 0.00125),
-    #     },
-    #     2475: {
-    #         "pSA_0.01": (0.0, 1.0, 0.05),
-    #         "pSA_0.1": (0.0, 2.5, 0.125),
-    #         "pSA_0.5": (0.0, 1.5, 0.075),
-    #         "pSA_1.0": (0.0, 0.8, 0.04),
-    #         "pSA_3.0": (0.0, 0.6, 0.03),
-    #         "pSA_5.0": (0.0, 0.25, 0.0125),
-    #         "pSA_10.0": (0.0, 0.025, 0.00125),
-    #     }
-    # }
-
     excd_values = [sha.utils.rp_to_prob(rp) for rp in rps]
 
-    hazard_df = pd.read_parquet(
+    # Load the hazard results
+    hazard_df_1 = pd.read_parquet(
+        hazard_results_dir_1 / f"{utils.get_im_filename(im)}_ds_hazard.parquet"
+    )
+    hazard_df_2 = pd.read_parquet(
+        hazard_results_dir_2 / f"{utils.get_im_filename(im)}_ds_hazard.parquet"
+    )
+    assert hazard_df_1.columns.equals(
+        hazard_df_2.columns
+    ), "Site mismatch between the two hazard results"
+
+    # Get the IM values at the specified return period
+    res_df = pd.DataFrame(index=hazard_df_1.columns, columns=rps, dtype=float)
+    res_df["lon"] = site_df.loc[hazard_df_1.columns, "lon"]
+    res_df["lat"] = site_df.loc[hazard_df_1.columns, "lat"]
+    for site in hazard_df_1.columns:
+        im_values_1 = sha.utils.exceedance_to_im(
+            np.array(excd_values),
+            hazard_df_1.index.values.astype(float),
+            hazard_df_1[site].values,
+        )
+        im_values_2 = sha.utils.exceedance_to_im(
+            np.array(excd_values),
+            hazard_df_2.index.values.astype(float),
+            hazard_df_2[site].values,
+        )
+        res_df.loc[site, rps] = np.log(im_values_1 / im_values_2)
+
+    filename_prefix = f"{filename_prefix}_" if filename_prefix else ""
+    for rp in rps:
+        plt_kwargs = {"water_color": "white"}
+        plot = SpatialPlot(plot_kwargs=plt_kwargs).plot_ratio(
+            res_df,
+            rp,
+            grid_spacing=grid_spacing,
+            cmap_limits=(-cb_max, cb_max, (2 * cb_max) / 10),
+            cb_label=f"{utils.get_nice_im_name(im)} - {cb_label_suffix}",
+            transparency=25,
+        )
+        plot.fig.text(
+            position="TL",
+            text=f"PoE: {utils.rp_to_poe_string(rp)}",
+            offset="0.5c/-0.5c",
+            font=constants.GMT_FIG_FONT_LABEL,
+        )
+        
+        out_ffp = (
+            output_dir
+            / f"{filename_prefix}hazard_ratio_{utils.get_im_filename(im)}_rp{rp}.png"
+        )
+        plot.save(out_ffp)
+        mlt.utils.write_to_yaml(
+            dict(
+                type="ds-hazard-ratio-map",
+                im=im,
+                rp=rp,
+                filename_prefix=filename_prefix,
+            ),
+            out_ffp.with_suffix(".yaml"),
+            clobber=True,
+        )
+
+
+def hazard_maps(
+    imdb_ffp: Path,
+    hazard_results_dir: Path,
+    ims: list[str],
+    rps: list[int],
+    output_dir: Path,
+    n_procs: int = 1,
+    title: str = None,
+    add_flt_hazard: bool = False,
+):
+    """Create NZ-wide DS hazard maps for specified IMs and return periods."""
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df().set_index("site_id")
+
+    if n_procs == 1:
+        for im in ims:
+            hazard_map(
+                site_df,
+                hazard_results_dir,
+                im,
+                rps,
+                output_dir,
+                title=title,
+                add_flt_hazard=add_flt_hazard,
+            )
+    else:
+        mp_func = partial(
+            hazard_map,
+            site_df,
+            hazard_results_dir,
+            rps=rps,
+            output_dir=output_dir,
+            is_mp=True,
+            title=title,
+            add_flt_hazard=add_flt_hazard,
+        )
+        with mp.Pool(n_procs) as pool:
+            logger.info(f"Using {n_procs} processes to generate hazard maps.")
+            list(tqdm(pool.imap_unordered(mp_func, ims), total=len(ims)))
+
+
+def hazard_map(
+    site_df: pd.DataFrame,
+    hazard_results_dir: Path,
+    im: str,
+    rps: list[int],
+    output_dir: Path,
+    add_flt_hazard: bool = False,
+    is_mp: bool = False,
+    grid_spacing: str = "250e/250e",
+    title: str | None = None,
+    filename_prefix: str | None = None,
+):
+    if is_mp:
+        import pygmt
+
+        reload(pygmt)
+
+    import seismic_hazard_analysis as sha
+
+    im_limits_mapping = (
+        TOTAL_HAZARD_IM_LIMITS_MAPPING
+        if add_flt_hazard
+        else DS_HAZARD_IM_LIMITS_MAPPING
+    )
+    excd_values = [sha.utils.rp_to_prob(rp) for rp in rps]
+    ds_hazard_df = pd.read_parquet(
         hazard_results_dir / f"{utils.get_im_filename(im)}_ds_hazard.parquet"
     )
 
-    results_df = pd.DataFrame(index=hazard_df.columns, columns=rps, dtype=float)
-    results_df["lon"] = site_df.loc[hazard_df.columns, "lon"]
-    results_df["lat"] = site_df.loc[hazard_df.columns, "lat"]
+    flt_im_df = None
+    if add_flt_hazard:
+        # Load Cybershake fault hazard
+        flt_hazard_df = (
+            pd.read_pickle(
+                constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+            )[im]
+            .loc[ds_hazard_df.columns]
+            .T
+        )
+        assert flt_hazard_df.columns.equals(
+            ds_hazard_df.columns
+        ), "Mismatch in DS and fault hazard site columns"
 
-    for site in hazard_df.columns:
-        results_df.loc[site, rps] = sha.utils.exceedance_to_im(
+        flt_im_df = pd.DataFrame(index=flt_hazard_df.columns, columns=rps, dtype=float)
+        
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+            for site in flt_hazard_df.columns:
+                flt_im_df.loc[site, rps] = sha.utils.exceedance_to_im(
+                    np.array(excd_values),
+                    flt_hazard_df.index.values.astype(float),
+                    flt_hazard_df[site].values.astype(float),
+                )
+
+    ds_im_df = pd.DataFrame(index=ds_hazard_df.columns, columns=rps, dtype=float)
+    ds_im_df["lon"] = site_df.loc[ds_hazard_df.columns, "lon"]
+    ds_im_df["lat"] = site_df.loc[ds_hazard_df.columns, "lat"]
+    for site in ds_hazard_df.columns:
+        ds_im_df.loc[site, rps] = sha.utils.exceedance_to_im(
             np.array(excd_values),
-            hazard_df.index.values.astype(float),
-            hazard_df[site].values,
+            ds_hazard_df.index.values.astype(float),
+            ds_hazard_df[site].values,
         )
 
+    im_df = ds_im_df
+    if add_flt_hazard:
+        assert ds_im_df.index.equals(
+            flt_im_df.index
+        ), "Mismatch in DS and fault hazard site indices"
+        im_df.loc[:, rps] = ds_im_df[rps] + flt_im_df[rps]
+
+    if title is None:
+        title = (
+            "Total Hazard" if add_flt_hazard else "Distributed Seismicity Hazard"
+        )
+
+    plt_kwargs = {"water_color": "white"}
+    filename_prefix = f"{filename_prefix}" if filename_prefix else f"{'total' if add_flt_hazard else 'ds'}"
     for rp in rps:
-        plot = SpatialPlot(title=f"RP={rp}").plot_im_values(
-            results_df, rp, im, grid_spacing="250e/250e"
+        plot = SpatialPlot(plot_kwargs=plt_kwargs).plot_im_values(
+            im_df,
+            rp,
+            im,
+            grid_spacing=grid_spacing,
+            cmap_limits=im_limits_mapping[im],
+            transparency=25,
         )
 
-        out_ffp = output_dir / f"hazard_map_{utils.get_im_filename(im)}_rp{rp}.png"
+
+        plot.fig.text(
+            position="TL",
+            text=title,
+            offset="0.5c/-0.5c",
+            font=constants.GMT_FIG_FONT_LABEL,
+        )
+        plot.fig.text(
+            position="TL",
+            text=f"PoE: {utils.rp_to_poe_string(rp)}",
+            offset="0.5c/-1.1c",
+            font=constants.GMT_FIG_FONT_LABEL,
+        )
+
+        out_ffp = (
+            output_dir
+            / f"{filename_prefix}_hazard_map_{utils.get_im_filename(im)}_rp{rp}.png"
+        )
         plot.save(out_ffp)
 
         mlt.utils.write_to_yaml(
-            dict(type="nn-hazard-map", im=im, rp=rp),
+            dict(
+                type=f"{'total' if add_flt_hazard else 'ds'}-hazard-map",
+                im=im,
+                rp=rp,
+                filename_prefix=filename_prefix,
+            ),
             out_ffp.with_suffix(".yaml"),
             clobber=True,
         )
@@ -513,8 +739,81 @@ def site_bias_res_std(
                 ],
             )
 
+def cv_mean_pred_std_maps(
+    cv_model_results_dir: Path,
+    output_dir: Path,
+    ims: list[str],
+    n_procs: int = 1,
+    grid_spacing: str = "250e/250e",
+):
+    """
+    Generate mean predicted std maps from cross-validation results
+    for the specified IMs.
+    """
+    run_config = nn_gmm.load_config(cv_model_results_dir / "run_config.yaml")
 
-def nn_site_term_map(
+    # Load results
+    pred_df = pd.read_parquet(cv_model_results_dir / "val_results.parquet")
+    record_int_ids = pred_df.index.values.astype(int)
+
+    logger.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df()
+        record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
+
+    pred_df["site_int_id"] = record_info_df.loc[pred_df.index].site_int_id.values
+    mean_pred_std_df = pred_df.groupby("site_int_id")[run_config.pred_std_keys].mean()
+    mean_pred_std_df["lon"] = site_df.loc[mean_pred_std_df.index, "lon"]
+    mean_pred_std_df["lat"] = site_df.loc[mean_pred_std_df.index, "lat"]
+    
+    if n_procs == 1:
+        for im in ims:
+            cv_mean_pred_std_map(
+            mean_pred_std_df,
+                im,
+                output_dir,
+                grid_spacing=grid_spacing
+            )
+    else:
+        logger.info(f"Using {n_procs} processes to generate hazard maps.")
+        fn_call = partial(
+            cv_mean_pred_std_map,
+            mean_pred_std_df,
+            output_dir=output_dir,
+            grid_spacing=grid_spacing,
+        )
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(processes=n_procs) as pool:
+            list(tqdm(pool.imap_unordered(fn_call, ims), total=len(ims)))
+
+def cv_mean_pred_std_map(
+    mean_pred_std_df: pd.DataFrame,
+    im: str,
+    output_dir: Path,
+    grid_spacing: str = "250e/250e"
+):
+    plt_kwargs = {"water_color": "white"}
+    spatial_plot = SpatialPlot(plot_kwargs=plt_kwargs)
+
+    spatial_plot.plot_values(
+        mean_pred_std_df,
+        f"{im}_pred_std",
+        f"Mean Predicted Std - {utils.get_nice_im_name(im)}",
+        (0.0, 1.0, 0.1),
+        grid_spacing=grid_spacing
+    )
+
+    out_ffp = output_dir / f"cv_mean_pred_std_map_{im}.png"
+    spatial_plot.save(out_ffp)
+
+    mlt.utils.write_to_yaml(
+        dict(type="cv-mean-pred-std-map", im=im),
+        out_ffp.with_suffix(".yaml"),
+        clobber=True,
+    )
+
+
+def nn_site_term_maps(
     nn_dir: Path,
     ims: list[str],
     output_dir: Path = None,
@@ -563,7 +862,7 @@ def _gen_im_site_term_map(
         site_res_df,
         im,
         grid_spacing=grid_spacing,
-        cmap_limits=(-0.5, 0.5, 1.0 / 16),
+        cmap_limits=(-0.5, 0.5, 1.0 / 10),
         cb_label=f"{utils.get_nice_im_name(im)} Site Term",
     )
 
