@@ -208,10 +208,10 @@ VS30_WEIGHTING_BIN_NAMES = [
     f"{VS30_WEIGHTING_BINS[i]}_{VS30_WEIGHTING_BINS[i + 1]}"
     for i in range(len(VS30_WEIGHTING_BINS) - 1)
 ]
-DETPH_WEIGHTING_BINS = np.asarray([0, 10, 20, 30, 50, 90])
-DETPH_WEIGHTING_BIN_NAMES = [
-    f"{DETPH_WEIGHTING_BINS[i]}_{DETPH_WEIGHTING_BINS[i + 1]}"
-    for i in range(len(DETPH_WEIGHTING_BINS) - 1)
+DEPTH_WEIGHTING_BINS = np.asarray([0, 10, 20, 30, 50, 90])
+DEPTH_WEIGHTING_BIN_NAMES = [
+    f"{DEPTH_WEIGHTING_BINS[i]}_{DEPTH_WEIGHTING_BINS[i + 1]}"
+    for i in range(len(DEPTH_WEIGHTING_BINS) - 1)
 ]
 
 # NZ bounding box
@@ -272,6 +272,10 @@ if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not Non
 GMT_FIG_FONT_LABEL = "14p,Helvetica,black"
 if (env_gmt_fig_font_label := os.environ.get("gmt_fig_font_label")) is not None:
     GMT_FIG_FONT_LABEL = env_gmt_fig_font_label
+
+GMT_FIG_BOLD_FONT_LABEL = "14p,Helvetica-Bold,black"
+if (env_gmt_fig_bold_font_label := os.environ.get("gmt_fig_bold_font_label")) is not None:
+    GMT_FIG_BOLD_FONT_LABEL = env_gmt_fig_bold_font_label
 
 GMT_FIG_FONT_ANNOT_PRIMARY = "11p,Helvetica,black"
 if (env_gmt_fig_font_annot_primary := os.environ.get("gmt_fig_font_annot_primary")) is not None:

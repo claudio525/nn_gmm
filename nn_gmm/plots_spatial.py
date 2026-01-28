@@ -7,6 +7,8 @@ import warnings
 
 import torch
 import pandas as pd
+import geopandas as gpd
+import shapely
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -60,11 +62,14 @@ class SpatialPlot:
     }
 
     DEFAULT_PLT_KWARGS = {
-        "topo_cmap_min": -1000,
-        "topo_cmap_max": 3000,
+        "topo_cmap_min": -250,
+        "topo_cmap_max": 6000,
         "topo_cmap_inc": 10,
-        "highway_pen_width": 0.1,
+        "highway_pen_width": 0.2,
+        "highway_pen_color": "orange",
         "frame_args": ["f"],
+        "coastline_pen_width": 0.1,
+        "coastline_pen_color": "black",
     }
 
     DEFAULT_CONFIG_OPTIONS = dict(
@@ -98,6 +103,20 @@ class SpatialPlot:
             **fig_kwargs,
             config_options=config_options,
             plot_kwargs=plot_kwargs,
+        )
+
+    def plot_coastline(self, **plot_kwargs):
+        """Adds the coastline to the existing figure."""
+        plot_kwargs = {
+            "coastline_pen_width": self.DEFAULT_PLT_KWARGS["coastline_pen_width"],
+            "coastline_pen_color": self.DEFAULT_PLT_KWARGS["coastline_pen_color"],
+        } | plot_kwargs
+
+        map_data = plotting.NZMapData.load(high_res_topo=False)
+
+        self.fig.plot(
+            data=map_data.coastline_df,
+            pen=f"{plot_kwargs['coastline_pen_width']}p,{plot_kwargs['coastline_pen_color']}",
         )
 
     def plot_sites(self, site_df: pd.DataFrame, **plot_kwargs):
@@ -204,6 +223,58 @@ class SpatialPlot:
 
         return self
     
+    def plot_basins(self, basin_dir: Path | None = constants.BASIN_BOUNDARIES_DIR, basin_specs: dict[Path, dict] | None = None, **plot_kwargs):
+        """
+        Adds basin polygons to the existing figure.
+
+        Parameters
+        ----------
+        basin_dir : Path
+            Directory containing basin boundary text files.
+            Plots all basins in the directory if basin_specs is None.
+        basin_specs : dict[Path, dict]
+            Dictionary mapping basin boundary file paths to plotting specifications.
+            If provided, only the specified basins are plotted with their respective specs,
+            and basin_dir is ignored.
+        plot_kwargs : dict
+            Additional plotting keyword arguments to apply to all basins if basin_specs is None.
+        """
+        plot_kwargs = {"fill": "red", "pen": "0.1p,black", "transparency": 35} | plot_kwargs
+
+        if basin_specs is None:
+            basin_files = list(basin_dir.glob("*.txt"))
+            basin_specs = {ffp: plot_kwargs for ffp in basin_files}
+
+        land_df = gpd.read_file(constants.NZ_LAND_SHAPEFILE).to_crs(epsg=2193).loc[[8263, 8322]]
+        
+        # Combine into a single polygon
+        land_polygon = shapely.coverage_union_all(land_df.geometry)
+
+        for ffp, plot_specs in basin_specs.items():
+            plot_specs = plot_kwargs | plot_specs
+
+            # Create basin polygon
+            basin_nztm_coords = coordinates.wgs_depth_to_nztm(np.loadtxt(ffp)[:, ::-1])[:, ::-1]
+            basin_polygon = shapely.Polygon(basin_nztm_coords)
+
+            # Obtain basin land polygon
+            basin_land_polygon = basin_polygon.intersection(land_polygon)
+            basin_land_polygon_wgs = shapely.transform(basin_land_polygon, lambda x: coordinates.nztm_to_wgs_depth(x[:, ::-1])[:, ::-1])
+
+            # Plot
+            if isinstance(basin_land_polygon_wgs, shapely.geometry.polygon.Polygon):
+                geom_coords = np.array(basin_land_polygon_wgs.exterior.coords)
+                self.fig.plot(x=geom_coords[:, 0], y=geom_coords[:, 1], **plot_specs)
+            elif isinstance(basin_land_polygon_wgs, shapely.geometry.multipolygon.MultiPolygon):
+                for geom_wgs in basin_land_polygon_wgs.geoms:
+                    geom_coords = np.array(geom_wgs.exterior.coords)
+                    self.fig.plot(x=geom_coords[:, 0], y=geom_coords[:, 1], **plot_specs)
+            else:
+                raise ValueError("Unexpected geometry type for basin land polygon.")
+
+        return self
+        
+
     def plot_basin_boundaries(
         self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs
     ):
@@ -520,7 +591,6 @@ def hazard_map(
             cmap_limits=im_limits_mapping[im],
             transparency=25,
         )
-
 
         plot.fig.text(
             position="TL",

@@ -1560,8 +1560,8 @@ def get_depth_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataF
     """
     record_info_df["depth_bin"] = pd.cut(
         record_info_df["hypo_depth"],
-        constants.DETPH_WEIGHTING_BINS,
-        labels=constants.DETPH_WEIGHTING_BIN_NAMES,
+        constants.DEPTH_WEIGHTING_BINS,
+        labels=constants.DEPTH_WEIGHTING_BIN_NAMES,
     )
 
     depth_bin_counts = record_info_df.depth_bin.value_counts().sort_index()
@@ -1796,7 +1796,7 @@ def run_full_training(
         site_df = imdb.get_site_df(min_grid_level=0, add_nztm=True)
 
     if run_config.extra_basin_sites:
-        # Take all level 0 sites and level 2 & 3 sites that are in a basin
+        # Take all level 0 sites and level 2  sites that are in a basin
         site_df = utils.add_basin_column(site_df)
         site_df = site_df.loc[
             (site_df.grid_level == 0)

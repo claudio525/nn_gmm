@@ -183,9 +183,9 @@ def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_
 
 
 @app.command("continue-hp-opt")
-def continue_hp_opt(study_dir: Path, n_trials: int):
+def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
     """Continue a previously started hyperparameter optimization study."""
-    nng.nn_hp_opt.continue_hp_opt(study_dir, n_trials)
+    nng.nn_hp_opt.continue_hp_opt(study_dir, n_trials, n_procs=n_procs)
 
 
 if __name__ == "__main__":

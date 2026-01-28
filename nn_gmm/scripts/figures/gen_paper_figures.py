@@ -1,5 +1,5 @@
-import io
 import os
+import io
 from pathlib import Path
 
 import torch
@@ -144,24 +144,61 @@ def fault_map(output_dir: Path, imdb_ffp: Path):
     event_df = event_df.loc[event_df.fault_type != "DS_POINT_SOURCE"]
 
     region = [165.4, 179.6, -47.4, -36.2]
-
     spatial_plot = nng.plots_spatial.SpatialPlot(
-        plot_topo=True, plot_highways=True, region=region
+        plot_topo=True,
+        plot_highways=True,
+        region=region,
+        plot_kwargs={"water_color": "white"},
     )
+
+    basin_specs = {
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Kaikoura_outline_WGS84.txt"
+        ): {"fill": "green", "pen": "0.2p,green"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Marlborough_outline_WGS84.txt"
+        ): {"fill": "orange", "pen": "0.2p,orange"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Wellington_outline_WGS84.txt"
+        ): {"fill": "blue", "pen": "0.2p,blue"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Cheviot_outline_WGS84.txt"
+        ): {"fill": "green", "pen": "0.2p,green"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Canterbury_outline_WGS84.txt"
+        ): {"fill": "cyan", "pen": "0.2p,cyan"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Hanmer_outline_WGS84_v19p1.txt"
+        ): {"fill": "green", "pen": "0.2p,green"},
+        Path(       
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Nelson_outline_WGS84.txt"
+        ): {"fill": "purple", "pen": "0.2p,purple"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/BanksPeninsulaVolcanics_outline_WGS84.txt"
+        ): {"fill": None, "pen": "0.2p,black"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/WaikatoHauraki_outline_WGS84.txt"
+        ): {"fill": "magenta", "pen": "0.2p,magenta"},
+        Path(
+            "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/NorthCanterbury_outline_WGS84.txt"
+        ): {"fill": "green", "pen": "0.2p,green"},
+    }
+
+    spatial_plot.plot_basins(basin_specs=basin_specs)
 
     # Plot simulated crustal faults
     spatial_plot.plot_fault_traces(
         event_df.loc[event_df.tect_type == "ACTIVE_SHALLOW"].event_id.values.astype(
             str
         ),
-        label="Simulated Active Shallow Sources",
+        label="Simulated active shallow sources",
         pen="0.75p,red",
     )
 
     # Plot simulated crustal faults
     spatial_plot.plot_fault_traces(
         event_df.loc[event_df.tect_type == "VOLCANIC"].event_id.values.astype(str),
-        label="Simulated Volcanic Sources",
+        label="Simulated volcanic sources",
         pen="0.75p,maroon",
     )
 
@@ -170,7 +207,7 @@ def fault_map(output_dir: Path, imdb_ffp: Path):
         event_df.loc[
             event_df.tect_type == "SUBDUCTION_INTERFACE"
         ].event_id.values.astype(str),
-        label="Simulated Subduction Interface Sources",
+        label="Simulated subduction interface sources",
         pen="0.75p,blue",
     )
 
@@ -181,12 +218,30 @@ def fault_map(output_dir: Path, imdb_ffp: Path):
     ].name.values.astype(str)
     spatial_plot.plot_fault_traces(
         not_simulated_faults,
-        label="Sources not Simulated",
+        label="Sources not simulated",
         pen="0.5p,black",
     )
 
+    # Coastline
+    spatial_plot.plot_coastline()
+
     # Add legend
     spatial_plot.fig.legend(position="JTL+jTL+o0.2c", box="+gwhite+p1p")
+
+    # Custom legend for modelled basins
+    legend_spec_io = io.StringIO(
+        """
+N 2
+S 0.1c r 0.25c green 0.2p,green 0.3c North Canterbury
+S 0.1c r 0.25c orange 0.2p,orange 0.3c Marlborough
+S 0.1c r 0.25c blue 0.2p,blue 0.3c Wellington
+S 0.1c r 0.25c cyan 0.2p,cyan 0.3c Canterbury
+S 0.1c r 0.25c purple 0.2p,purple 0.3c Nelson
+S 0.1c r 0.25c magenta 0.2p,magenta 0.3c Waikato-Hauraki
+        """
+    )
+
+    spatial_plot.fig.legend(spec=legend_spec_io, position="JBR+jBR+o0.2c+w7.5c", box="+gwhite+p1p")
 
     spatial_plot.save(output_dir / f"nz_faults.{nng.constants.FIG_FORMAT}")
 
@@ -448,8 +503,7 @@ def nn_gmm_site_term_map(
         site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left"
     )
 
-    plt_kwargs = {"water_color": "white"}
-    spatial_plot = nng.plots_spatial.SpatialPlot(plot_kwargs=plt_kwargs)
+    spatial_plot = nng.plots_spatial.SpatialPlot(plot_kwargs={"water_color": "white"})
 
     spatial_plot.plot_ratio(
         site_res_df,
@@ -947,9 +1001,6 @@ def site_hazard_plot(
     )
 
     # Site 2 - IM 1
-    ax3.sharex(ax1)
-    ax3.sharey(ax1)
-
     ax3.loglog(
         base_ds_hazard[site2]["total"][im1].index,
         base_ds_hazard[site2]["total"][im1].values,
@@ -1163,6 +1214,386 @@ def model_trends(
         pass
     else:
         raise ValueError(f"Unknown trend type: {config['type']}")
+
+
+@app.command("sample-weights")
+def sample_weights(imdb_ffp: Path, test_events_ffp: Path, output_dir: Path):
+    """
+    Generate sample weight figures for magnitude,
+    rrup, vs30, tectonic type and hypocentre depth.
+    """
+    nng.utils.setup_logging()
+    _fig_settings()
+
+    bin_color = "#4363d8"
+
+    with nng.DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(max_grid_level=0, min_grid_level=0)
+        sites = site_df.site_id.values.astype(str)
+
+        event_df = imdb.get_event_df()
+        rel_df = imdb.get_rel_df()
+
+        # Drop test events
+        test_events = np.load(test_events_ffp).astype(str)
+        event_df = event_df[~event_df.event_id.isin(test_events)]
+
+        record_info_df = imdb.get_record_info_df(
+            sites=sites, events=event_df.event_id.values.astype(str)
+        )
+        site_event_data = imdb.get_site_event_df(
+            sites=site_df.site_id.values.astype(str)
+        )
+
+    # Add site-event int id
+    record_info_df["site_event_int_id"] = nng.utils.get_site_event_int_id(
+        record_info_df.site_int_id.values, record_info_df.event_int_id.values
+    )
+
+    # Add magnitude, rrup, vs30, and tectonic type
+    record_info_df["vs30"] = site_df.loc[record_info_df.site_int_id, "vs30"].values
+    record_info_df["magnitude"] = event_df.loc[
+        record_info_df.event_int_id, "magnitude"
+    ].values
+    record_info_df["rrup"] = site_event_data.loc[
+        record_info_df.site_event_int_id, "rrup"
+    ].values
+    record_info_df["tect_type"] = event_df.loc[
+        record_info_df.event_int_id, "tect_type"
+    ].values
+    record_info_df["hypo_depth"] = rel_df.loc[
+        record_info_df.rel_int_id, "hypo_depth"
+    ].values
+
+    # Spacing
+    left, right = 0.055, 0.99
+    top, bottom = 0.95, 0.125
+    wspace = 0.15
+
+    # Magnitude
+    fig, (
+        ax1,
+        ax2,
+    ) = mlt.plotting.get_fig_axes(
+        2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
+    )
+    record_info_df = nng.nn_gmm.get_mag_weights(record_info_df, 2.5)
+
+    ax1.hist(
+        record_info_df.magnitude,
+        bins=nng.constants.MAG_WEIGHTING_BINS,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.xaxis.set_minor_locator(plt.MultipleLocator(0.25))
+    ax1.set_ylabel("Count")
+    ax1.set_xlabel("Magnitude")
+    ax1.set_xlim(
+        nng.constants.MAG_WEIGHTING_BINS[0], nng.constants.MAG_WEIGHTING_BINS[-1]
+    )
+
+    ax2.hist(
+        record_info_df.magnitude.values,
+        bins=nng.constants.MAG_WEIGHTING_BINS,
+        weights=1 + record_info_df["mag_weight"].values.astype(float),
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax2.set_xlabel("Magnitude")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.xaxis.set_minor_locator(plt.MultipleLocator(0.25))
+    ax2.set_ylabel("Weighted Count")
+    ax2.set_ylim(ax1.get_ylim())
+    ax2.set_xlim(
+        nng.constants.MAG_WEIGHTING_BINS[0], nng.constants.MAG_WEIGHTING_BINS[-1]
+    )
+
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
+    fig.savefig(output_dir / f"mag_weights.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    # Source-to-site distance
+    fig, (
+        ax1,
+        ax2,
+    ) = mlt.plotting.get_fig_axes(
+        2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
+    )
+    record_info_df = nng.nn_gmm.get_rrup_weights(record_info_df, 2.5)
+
+    ax1.hist(
+        record_info_df.rrup,
+        bins=nng.constants.RRUP_WEIGHTING_BINS,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.xaxis.set_minor_locator(plt.MultipleLocator(25))
+    ax1.set_ylabel("Count")
+    ax1.set_xlabel("Source-to-site Distance, $R_{rup}$ (km)")
+    ax1.set_xlim(
+        nng.constants.RRUP_WEIGHTING_BINS[0], nng.constants.RRUP_WEIGHTING_BINS[-1]
+    )
+
+    ax2.hist(
+        record_info_df.rrup.values,
+        bins=nng.constants.RRUP_WEIGHTING_BINS,
+        weights=1 + record_info_df["rrup_weight"].values.astype(float),
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax2.set_xlabel("Source-to-site Distance, $R_{rup}$ (km)")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.xaxis.set_minor_locator(plt.MultipleLocator(25))
+    ax2.set_ylabel("Weighted Count")
+    ax2.set_ylim(ax1.get_ylim())
+    ax2.set_xlim(
+        nng.constants.RRUP_WEIGHTING_BINS[0], nng.constants.RRUP_WEIGHTING_BINS[-1]
+    )
+
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
+    fig.savefig(output_dir / f"rrup_weights.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    # Vs30
+    fig, (
+        ax1,
+        ax2,
+    ) = mlt.plotting.get_fig_axes(
+        2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
+    )
+    record_info_df = nng.nn_gmm.get_vs30_weights(record_info_df, 2.5)
+
+    ax1.hist(
+        record_info_df.vs30,
+        bins=nng.constants.VS30_WEIGHTING_BINS,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.xaxis.set_minor_locator(plt.MultipleLocator(100))
+    ax1.xaxis.set_major_locator(plt.MultipleLocator(200))
+    ax1.set_ylabel("Count")
+    ax1.set_xlabel("$V_{S30}$ (m/s)")
+    ax1.set_xlim(
+        nng.constants.VS30_WEIGHTING_BINS[0], nng.constants.VS30_WEIGHTING_BINS[-1]
+    )
+
+    ax2.hist(
+        record_info_df.vs30.values,
+        bins=nng.constants.VS30_WEIGHTING_BINS,
+        weights=1 + record_info_df["vs30_weight"].values.astype(float),
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax2.set_xlabel("$V_{S30}$ (m/s)")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.xaxis.set_minor_locator(plt.MultipleLocator(100))
+    ax2.xaxis.set_major_locator(plt.MultipleLocator(200))
+    ax2.set_ylabel("Weighted Count")
+    ax2.set_ylim(ax1.get_ylim())
+    ax2.set_xlim(
+        nng.constants.VS30_WEIGHTING_BINS[0], nng.constants.VS30_WEIGHTING_BINS[-1]
+    )
+
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
+    fig.savefig(output_dir / f"vs30_weights.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    # Tectonic type
+    fig, (
+        ax1,
+        ax2,
+    ) = mlt.plotting.get_fig_axes(
+        2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
+    )
+
+    record_info_df.tect_type = record_info_df.tect_type.map(
+        {
+            "ACTIVE_SHALLOW": "Crustal",
+            "VOLCANIC": "Volcanic",
+            "SUBDUCTION_INTERFACE": "Interface",
+            "SUBDUCTION_SLAB": "Slab",
+        }
+    )
+    tect_type_counts = record_info_df.tect_type.value_counts()
+    record_info_df = nng.nn_gmm.get_tect_type_weights(record_info_df, 2.5)
+    record_info_df["base_and_tect_weight"] = 1 + record_info_df["tect_type_weight"]
+    weighted_counts = record_info_df.groupby("tect_type", observed=True)[
+        "base_and_tect_weight"
+    ].sum()
+
+    ax1.bar(
+        tect_type_counts.index,
+        tect_type_counts.values,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax1.set_ylabel("Count")
+
+    ax2.bar(
+        weighted_counts.index,
+        weighted_counts.values,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax2.set_ylabel("Weighted Count")
+    ax2.set_ylim(ax1.get_ylim())
+
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
+    fig.savefig(output_dir / f"tect_type_weights.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+    # Hypocentre depth
+    fig, (
+        ax1,
+        ax2,
+    ) = mlt.plotting.get_fig_axes(
+        2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
+    )
+    record_info_df = nng.nn_gmm.get_depth_weights(record_info_df, 2.5)
+
+    ax1.hist(
+        record_info_df.hypo_depth,
+        bins=nng.constants.DEPTH_WEIGHTING_BINS,
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax1.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    # ax1.xaxis.set_minor_locator(plt.MultipleLocator(25))
+    ax1.set_ylabel("Count")
+    ax1.set_xlabel(r"Hypocentre Depth, $h_{Depth}$ (km)")
+    ax1.set_xlim(
+        nng.constants.DEPTH_WEIGHTING_BINS[0], nng.constants.DEPTH_WEIGHTING_BINS[-1]
+    )
+
+    ax2.hist(
+        record_info_df.hypo_depth.values,
+        bins=nng.constants.DEPTH_WEIGHTING_BINS,
+        weights=1 + record_info_df["depth_weight"].values.astype(float),
+        edgecolor="black",
+        color=bin_color,
+    )
+    ax2.set_xlabel(r"Hypocentre Depth, $h_{Depth}$ (km)")
+    ax2.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    # ax2.xaxis.set_minor_locator(plt.MultipleLocator(25))
+    ax2.set_ylabel("Weighted Count")
+    ax2.set_ylim(ax1.get_ylim())
+    ax2.set_xlim(
+        nng.constants.DEPTH_WEIGHTING_BINS[0], nng.constants.DEPTH_WEIGHTING_BINS[-1]
+    )
+
+    fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, wspace=wspace)
+    fig.savefig(output_dir / f"depth_weights.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+
+@app.command("site-distribution-maps")
+def site_distribution_maps(imdb_ffp: Path, output_dir: Path):
+    """Generate site distribution maps for the NZ site locations."""
+    nng.utils.setup_logging()
+    _fig_settings()
+
+    site_color, style, pen = "green", "t0.075c", "0.05p,black"
+    basin_color = "purple"
+
+    with nng.DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df()
+
+    # Level 0 sites
+    site_map = nng.plots_spatial.SpatialPlot(
+        plot_kwargs={
+            "water_color": "white",
+        }
+    )
+    site_map.plot_basins(fill=basin_color)
+    site_map.plot_sites(
+        site_df.loc[site_df.grid_level == 0], fill=site_color, style=style, pen=pen
+    )
+    site_map.fig.text(
+        position="TL",
+        text="Level 0 - 8km",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    site_map.save(
+        output_dir / f"level_0_site_distribution_map.{nng.constants.FIG_FORMAT}",
+        dpi=nng.constants.FIG_DPI,
+    )
+
+    # Level 1 sites
+    site_map = nng.plots_spatial.SpatialPlot(plot_kwargs={"water_color": "white"})
+    site_map.plot_basins(fill=basin_color)
+    site_map.plot_sites(
+        site_df.loc[site_df.grid_level == 1], fill=site_color, style=style, pen=pen
+    )
+    site_map.fig.text(
+        position="TL",
+        text="Level 1 - 4km",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    site_map.save(
+        output_dir / f"level_1_site_distribution_map.{nng.constants.FIG_FORMAT}",
+        dpi=nng.constants.FIG_DPI,
+    )
+
+    # Level 2 sites
+    site_map = nng.plots_spatial.SpatialPlot(plot_kwargs={"water_color": "white"})
+    site_map.plot_basins(fill=basin_color)
+    site_map.plot_sites(
+        site_df.loc[site_df.grid_level == 2], fill=site_color, style=style, pen=pen
+    )
+    site_map.fig.text(
+        position="TL",
+        text="Level 2 - 2km",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    site_map.save(
+        output_dir / f"level_2_site_distribution_map.{nng.constants.FIG_FORMAT}",
+        dpi=nng.constants.FIG_DPI,
+    )
+
+    # Level 3 sites
+    site_map = nng.plots_spatial.SpatialPlot(plot_kwargs={"water_color": "white"})
+    site_map.plot_basins(fill=basin_color)
+    site_map.plot_sites(
+        site_df.loc[site_df.grid_level == 3], fill=site_color, style=style, pen=pen
+    )
+    site_map.fig.text(
+        position="TL",
+        text="Level 3 - 1km",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    site_map.save(
+        output_dir / f"level_3_site_distribution_map.{nng.constants.FIG_FORMAT}",
+        dpi=nng.constants.FIG_DPI,
+    )
+
+    # Real sites
+    site_map = nng.plots_spatial.SpatialPlot(plot_kwargs={"water_color": "white"})
+    site_map.plot_basins(fill=basin_color)
+    site_map.plot_sites(
+        site_df.loc[site_df.grid_level == -1],
+        fill="green",
+        style="t0.1c",
+        pen="0.05p,black",
+    )
+    site_map.fig.text(
+        position="TL",
+        text="Real Sites",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    site_map.save(
+        output_dir / f"real_site_distribution_map.{nng.constants.FIG_FORMAT}",
+        dpi=nng.constants.FIG_DPI,
+    )
 
 
 if __name__ == "__main__":

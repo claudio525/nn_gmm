@@ -107,6 +107,7 @@ class HPOptConfig:
             batch_sizes=config_dict["batch_sizes"],
             learning_rates=config_dict["learning_rates"],
             n_layers_min=config_dict["n_layers_min"],
+            last_hlayer_sizes=config_dict["last_hlayer_sizes"],
             n_layers_max=config_dict["n_layers_max"],
             unit_sizes=config_dict["unit_sizes"],
             activation_fns=config_dict["activation_fns"],
@@ -119,7 +120,7 @@ class HPOptConfig:
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
-def continue_hp_opt(study_dir: Path, n_trials: int):
+def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
     """Continue a previously started hyperparameter optimization study."""
     hp_config = HPOptConfig.from_yaml(study_dir / "hp_config.yaml")
     hp_config.study_dir = study_dir
@@ -129,7 +130,7 @@ def continue_hp_opt(study_dir: Path, n_trials: int):
         storage="sqlite:///{}.db".format(study_dir / study_dir.name),
         load_if_exists=True,
     )
-    study.optimize(functools.partial(objective, hp_config=hp_config), n_trials=n_trials)
+    study.optimize(functools.partial(objective, hp_config=hp_config, n_procs=n_procs), n_trials=n_trials)
 
 def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs: int = 1, n_startup_trials: int = 25):
     """Run hyperparameter optimization using Optuna."""
@@ -168,14 +169,13 @@ def objective(trial: opt.Trial, hp_config: HPOptConfig, n_procs: int) -> float:
         n_procs=n_procs,
         run_notebook=False,
         remove_cv_results=True,
-
     )
 
     metrics = xr.open_dataarray(output_dir / "metrics.nc")
     w_val_loss_data = metrics.sel(metric="w_loss_hist_val")
     median_w_val_loss = float(w_val_loss_data.min(dim="epoch").median())
 
-    trial.set_user_attr("median_w_val_loss", )
+    trial.set_user_attr("median_w_val_loss", median_w_val_loss)
     trial.set_user_attr("percentile_16_84_w_val_loss", tuple(np.percentile(w_val_loss_data.min(dim="epoch").values, [16, 84])))
     trial.set_user_attr("median_best_epoch", float(w_val_loss_data.argmin(dim="epoch").median()))
 
@@ -200,8 +200,8 @@ def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
         "n_layers", hp_config.n_layers_min, hp_config.n_layers_max
     )
     unit_size = trial.suggest_categorical("unit_size", hp_config.unit_sizes)
-    last_layer_size = trial.suggest_categorical("last_hlayer_size", hp_config.last_hlayer_sizes)
-    run_config.model_config.units = [unit_size] * (n_layers - 1) + [last_layer_size]
+    last_hlayer_size = trial.suggest_categorical("last_hlayer_size", hp_config.last_hlayer_sizes)
+    run_config.model_config.units = [unit_size] * (n_layers - 1) + [last_hlayer_size]
 
     run_config.model_config.activation = trial.suggest_categorical(
         "activation_fn", hp_config.activation_fns

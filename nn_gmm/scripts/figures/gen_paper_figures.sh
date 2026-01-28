@@ -4,7 +4,8 @@
 default_fig_size="6.5,4"
 export fig_size=$default_fig_size
 export fig_format="png"
-export fig_dpi="900"
+# export fig_dpi="900"
+export fig_dpi="500"
 export fig_font_size="8"
 export fig_linewidth="2.0"
 export fig_group_linewidth="1.0"
@@ -13,6 +14,8 @@ SCRIPT_DIR="${0:a:h}"
 
 imdb_ffp=$wdata/nn_gmm/20251222_CS200_DSSlab_rotd50_imdb.duckdb
 echo "imdb_ffp: $imdb_ffp"
+test_events_ffp=$wdata/nn_gmm/test_events.npy
+echo "test_events_ffp: $test_events_ffp"
 emp_ds_hazard_results=$wdata/nn_gmm/results/emp_ds_hazard
 echo "emp_ds_hazard_results: $emp_ds_hazard_results"
 cv_base_model_dir=$wdata/nn_gmm/results/1231_1247_cv_v1_25Epochs_6E6Folds
@@ -25,6 +28,9 @@ full_location_model_dir=$wdata/nn_gmm/results/0105_1316_full_locAdjV1_5Epochs
 echo "full_location_model_dir: $full_location_model_dir"
 out_dir=~/dev/tmp_share/nn_gmm/paper_figures
 echo "out_dir: $out_dir"
+
+### Fault Map
+# python gen_paper_figures.py fault-map $out_dir $imdb_ffp
 
 # ### Mixed Effects Regression Results
 # echo "Generating mixed effects regression results..."
@@ -103,11 +109,19 @@ echo "out_dir: $out_dir"
 
 # --------------------------------------- Electronic Supplementary Material Figures ---------------------------------------
 
-# ### DS Hazard ratio maps
-echo "Generating DS hazard ratio maps for ln(emp/base) at RP=475"
-python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Empirical/Base Model)" ratio_emp_base 100e/100e  --cb-max 1.0
-python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Empirical/Base Model)" ratio_emp_base 100e/100e  --cb-max 1.0
+# Sample weighting figures
+# export fig_size="3.25,3"
+# python gen_paper_figures.py sample-weights $imdb_ffp $test_events_ffp $out_dir
+# export fig_size=$default_fig_size
 
-echo "Generating DS hazard ratio maps for ln(base/loc) at RP=475"
-python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0
-python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0
+# Site distribution maps
+python gen_paper_figures.py site-distribution-maps $imdb_ffp $out_dir
+
+# # DS Hazard ratio maps
+# echo "Generating DS hazard ratio maps for ln(emp/base) at RP=475"
+# python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Empirical/Base Model)" ratio_emp_base 100e/100e  --cb-max 1.0
+# python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Empirical/Base Model)" ratio_emp_base 100e/100e  --cb-max 1.0
+
+# echo "Generating DS hazard ratio maps for ln(base/loc) at RP=475"
+# python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0
+# python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0

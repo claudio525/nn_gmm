@@ -718,11 +718,11 @@ def run_site_cond_model_training(
 
     # Generate training and validation sites
     logger.info(f"Generating {n_train_sites} training sites")
-    train_site_df, train_pre_site_df = get_rand_site_cond_site_df(
+    _, train_pre_site_df = get_rand_site_cond_site_df(
         imdb_ffp, n_train_sites
     )
     logger.info(f"Generating {n_val_sites} validation sites")
-    val_site_df, val_pre_site_df = get_rand_site_cond_site_df(imdb_ffp, n_val_sites)
+    _, val_pre_site_df = get_rand_site_cond_site_df(imdb_ffp, n_val_sites)
 
     # Datasets and Dataloaders
     train_dataset = LocationSiteCondDataset(train_pre_site_df, device=device)
