@@ -10,13 +10,13 @@ fixed_inputs:
     dbottom: 15
     hypo_depth: 8.5
     is_point_source: False
-    rrup: 75
-    rjb: 75
-    rx: 75
-    ry: 75
+    rrup: 120
+    rjb: 120
+    rx: 120
+    ry: 120
 records_range:
-    vs30: 25
+    vs30: 30
     rrup: 5
     rjb: 5
-    rx: 7.5
-    ry: 7.5
+    rx: 10
+    ry: 10

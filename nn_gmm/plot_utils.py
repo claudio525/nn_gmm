@@ -19,6 +19,7 @@ def get_pSA_bias_residual_fig(
     main_wspace: float = 0.1,
     bias_y_axis_limits: tuple[float, float] = (-1.0, 1.0),
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
+    x_axis_limits: tuple[float, float] = (0.01, 10.0),
     dpi: int = None,
 ):
     """
@@ -50,7 +51,7 @@ def get_pSA_bias_residual_fig(
     ax1.set_xscale("log")
     ax1.axhline(0, color="black", zorder=0)
     ax1.set_ylim(*bias_y_axis_limits)
-    ax1.set_xlim(0.01, 10.0)
+    ax1.set_xlim(*x_axis_limits)
 
     ax1.text(
         0.03,
@@ -76,7 +77,7 @@ def get_pSA_bias_residual_fig(
     ax2.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     ax2.set_xscale("log")
     ax2.set_ylim(*std_y_axis_limits)
-    ax2.set_xlim(0.01, 10.0)
+    ax2.set_xlim(*x_axis_limits)
 
     fig.subplots_adjust(
         left=left, right=right, top=top, bottom=bottom, wspace=main_wspace

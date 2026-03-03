@@ -129,7 +129,7 @@ def run_nn_mera(
     )
 
     logging.info("Running MERA")
-    ims = constants.PLOT_IMS if ims is None else ims
+    ims = constants.MERA_IMS if ims is None else ims
     start = time.time()
     event_mera_results = mera.run_mera(
         res_df,

@@ -6,6 +6,8 @@ import pandas as pd
 
 import oq_wrapper as oqw
 
+WDATA = Path(os.environ["wdata"])
+
 class ObsDataSource(StrEnum):
     NZGMDB = "NZGMDB"
     NGAWest2 = "NGAWest2"
@@ -72,7 +74,6 @@ PSA_KEYS = [
     "pSA_0.8",
     "pSA_0.9",
     "pSA_1.0",
-    # "pSA_1.25",
     "pSA_1.5",
     "pSA_2.0",
     "pSA_2.5",
@@ -105,7 +106,6 @@ PSA_PERIODS = [
     0.8,
     0.9,
     1.0,
-    # 1.25,
     1.5,
     2.0,
     2.5,
@@ -242,7 +242,14 @@ AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
 HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/morteza_cs200_hazard"
 
+
+DS_ERF_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZ_DSmodel_2010.txt"
+DS_SOURCE_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZBCK211_OpenSHA.txt"
+
+LEE_NZ_VAL_BIAS_STD_FFP = WDATA / "nn_gmm/other/lee_nz_validation_2022/PJSvarCompsBiased_sim.csv"
+
 PLOT_IMS = ["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
+MERA_IMS = ["pSA_0.01", "pSA_0.1", "pSA_1.0", "pSA_2.0", "pSA_3.0", "pSA_4.0", "pSA_5.0", "pSA_6.0", "pSA_7.5", "pSA_10.0"]
 
 # Default figure settings
 FIG_SIZE = (16, 10)

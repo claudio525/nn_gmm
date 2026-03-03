@@ -1,0 +1,22 @@
+type: "mag"
+fixed_inputs:
+    vs30: 500
+    z1p0: 0.1
+    z2p5: 1
+    tect_type: "ACTIVE_SHALLOW"
+    rake: 10
+    dip: 60
+    dtop: 0
+    dbottom: 15
+    hypo_depth: 8.5
+    is_point_source: False
+    rrup: 30    
+    rjb: 30
+    rx: 30
+    ry: 30
+records_range:
+    vs30: 30
+    rrup: 2.5
+    rjb: 2.5
+    rx: 5
+    ry: 5

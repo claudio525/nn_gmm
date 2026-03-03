@@ -1,0 +1,17 @@
+type: "rrup"
+fixed_inputs:
+    vs30: 500
+    z1p0: 0.1
+    z2p5: 1
+    tect_type: "SUBDUCTION_INTERFACE"
+    rake: 10
+    dip: 60
+    dtop: 0
+    dbottom: 15
+    hypo_depth: 8.5
+    is_point_source: False
+    magnitude: 8.0
+records_range:
+    magnitude: 0.025
+    vs30: 30
+    

@@ -1,0 +1,20 @@
+type: "mag"
+fixed_inputs:
+    vs30: 500
+    z1p0: 0.1
+    z2p5: 1
+    tect_type: "SUBDUCTION_SLAB"
+    rake: -90
+    dip: 45
+    dtop: 50
+    dbottom: 50
+    hypo_depth: 50
+    is_point_source: True
+    rrup: 75
+    rjb: 75
+    rx: 75
+    ry: 75
+records_range:
+    vs30: 30
+    rrup: 5
+    hypo_depth: 10

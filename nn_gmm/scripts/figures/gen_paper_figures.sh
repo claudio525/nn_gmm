@@ -32,6 +32,11 @@ echo "out_dir: $out_dir"
 ### Fault Map
 # python gen_paper_figures.py fault-map $out_dir $imdb_ffp
 
+### Magnitude-Rrrup Scatter Plot
+
+### Magnitude-Tectonic Type Distribution
+# python gen_paper_figures.py mag-tect-type-dist $imdb_ffp $out_dir
+
 # ### Mixed Effects Regression Results
 # echo "Generating mixed effects regression results..."
 # python gen_paper_figures.py mera-site-term $cv_base_model_dir $cv_location_model_dir $out_dir
@@ -40,26 +45,35 @@ echo "out_dir: $out_dir"
 # echo "Generating basin site term comparison..."
 # python gen_paper_figures.py mera-basin-site-term $cv_base_model_dir $cv_location_model_dir $out_dir
 
+### Site-to-site residual distribution
+# echo "Generating site-to-site residual distribution...."
+# export fig_size="6.5,2.25"
+# python gen_paper_figures.py site-to-site-residual-hist pSA_3.0 $cv_base_model_dir $cv_location_model_dir $out_dir --y-max-limit 6.5 --empty-xaxis
+# python gen_paper_figures.py site-to-site-residual-hist pSA_5.0 $cv_base_model_dir $cv_location_model_dir $out_dir --y-max-limit 6.5
+# export fig_size=$default_fig_size
+
 # ### Site Term Maps
 # echo "Generating site term maps..."
 # python gen_paper_figures.py nn-gmm-site-term-map $cv_base_model_dir $out_dir pSA_5.0 base --grid-spacing 50e/50e
 # python gen_paper_figures.py nn-gmm-site-term-map $cv_location_model_dir $out_dir pSA_5.0 loc --grid-spacing 50e/50e
 
 # ### Model Trends
-# echo "Generating model trend figures..."
-# export fig_size="3.25,3"
-# python gen_paper_figures.py model-trends $cv_base_model_dir $cv_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_moderate_dist_model_trend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS
-# export fig_size=$default_fig_size
+echo "Generating model trend figures..."
+export fig_size="3.25,3"
+python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_crustal_shortDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/rrup_crustal_mag6p5_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+export fig_size=$default_fig_size
 
-# ### Site hazard plots
-# echo "Generating site hazard plots..."
+### Seismic Hazard Curves
+# python gen_paper_figures.py single-site-hazard-plot LHUS pSA_0.5 $full_base_model_dir/ds_hazard/ref_sites $full_location_model_dir/ds_hazard/ref_sites $emp_ds_hazard_results/ref_sites $out_dir
+# python gen_paper_figures.py single-site-ds-hazard-plot LHUS pSA_0.5 $full_base_model_dir/ds_hazard/ref_sites $full_location_model_dir/ds_hazard/ref_sites $emp_ds_hazard_results/ref_sites $out_dir
+
 # export fig_size="3.25,3"
 # python gen_paper_figures.py site-hazard-plot $full_base_model_dir/ds_hazard/ref_sites $full_location_model_dir/ds_hazard/ref_sites $emp_ds_hazard_results/ref_sites $out_dir
 # export fig_size=$default_fig_size
 
-# ### Site UHS plots
-# echo "Generating site UHS plots..."
-# export fig_size="3.25,3"
+### UHS Curves
+# export fig_size="3.25,2.5"
 # python gen_paper_figures.py site-uhs-plot $full_base_model_dir/ds_hazard/ref_sites $full_location_model_dir/ds_hazard/ref_sites $emp_ds_hazard_results/ref_sites $out_dir
 # export fig_size=$default_fig_size
 
@@ -115,7 +129,7 @@ echo "out_dir: $out_dir"
 # export fig_size=$default_fig_size
 
 # Site distribution maps
-python gen_paper_figures.py site-distribution-maps $imdb_ffp $out_dir
+# python gen_paper_figures.py site-distribution-maps $imdb_ffp $out_dir
 
 # # DS Hazard ratio maps
 # echo "Generating DS hazard ratio maps for ln(emp/base) at RP=475"
@@ -125,3 +139,24 @@ python gen_paper_figures.py site-distribution-maps $imdb_ffp $out_dir
 # echo "Generating DS hazard ratio maps for ln(base/loc) at RP=475"
 # python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0
 # python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Base Model/Location Model)" ratio_emp_loc 100e/100e  --cb-max 1.0
+
+
+# ### Model Trends
+# echo "Generating ES model trend figures..."
+# export fig_size="3.25,3"
+# # Crustal - Magnitude - Full
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_crustal_shortDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_crustal_moderateDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_crustal_largeDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+
+# # Slab - Magnitude - Full
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_slab_shortDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_slab_moderateDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/mag_slab_largeDist_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+
+
+# # Rrup - Full
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/rrup_crustal_mag6p5_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/rrup_crustal_mag7p25_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# python gen_paper_figures.py model-trends $full_base_model_dir $full_location_model_dir $SCRIPT_DIR/../configs/figure_configs/rrup_interface_mag8p0_modelTrend.yaml $out_dir pSA_0.5 pSA_1.0 pSA_5.0 pSA_10.0 --locations HORC --locations LHUS --no-cv
+# export fig_size=$default_fig_size

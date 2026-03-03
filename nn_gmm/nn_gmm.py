@@ -1541,6 +1541,7 @@ def get_vs30_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFr
         labels=constants.VS30_WEIGHTING_BIN_NAMES,
     )
 
+
     vs30_bin_counts = record_info_df.vs30_bin.value_counts().sort_index()
 
     vs30_bin_weights = np.clip(

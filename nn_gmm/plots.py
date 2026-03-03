@@ -42,6 +42,7 @@ def magnitude_trend_plot(
     plot_empirical: bool = True,
     legend_labels: bool = True,
     legend: bool = True,
+    fill_between: bool = True,
 ):
     """
     Create magnitude trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -56,11 +57,11 @@ def magnitude_trend_plot(
         Dictionary specifying record selection limits
     device : str
         Device to run the predictions on (e.g., "cpu" or "cuda")
+    simulation_df : pd.DataFrame | None, optional
+        DataFrame containing simulation IM values
     record_int_ids : np.ndarray | None, optional
         Record integer IDs which can be plotted.
         Must be in the simulation DataFrame
-    simulation_df : pd.DataFrame | None, optional
-        DataFrame containing simulation IM values
     cv: bool, optional
         Whether the the result dir is for CV results.
     """
@@ -118,14 +119,14 @@ def magnitude_trend_plot(
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
-    similar_record_ids = data.get_similar_records(
-        run_config, fixed_inputs, record_limits, record_int_ids=record_int_ids
-    )
-    logger.info(f"Found {len(similar_record_ids)} similar records")
+    if simulation_df is not None:
+        similar_record_ids = data.get_similar_records(
+            run_config, fixed_inputs, record_limits, record_int_ids=record_int_ids
+        )
+        logger.info(f"Found {len(similar_record_ids)} similar records")
 
     # Create magnitude plots for each IM
     ims = constants.PLOT_IMS if ims is None else ims
-
     fig = None
     if axs is None:
         fig, axs = mlt.plotting.get_fig_axes(
@@ -171,13 +172,14 @@ def magnitude_trend_plot(
                 linestyle="--",
                 linewidth=minor_line_width,
             )
-            ax.fill_between(
-                emp_pred_df["magnitude"],
-                np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
-                np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
-                color="g",
-                alpha=0.2,
-            )
+            if fill_between:
+                ax.fill_between(
+                    emp_pred_df["magnitude"],
+                    np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
+                    np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
+                    color="g",
+                    alpha=0.2,
+                )
 
         # CV predictions
         # Plot the average mean prediction across all CV folds
@@ -193,10 +195,10 @@ def magnitude_trend_plot(
                 )
 
             comb_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
-
             within_model_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
             between_model_std = mean_pred_da.std(dim="cv").sel(im=f"{im}_pred")
             comb_std = np.sqrt(within_model_std**2 + between_model_std**2)
+
             ax.plot(
                 mean_pred_da.coords["mag"].values,
                 np.exp(comb_mean + comb_std),
@@ -212,12 +214,13 @@ def magnitude_trend_plot(
                 linewidth=minor_line_width,
                 label="NN-GMM Average Std" if legend_labels else None,
             )
-            ax.fill_between(
-                mean_pred_da.coords["mag"].values,
-                np.exp(comb_mean - comb_std),
-                np.exp(comb_mean + comb_std),
-                color=nn_color,
-                alpha=0.2,
+            if fill_between:
+                ax.fill_between(
+                    mean_pred_da.coords["mag"].values,
+                    np.exp(comb_mean - comb_std),
+                    np.exp(comb_mean + comb_std),
+                    color=nn_color,
+                    alpha=0.2,
             )
 
             ax.plot(
@@ -232,7 +235,7 @@ def magnitude_trend_plot(
                 pred_df["magnitude"],
                 np.exp(pred_df[f"{im}_pred"]),
                 c=nn_color,
-                label="NN-GMM",
+                label="NN-GMM" if legend_labels else None,
                 linewidth=major_line_width,
             )
             ax.plot(
@@ -249,15 +252,15 @@ def magnitude_trend_plot(
                 linestyle="--",
                 linewidth=minor_line_width,
             )
-            ax.fill_between(
-                pred_df["magnitude"],
-                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-                color=nn_color,
-                alpha=0.2,
-            )
+            if fill_between:
+                ax.fill_between(    
+                    pred_df["magnitude"],
+                    np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                    np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                    color=nn_color,
+                    alpha=0.2,
+                )
 
-        # ax.set_xlim(5.25, 8.25)
         ax.set_ylabel(utils.get_nice_im_name(im))
         ax.set_xlabel("Magnitude")
         ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
@@ -274,14 +277,24 @@ def magnitude_trend_plot(
 
 def rrup_trend_plot(
     result_dir: Path,
-    simulation_df: pd.DataFrame,
     fixed_inputs: dict,
     record_limits: dict,
-    record_int_ids: np.ndarray,
     device: str,
+    simulation_df: pd.DataFrame | None = None,
+    record_int_ids: np.ndarray | None = None,
     cv: bool = False,
+    plot_ind_cv: bool = True,
     major_line_width: float = 3.0,
     minor_line_width: float = 2.0,
+    ind_fig_size: tuple = (8, 6),
+    ims: list[str] | None = None,
+    dpi: float | None = None,   
+    axs: list[plt.Axes] | None = None,
+    nn_color: str = "blue",
+    plot_empirical: bool = True,
+    legend_labels: bool = True,
+    legend: bool = True,
+    fill_between: bool = True,
 ):
     """
     Create rrup trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -290,22 +303,25 @@ def rrup_trend_plot(
     ----------
     result_dir : Path
         NN-GMM result directory
-    simulation_df : pd.DataFrame
-        DataFrame containing simulation IM values
     fixed_inputs : dict
         Dictionary of fixed inputs for the NN-GM and empirical GM model
     record_limits : dict
         Dictionary specifying record selection limits
-    record_int_ids : np.ndarray
+    simulation_df : pd.DataFrame | None, optional
+        DataFrame containing simulation IM values
+    record_int_ids : np.ndarray | None, optional
         Record integer IDs which can be plotted
         Must be in the simulation DataFrame
     device : str
         Device to run the predictions on (e.g., "cpu" or "cuda")
     """
-
-    assert np.all(
+    assert simulation_df is None or np.all(
         np.isin(record_int_ids, simulation_df.index)
     ), "record_int_ids must be a subset of the simulation_df index"
+    assert axs is None or len(axs) == (
+        len(ims) if ims is not None else len(constants.PLOT_IMS)
+    ), "If axs is provided, its length must match the number of ims to be plotted."
+
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
@@ -347,6 +363,8 @@ def rrup_trend_plot(
         )
     else:
         pred_df = nn_gmm.run_predictions_dir(result_dir, input_df, device=device)
+
+    # Get empirical GM predictions
     emp_pred_df = emp_gmm.get_gmm_predictions(input_df, constants.GMM_MAPPING)
 
     # Get similar records
@@ -356,126 +374,161 @@ def rrup_trend_plot(
     logger.info(f"Found {len(similar_record_ids)} similar records")
 
     # Create rrup plots for each IM
-    plot_ims = ["pSA_0.01", "pSA_0.5", "pSA_1.0", "pSA_5.0"]
-    fig, axs = mlt.plotting.get_fig_axes(4, 2, 2, ind_figsize=(8, 6))
+    ims = constants.PLOT_IMS if ims is None else ims
+    fig = None
+    if axs is None:
+        fig, axs = mlt.plotting.get_fig_axes(
+            len(ims), 2, -1, ind_figsize=ind_fig_size, dpi=dpi
+        )
 
-    for i, (ax, im) in enumerate(zip(axs, plot_ims)):
+    for i, (ax, im) in enumerate(zip(axs, ims)):
+        if i % 2 == 1:
+            ax.yaxis.set_label_position("right")
+            ax.yaxis.set_ticks_position("right")
+
+        # Add data points
+        if simulation_df is not None:
+            ax.scatter(
+                simulation_df.loc[similar_record_ids, "rrup"].values,
+                # + np.random.uniform(-0.01, 0.01, similar_record_ids.size),
+                simulation_df.loc[similar_record_ids, im],
+                s=1,
+                alpha=0.5,
+                c="gray",
+            )
+            # if "basin" in simulation_df.columns:
+            #     mask = simulation_df.loc[similar_record_ids].basin != "NiB"
+            #     ax.scatter(
+            #         simulation_df.loc[similar_record_ids].loc[mask, "rrup"].values,
+            #         simulation_df.loc[similar_record_ids].loc[mask, im],
+            #         s=1,
+            #         alpha=0.5,
+            #         c="blue",
+            #     )
+
+        # Empirical GMM predictions
+        if plot_empirical:
+            ax.plot(
+                emp_pred_df["rrup"],
+                np.exp(emp_pred_df[f"{im}_mean"]),
+                c="g",
+                label="Empirical GMM" if legend_labels else None,
+                linewidth=major_line_width,
+            )
+            ax.plot(
+                emp_pred_df["rrup"],
+                np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
+                c="g",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                emp_pred_df["rrup"],
+                np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
+                c="g",
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            if fill_between:
+                ax.fill_between(
+                    emp_pred_df["rrup"],
+                    np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
+                    np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
+                    color="g",
+                    alpha=0.2,
+                )
+
+        # CV predictions
+        # Plot the average mean prediction across all CV folds
         if cv:
             # Plot individual CV predictions
-            ax.plot(
-                mean_pred_da.coords["rrup"].values,
-                np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
-                c="k",
-                linestyle="--",
-                linewidth=minor_line_width,
-            )
+            if plot_ind_cv:
+                ax.plot(
+                    mean_pred_da.coords["rrup"].values,
+                    np.exp(mean_pred_da.sel(im=f"{im}_pred").values.T),
+                    c="k",
+                    linestyle="--",
+                    linewidth=minor_line_width,
+                )
 
-            avg_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
-            avg_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
-            ax.plot(
-                mean_pred_da.coords["rrup"].values,
-                np.exp(avg_mean + avg_std),
-                c="b",
-                linestyle="--",
-                linewidth=minor_line_width,
-            )
-            ax.plot(
-                mean_pred_da.coords["rrup"].values,
-                np.exp(avg_mean - avg_std),
-                c="b",
-                linestyle="--",
-                linewidth=minor_line_width,
-                label="NN-GMM Average Std",
-            )
-            ax.fill_between(
-                mean_pred_da.coords["rrup"].values,
-                np.exp(avg_mean - avg_std),
-                np.exp(avg_mean + avg_std),
-                color="b",
-                alpha=0.2,
-            )
+            comb_mean = mean_pred_da.mean(dim="cv").sel(im=f"{im}_pred")
+            within_model_std = std_pred_da.mean(dim="cv").sel(im=f"{im}_pred_std")
+            between_model_std = mean_pred_da.std(dim="cv").sel(im=f"{im}_pred")
+            comb_std = np.sqrt(within_model_std**2 + between_model_std**2)
 
             ax.plot(
                 mean_pred_da.coords["rrup"].values,
-                np.exp(avg_mean),
-                c="b",
-                label="NN-GMM Average Mean",
+                np.exp(comb_mean + comb_std),
+                c=nn_color,
+                linestyle="--",
+                linewidth=minor_line_width,
+            )
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(comb_mean - comb_std),
+                c=nn_color,
+                linestyle="--",
+                linewidth=minor_line_width,
+                label="NN-GMM Average Std" if legend_labels else None,
+            )
+            if fill_between:
+                ax.fill_between(
+                    mean_pred_da.coords["rrup"].values,
+                    np.exp(comb_mean - comb_std),
+                    np.exp(comb_mean + comb_std),
+                    color=nn_color,
+                    alpha=0.2,
+                )
+            ax.plot(
+                mean_pred_da.coords["rrup"].values,
+                np.exp(comb_mean),
+                c=nn_color,
+                label="NN-GMM Average Mean" if legend_labels else None,
                 linewidth=major_line_width,
             )
         else:
             ax.plot(
-                pred_df["rrup"], np.exp(pred_df[f"{im}_pred"]), c="b", label="NN-GMM"
+                pred_df["rrup"],
+                np.exp(pred_df[f"{im}_pred"]),
+                c=nn_color,
+                label="NN-GMM" if legend_labels else None,
+                linewidth=major_line_width,
             )
             ax.plot(
                 pred_df["rrup"],
                 np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-                c="b",
+                c=nn_color,
                 linestyle="--",
-                linewidth=1,
+                linewidth=minor_line_width,
             )
             ax.plot(
                 pred_df["rrup"],
                 np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-                c="b",
+                c=nn_color,
                 linestyle="--",
-                linewidth=1,
+                linewidth=minor_line_width,
             )
-            ax.fill_between(
-                pred_df["rrup"],
-                np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
-                np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
-                color="b",
-                alpha=0.2,
-            )
+            if fill_between:
+                ax.fill_between(
+                    pred_df["rrup"],
+                    np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
+                    np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
+                    color=nn_color,
+                    alpha=0.2,
+                )
 
-        # Empirical GMM predictions
-        ax.plot(
-            emp_pred_df["rrup"],
-            np.exp(emp_pred_df[f"{im}_mean"]),
-            c="g",
-            label="Empirical GMM",
-        )
-        ax.plot(
-            emp_pred_df["rrup"],
-            np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
-            c="g",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.plot(
-            emp_pred_df["rrup"],
-            np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
-            c="g",
-            linestyle="--",
-            linewidth=1,
-        )
-        ax.fill_between(
-            emp_pred_df["rrup"],
-            np.exp(emp_pred_df[f"{im}_mean"] - emp_pred_df[f"{im}_std_Total"]),
-            np.exp(emp_pred_df[f"{im}_mean"] + emp_pred_df[f"{im}_std_Total"]),
-            color="g",
-            alpha=0.2,
-        )
-
-        ax.scatter(
-            simulation_df.loc[similar_record_ids, "rrup"].values,
-            simulation_df.loc[similar_record_ids, im],
-            s=1,
-            alpha=0.5,
-        )
-
-        # ax.set_xlim(0.1, 1000)
         ax.set_ylabel(im)
-        ax.set_xlabel("$R_{Rup}$ (km)")
-        ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+        ax.set_xlabel("Source-to-Site Distance, $R_{Rup}$ (km)")
+        ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
         ax.set_yscale("log")
         ax.set_xscale("log")
         ax.set_xlim(min_rrup, max_rrup)
 
-        if i == 0:
+        if i == 0 and legend:
             ax.legend()
 
-    fig.tight_layout()
+    if fig:
+        fig.tight_layout()
 
     return fig, axs
 
@@ -487,8 +540,9 @@ class BiasStdPlot:
         pSA_keys_periods: tuple[list[str], list[float]] | None = None,
         im_set: str = "pSA",
         figsize: tuple = (16, 6),
-        bias_ylim: tuple = (-0.8, 0.8),
-        std_ylim: tuple = (0, 0.8),
+        bias_ylim: tuple[float, float] = (-0.8, 0.8),
+        std_ylim: tuple[float, float] = (0, 0.8),
+        x_axis_limits: tuple[float, float] = (0.01, 10.0),
         **fig_kwargs,
     ):
         """
@@ -515,6 +569,7 @@ class BiasStdPlot:
             figsize=figsize,
             bias_y_axis_limits=bias_ylim,
             std_y_axis_limits=std_ylim,
+            x_axis_limits=x_axis_limits,
             **fig_kwargs,
         )
 
@@ -628,10 +683,11 @@ class GroupedBiasStdPlot(BiasStdPlot):
         group_colors: list,
         group_labels: list[str] | None = None,
         pSA_keys_periods: tuple[list[str], list[float]] | None = None,
-        im_set="pSA",
-        figsize=(16, 6),
-        bias_ylim=(-0.8, 0.8),
-        std_ylim=(0, 0.8),
+        im_set: str = "pSA",
+        figsize: tuple[float, float] = (16, 6),
+        bias_ylim: tuple[float, float] = (-0.8, 0.8),
+        std_ylim: tuple[float, float] = (0, 0.8),
+        x_axis_limits: tuple[float, float] = (0.01, 10.0),
         **fig_kwargs,
     ):
         """
@@ -654,7 +710,13 @@ class GroupedBiasStdPlot(BiasStdPlot):
             The IM set to use. Default is "pSA".
         """
         super().__init__(
-            pSA_keys_periods, im_set, figsize, bias_ylim, std_ylim, **fig_kwargs
+            pSA_keys_periods,
+            im_set,
+            figsize,
+            bias_ylim,
+            std_ylim,
+            x_axis_limits=x_axis_limits,
+            **fig_kwargs,
         )
 
         self.group_key = group_key
@@ -1121,9 +1183,7 @@ def site_uhs(
     # Empirical DS UHS
     emp_ds_uhs = None
     if emp_ds_results_dir is not None:
-        emp_ds_uhs = hazard.compute_emp_ds_uhs(
-            emp_ds_results_dir, rps, sites=sites
-        )
+        emp_ds_uhs = hazard.compute_emp_ds_uhs(emp_ds_results_dir, rps, sites=sites)
 
     # Create UHS plots
     logger.info(f"Creating UHS plots for {len(sites)} sites")
