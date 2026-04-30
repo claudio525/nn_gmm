@@ -1,13 +1,10 @@
-import multiprocessing as mp
 import time
 import logging
 from pathlib import Path
 
+import shap
 import numpy as np
 import pandas as pd
-
-import rpy2.robjects.conversion as cv
-from pymer4.models import Lmer
 
 from . import constants
 from .empdb import DuckEmpiricalDB
@@ -108,6 +105,7 @@ def run_nn_mera(
     n_procs: int = 4,
     ims: list[str] = None,
 ):
+    """Run MERA on the specified NN model results."""
     import mera
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
@@ -223,23 +221,23 @@ def run_nn_mera(
     logging.info(f"Wrote MERA results to: {out_dir}")
 
 
-def _run_site_mera(res_df: pd.DataFrame, im: str):
-    site_model = Lmer(f"{im} ~ 1 + (1|site_id)", data=res_df)
-    site_model.fit(summary=False)
+# def _run_site_mera(res_df: pd.DataFrame, im: str):
+#     site_model = Lmer(f"{im} ~ 1 + (1|site_id)", data=res_df)
+#     site_model.fit(summary=False)
 
-    site_res = site_model.ranef.iloc[:, 0].rename(im)
-    rem_res = pd.Series(index=res_df.index, data=site_model.residuals, name=im)
-    bias_std_values = pd.Series(
-        index=["bias_site","phi_S2S", "phi_w"],
-        data=[
-            site_model.coefs.iloc[0, 0],
-            site_model.ranef_var.loc["site_id", "Std"],
-            site_model.ranef_var.loc["Residual", "Std"],
-        ],
-        name=im,
-    )
+#     site_res = site_model.ranef.iloc[:, 0].rename(im)
+#     rem_res = pd.Series(index=res_df.index, data=site_model.residuals, name=im)
+#     bias_std_values = pd.Series(
+#         index=["bias_site","phi_S2S", "phi_w"],
+#         data=[
+#             site_model.coefs.iloc[0, 0],
+#             site_model.ranef_var.loc["site_id", "Std"],
+#             site_model.ranef_var.loc["Residual", "Std"],
+#         ],
+#         name=im,
+#     )
 
-    return rem_res, site_res, bias_std_values
+#     return rem_res, site_res, bias_std_values
 
 
 def get_mag_input_df(
@@ -331,3 +329,13 @@ def get_rrup_input_df(
                 raise ValueError(f"Missing required event-site input: {key}")
 
     return input_df
+
+
+
+def compute_cv_shape_values(results_dir: Path):
+    val_df = pd.read_parquet(results_dir / "val_results.parquet")
+
+    print("wtf")
+
+def compute_shap_values(result_dir: Path):
+    print("wtf")

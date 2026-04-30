@@ -8,7 +8,6 @@ import xarray as xr
 import seaborn as sns
 
 import ml_tools as mlt
-from mera import MeraResults
 
 from . import nn_gmm
 from . import emp_gmm
@@ -974,6 +973,8 @@ def mera_basin_site_term_comparison(
     model_dir_2: Path,
     output_dir: Path,
 ):
+    from mera import MeraResults
+
     # Check that MERA results exist
     if not (mera_dir_1 := model_dir_1 / "mera_site_term").exists():
         raise FileNotFoundError(f"MERA results directory not found: {mera_dir_1}")

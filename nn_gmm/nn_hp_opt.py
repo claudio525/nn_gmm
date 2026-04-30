@@ -10,12 +10,12 @@ import optuna as opt
 
 import ml_tools as mlt
 
-from .nn_gmm import GMMRunConfig
-from .nn_gmm_cv import train_cv
+from .nn_gmm import GMMRunConfig, LocAdjRunConfig
+from .nn_gmm_cv import train_cv, train_loc_adj_cv
 
 
 @dataclass
-class HPOptConfig:
+class BaseModelHPOptConfig:
 
     rel_base_output_dir: str
     base_run_config: GMMRunConfig
@@ -120,9 +120,9 @@ class HPOptConfig:
         return cls.from_dict(mlt.utils.load_yaml(ffp))
 
 
-def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
+def continue_base_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
     """Continue a previously started hyperparameter optimization study."""
-    hp_config = HPOptConfig.from_yaml(study_dir / "hp_config.yaml")
+    hp_config = BaseModelHPOptConfig.from_yaml(study_dir / "hp_config.yaml")
     hp_config.study_dir = study_dir
 
     study = opt.create_study(
@@ -130,11 +130,23 @@ def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
         storage="sqlite:///{}.db".format(study_dir / study_dir.name),
         load_if_exists=True,
     )
-    study.optimize(functools.partial(objective, hp_config=hp_config, n_procs=n_procs), n_trials=n_trials)
+    study.optimize(
+        functools.partial(base_model_objective, hp_config=hp_config, n_procs=n_procs),
+        n_trials=n_trials,
+    )
 
-def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs: int = 1, n_startup_trials: int = 25):
+
+def run_base_hp_opt(
+    hp_config: BaseModelHPOptConfig,
+    n_trials: int,
+    suffix: str = "",
+    n_procs: int = 1,
+    n_startup_trials: int = 25,
+):
     """Run hyperparameter optimization using Optuna."""
-    objective_fn_call = functools.partial(objective, hp_config=hp_config, n_procs=n_procs)
+    objective_fn_call = functools.partial(
+        base_model_objective, hp_config=hp_config, n_procs=n_procs
+    )
 
     study_id = mlt.utils.create_run_id()
     study_name = f"{study_id}{f'_{suffix}' if suffix else ''}"
@@ -146,15 +158,19 @@ def run_hp_opt(hp_config: HPOptConfig, n_trials: int, suffix: str = "", n_procs:
     study = opt.create_study(
         study_name=study_name,
         direction="minimize",
-        sampler=opt.samplers.TPESampler(n_startup_trials=n_startup_trials, n_ei_candidates=1000),
+        sampler=opt.samplers.TPESampler(
+            n_startup_trials=n_startup_trials, n_ei_candidates=1000
+        ),
         storage="sqlite:///{}.db".format(hp_config.study_dir / study_name),
     )
     study.optimize(objective_fn_call, n_trials=n_trials)
 
 
-def objective(trial: opt.Trial, hp_config: HPOptConfig, n_procs: int) -> float:
+def base_model_objective(
+    trial: opt.Trial, hp_config: BaseModelHPOptConfig, n_procs: int
+) -> float:
     """Objective function for hyperparameter optimization."""
-    run_config = _get_run_config(trial, hp_config)
+    run_config = _get_base_run_config(trial, hp_config)
     run_config.n_epochs = hp_config.n_epochs
 
     output_dir = hp_config.study_dir / f"trial_{trial.number:03d}"
@@ -176,15 +192,22 @@ def objective(trial: opt.Trial, hp_config: HPOptConfig, n_procs: int) -> float:
     median_w_val_loss = float(w_val_loss_data.min(dim="epoch").median())
 
     trial.set_user_attr("median_w_val_loss", median_w_val_loss)
-    trial.set_user_attr("percentile_16_84_w_val_loss", tuple(np.percentile(w_val_loss_data.min(dim="epoch").values, [16, 84])))
-    trial.set_user_attr("median_best_epoch", float(w_val_loss_data.argmin(dim="epoch").median()))
+    trial.set_user_attr(
+        "percentile_16_84_w_val_loss",
+        tuple(np.percentile(w_val_loss_data.min(dim="epoch").values, [16, 84])),
+    )
+    trial.set_user_attr(
+        "median_best_epoch", float(w_val_loss_data.argmin(dim="epoch").median())
+    )
 
     (output_dir / "val_results.parquet").unlink()
 
     return median_w_val_loss
 
 
-def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
+def _get_base_run_config(
+    trial: opt.Trial, hp_config: BaseModelHPOptConfig
+) -> GMMRunConfig:
     """Get a RunConfig object with hyperparameters set from the trial."""
     run_config = copy.deepcopy(hp_config.base_run_config)
     run_config.rel_results_dir = "nn_gmm/hp_opt"
@@ -200,7 +223,9 @@ def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
         "n_layers", hp_config.n_layers_min, hp_config.n_layers_max
     )
     unit_size = trial.suggest_categorical("unit_size", hp_config.unit_sizes)
-    last_hlayer_size = trial.suggest_categorical("last_hlayer_size", hp_config.last_hlayer_sizes)
+    last_hlayer_size = trial.suggest_categorical(
+        "last_hlayer_size", hp_config.last_hlayer_sizes
+    )
     run_config.model_config.units = [unit_size] * (n_layers - 1) + [last_hlayer_size]
 
     run_config.model_config.activation = trial.suggest_categorical(
@@ -216,4 +241,197 @@ def _get_run_config(trial: opt.Trial, hp_config: HPOptConfig) -> GMMRunConfig:
         "use_batch_norm", [True, False]
     )
 
+    return run_config
+
+
+@dataclass
+class LocAdjModelHPOptConfig:
+    rel_base_output_dir: str
+    base_loc_run_config: LocAdjRunConfig
+
+    n_epochs: int
+
+    batch_sizes: list[int]
+    loc_learning_rates: list[float]
+    adj_learning_rates: list[float]
+    n_layers_min: int
+    n_layers_max: int
+    unit_sizes: list[int]
+    last_hlayer_sizes: list[int]
+    activation_fns: list[str]
+    l2_regs: list[float]
+    dropout_rates: list[float]
+
+    def __post_init__(self):
+        self._study_dir = None
+
+    @property
+    def base_output_dir(self) -> Path:
+        return Path(os.environ["wdata"]) / self.rel_base_output_dir
+
+    @property
+    def study_dir(self) -> Path:
+        return self._study_dir
+
+    @study_dir.setter
+    def study_dir(self, value: Path):
+        if self._study_dir is not None:
+            raise ValueError("study_dir has already been set and cannot be modified.")
+        self._study_dir = value
+
+    @classmethod
+    def from_config(cls, config_ffp: Path, run_config_ffp: Path, rel_base_model_dir: str, device: str):
+        base_loc_run_config = LocAdjRunConfig.from_config_kwargs(
+            run_config_ffp,
+            device=device,
+            rel_base_model_dir=rel_base_model_dir,
+        )
+        config_dict = mlt.utils.load_yaml(config_ffp)
+
+        return cls(
+            base_loc_run_config=base_loc_run_config,    
+            rel_base_output_dir=config_dict["rel_base_output_dir"],
+            n_epochs=config_dict["n_epochs"],
+            batch_sizes=config_dict["batch_sizes"],
+            loc_learning_rates=config_dict["loc_learning_rates"],
+            adj_learning_rates=config_dict["adj_learning_rates"],
+            n_layers_min=config_dict["n_layers_min"],
+            n_layers_max=config_dict["n_layers_max"],
+            unit_sizes=config_dict["unit_sizes"],
+            last_hlayer_sizes=config_dict["last_hlayer_sizes"],
+            activation_fns=config_dict["activation_fns"],
+            l2_regs=config_dict["l2_regs"],
+            dropout_rates=config_dict["dropout_rates"],
+        )
+
+
+    def to_dict(self) -> dict:
+        return {
+            "rel_base_output_dir": self.rel_base_output_dir,
+            "base_loc_run_config": self.base_loc_run_config.to_dict(),
+            "n_epochs": self.n_epochs,
+            "batch_sizes": self.batch_sizes,
+            "loc_learning_rates": self.loc_learning_rates,
+            "adj_learning_rates": self.adj_learning_rates,
+            "n_layers_min": self.n_layers_min,
+            "n_layers_max": self.n_layers_max,
+            "unit_sizes": self.unit_sizes,
+            "last_hlayer_sizes": self.last_hlayer_sizes,
+            "activation_fns": self.activation_fns,
+            "l2_regs": self.l2_regs,
+            "dropout_rates": self.dropout_rates,
+        }
+
+    def to_yaml(self, ffp: Path):
+        """Save the RunConfig to a YAML file."""
+        mlt.utils.write_to_yaml(self.to_dict(), ffp)
+
+    def from_dict(cls, config_dict: dict):
+        raise NotImplementedError()
+
+
+def run_loc_adj_hp_opt(
+    hp_config: LocAdjModelHPOptConfig,
+    n_trials: int,
+    suffix: str = "",
+    n_procs: int = 1,
+    n_startup_trials: int = 25,
+):
+    """Run hyperparameter optimization for location adjustment model using Optuna."""
+    objective_fn_call = functools.partial(
+        loc_adj_model_objective, hp_config=hp_config, n_procs=n_procs
+    )
+
+    study_id = mlt.utils.create_run_id()
+    study_name = f"{study_id}{f'_{suffix}' if suffix else ''}"
+    hp_config.study_dir = hp_config.base_output_dir / study_name
+    hp_config.study_dir.mkdir(parents=False, exist_ok=False)
+    hp_config.to_yaml(hp_config.study_dir / "hp_config.yaml")
+
+    # Create the study & start optimizing
+    study = opt.create_study(
+        study_name=study_name,
+        direction="minimize",
+        sampler=opt.samplers.TPESampler(
+            n_startup_trials=n_startup_trials, n_ei_candidates=1000
+        ),
+        storage="sqlite:///{}.db".format(hp_config.study_dir / study_name),
+    )
+    study.optimize(objective_fn_call, n_trials=n_trials)
+
+
+
+def loc_adj_model_objective(
+    trial: opt.Trial, hp_config: LocAdjModelHPOptConfig, n_procs: int
+) -> float:
+    """Objective function for hyperparameter optimization."""
+    run_config = _get_loc_adj_run_config(trial, hp_config)
+    run_config.n_epochs = hp_config.n_epochs
+
+    output_dir = hp_config.study_dir / f"trial_{trial.number:03d}"
+    output_dir.mkdir(parents=False, exist_ok=False)
+
+    train_loc_adj_cv(
+        run_config,
+        output_dir,
+        n_procs=n_procs,
+        run_notebook=False,
+        remove_cv_results=True,
+    )
+
+    metrics = xr.open_dataarray(output_dir / "metrics.nc")
+    w_val_loss_data = metrics.sel(metric="w_loss_hist_val")
+    median_w_val_loss = float(w_val_loss_data.min(dim="epoch").median())
+
+    trial.set_user_attr("median_w_val_loss", median_w_val_loss)
+    trial.set_user_attr(
+        "percentile_16_84_w_val_loss",
+        tuple(np.percentile(w_val_loss_data.min(dim="epoch").values, [16, 84])),
+    )
+    trial.set_user_attr(
+        "median_best_epoch", float(w_val_loss_data.argmin(dim="epoch").median())
+    )
+
+    (output_dir / "val_results.parquet").unlink()
+
+    return median_w_val_loss
+
+
+
+def _get_loc_adj_run_config(
+    trial: opt.Trial, hp_config: LocAdjModelHPOptConfig
+) -> LocAdjRunConfig:
+    """Get a RunConfig object with hyperparameters set from the trial."""
+    run_config = copy.deepcopy(hp_config.base_loc_run_config)
+    run_config.rel_results_dir = "nn_gmm/hp_opt"
+
+    run_config.batch_size = trial.suggest_categorical(
+        "batch_size", hp_config.batch_sizes
+    )
+    run_config.adj_learning_rate = trial.suggest_categorical(
+        "learning_rate", hp_config.adj_learning_rates
+    )
+    run_config.loc_learning_rate = trial.suggest_categorical(
+        "learning_rate", hp_config.loc_learning_rates
+    )
+
+    n_layers = trial.suggest_int(
+        "n_layers", hp_config.n_layers_min, hp_config.n_layers_max
+    )
+    unit_size = trial.suggest_categorical("unit_size", hp_config.unit_sizes)
+    last_hlayer_size = trial.suggest_categorical(
+        "last_hlayer_size", hp_config.last_hlayer_sizes
+    )
+    run_config.adj_model_config.units = [unit_size] * (n_layers - 1) + [
+        last_hlayer_size
+    ]
+    run_config.adj_model_config.dropout_rate = trial.suggest_categorical(
+        "dropout_rate", hp_config.dropout_rates
+    )
+    run_config.adj_model_config.l2_reg = trial.suggest_categorical(
+        "l2_reg", hp_config.l2_regs
+    )
+    run_config.adj_model_config.activation = trial.suggest_categorical(
+        "activation_fn", hp_config.activation_fns
+    )
     return run_config

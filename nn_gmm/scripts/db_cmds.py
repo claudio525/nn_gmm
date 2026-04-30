@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+import re
 
 import pandas as pd
 import numpy as np
@@ -37,6 +38,9 @@ def create_imdb(
     ll_ffp: Path = typer.Argument(..., help="Path to the Cybershake site data file"),
     vs30_ffp: Path = typer.Argument(..., help="Path to the Cybershake vs30 data file"),
     z_ffp: Path = typer.Argument(..., help="Path to the Cybershake Z data file"),
+    cs_100m: bool = typer.Option(
+        False, "--cs-100m", help="Whether this is 100m grid Cybershake data"
+    ),
     log_level: str = typer.Option(
         "INFO",
         "--log-level",
@@ -112,12 +116,23 @@ def create_imdb(
             [cur_dir.stem for cur_dir in im_data_loc.iterdir() if cur_dir.is_dir()]
         )
 
-    # Get events (and sanity check)
-    source_events = np.sort(
-        [cur_dir.stem for cur_dir in source_info_dir.iterdir() if cur_dir.is_dir()]
-    )
-    assert np.all(im_events == source_events), "IM and source events do not match!"
-    events = im_events
+    # Get source events
+    source_events = []
+    source_dir_name = "Source" if cs_100m else "Srf"
+    for cur_event in im_events:
+        if (
+            not (source_info_dir / cur_event).exists()
+            or (not (source_info_dir / cur_event / source_dir_name).exists())
+            or len(list((source_info_dir / cur_event / source_dir_name).iterdir())) == 0
+        ):
+            logger.warning(
+                f"Event {cur_event} exists in IM data but not in source info directory. Skipping!"
+            )
+        else:
+            source_events.append(cur_event)
+    source_events = np.array(source_events)
+
+    events = np.intersect1d(im_events, source_events)
 
     # Compute the site to source distances
     flt_definitions = nhm.load_nhm(nhm_flt_ffp)
@@ -134,7 +149,11 @@ def create_imdb(
     with nng.DuckIMDB(db_ffp) as db:
         # Add event, realisation and IM data
         for cur_event in tqdm(events, desc="Processing events"):
-            source_dir = source_info_dir / cur_event / "Srf"
+            source_dir = source_info_dir / cur_event / source_dir_name
+
+            assert (
+                source_dir.exists() and len(list(source_dir.iterdir())) > 0
+            ), f"Source directory {source_dir} does not exist or is empty!"
 
             # Read the median data
             median_info = pd.read_csv(source_dir / f"{cur_event}.csv").squeeze()
@@ -143,7 +162,10 @@ def create_imdb(
 
             # Read the realisation data
             rel_infos = []
-            for cur_rel_ffp in source_dir.glob("*REL*.csv"):
+            # for cur_rel_ffp in source_dir.glob("*REL*.csv"):
+            pattern = re.compile(r".*REL[0-9]+\.csv$")
+            rel_info_files = [f for f in source_dir.iterdir() if pattern.match(f.name)]
+            for cur_rel_ffp in rel_info_files:
                 cur_rel_id = (
                     f"{cur_event}_{cur_rel_ffp.stem.rsplit('_', maxsplit=1)[-1]}"
                 )
@@ -287,7 +309,9 @@ def imdb_add_ds_sims(
         db_site_df = db.get_site_df()
         db_site_ids = db_site_df["site_id"].values.astype(str)
 
-    site_coords = np.concatenate([db_site_df[["lat", "lon"]].values, np.zeros((db_site_df.shape[0], 1))], axis=1)
+    site_coords = np.concatenate(
+        [db_site_df[["lat", "lon"]].values, np.zeros((db_site_df.shape[0], 1))], axis=1
+    )
 
     event_int_id = max_event_int_id + 1
     rel_int_id = max_rel_int_id + 1
@@ -369,8 +393,18 @@ def imdb_add_ds_sims(
         )
         site_mask = np.isin(db_site_ids, site_ids)
         assert site_mask.sum() == im_df.shape[0], "Site count mismatch!"
-        rrup = coords.distance_between_wgs_depth_coordinates(source_coords[None,:], site_coords[site_mask]) / 1000
-        rjb = coords.distance_between_wgs_depth_coordinates(source_coords[None, :2], site_coords[site_mask, :2]) / 1000
+        rrup = (
+            coords.distance_between_wgs_depth_coordinates(
+                source_coords[None, :], site_coords[site_mask]
+            )
+            / 1000
+        )
+        rjb = (
+            coords.distance_between_wgs_depth_coordinates(
+                source_coords[None, :2], site_coords[site_mask, :2]
+            )
+            / 1000
+        )
         site_event_df = pd.DataFrame(
             index=db_site_ids[site_mask],
             data={"rrup": rrup, "rjb": rjb},
@@ -386,7 +420,9 @@ def imdb_add_ds_sims(
     rel_df = pd.DataFrame.from_dict(rel_data, orient="index").sort_values("rel_id")
     assert np.isin(db_rel_columns, rel_df.columns).all(), "Missing realisation columns!"
     im_df = pd.concat(im_dfs, axis=0, ignore_index=True)
-    assert np.isin(["event_int_id", "rel_int_id", "site_id"] + nng.constants.IMS, im_df.columns).all(), "Missing record IM columns!"
+    assert np.isin(
+        ["event_int_id", "rel_int_id", "site_id"] + nng.constants.IMS, im_df.columns
+    ).all(), "Missing record IM columns!"
     site_event_df = pd.concat(
         site_event_dfs,
         axis=0,

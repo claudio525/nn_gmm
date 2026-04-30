@@ -680,13 +680,13 @@ class DuckIMDB:
         site_event_df : pd.DataFrame
             DataFrame containing the site-event data to add
         """
-        site_event_df["site_int_id"] = self.site_to_int_id_mapping.loc[
+        site_event_df.loc[:, "site_int_id"] = self.site_to_int_id_mapping.loc[
             site_event_df.site_id
         ].values.astype(int)
-        site_event_df["event_int_id"] = self.event_to_int_id_mapping.loc[
+        site_event_df.loc[:, "event_int_id"] = self.event_to_int_id_mapping.loc[
             site_event_df.event_id
         ].values.astype(int)
-        site_event_df["site_event_int_id"] = utils.get_site_event_int_id(
+        site_event_df.loc[:, "site_event_int_id"] = utils.get_site_event_int_id(
             site_event_df.site_int_id.values, site_event_df.event_int_id.values
         )
 

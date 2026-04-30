@@ -164,7 +164,11 @@ def train_full_loc_adj_model(
 
 @app.command("run-mera")
 def run_mera(
-    result_dir: Path, site_term: bool = False, out_dir: Path = None, n_procs: int = 4, ims: list[str] = None
+    result_dir: Path,
+    site_term: bool = False,
+    out_dir: Path = None,
+    n_procs: int = 4,
+    ims: list[str] = None,
 ):
     """Run mixed effects residual analysis (MERA) on the CV validation residuals."""
     nng.utils.setup_logging()
@@ -173,20 +177,56 @@ def run_mera(
     )
 
 
-@app.command("run-hp-opt")
-def run_hp_opt(hp_config_ffp: Path, base_run_config_ffp: Path, n_trials: int, n_procs: int = 1, n_startup_trials: int = 25):
+@app.command("run-base-hp-opt")
+def run_base_hp_opt(
+    hp_config_ffp: Path,
+    base_run_config_ffp: Path,
+    n_trials: int,
+    n_procs: int = 1,
+    n_startup_trials: int = 25,
+):
     """Run hyperparameter optimization using Optuna."""
-    hp_config = nng.nn_hp_opt.HPOptConfig.from_config(
+    hp_config = nng.nn_hp_opt.BaseModelHPOptConfig.from_config(
         hp_config_ffp, base_run_config_ffp, device
     )
-    nng.nn_hp_opt.run_hp_opt(hp_config, n_trials, n_procs=n_procs, n_startup_trials=n_startup_trials)
+    nng.nn_hp_opt.run_base_hp_opt(
+        hp_config, n_trials, n_procs=n_procs, n_startup_trials=n_startup_trials
+    )
+
+
+@app.command("run-loc-adj-hp-opt")
+def run_loc_adj_hp_opt(
+    hp_config_ffp: Path,
+    loc_run_config_ffp: Path,
+    rel_base_model_dir: str,
+    n_trials: int,
+    n_procs: int = 1,
+    n_startup_trials: int = 25,
+):
+    """Run hyperparameter optimization for location adjustment model using Optuna."""
+    hp_config = nng.nn_hp_opt.LocAdjModelHPOptConfig.from_config(
+        hp_config_ffp, loc_run_config_ffp, rel_base_model_dir, device
+    )
+    nng.nn_hp_opt.run_loc_adj_hp_opt(
+        hp_config,
+        n_trials,
+        suffix="loc_adj",
+        n_procs=n_procs,
+        n_startup_trials=n_startup_trials,
+    )
 
 
 @app.command("continue-hp-opt")
 def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
     """Continue a previously started hyperparameter optimization study."""
-    nng.nn_hp_opt.continue_hp_opt(study_dir, n_trials, n_procs=n_procs)
+    nng.nn_hp_opt.continue_base_hp_opt(study_dir, n_trials, n_procs=n_procs)
 
+
+@app.command("compute-cv-shap-values")
+def compute_cv_shap_values(
+    result_dirs: Path):
+    """Compute SHAP values for the specified CV results."""
+    nng.analysis.compute_cv_shape_values(result_dirs)
 
 if __name__ == "__main__":
     app()

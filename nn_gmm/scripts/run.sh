@@ -16,19 +16,19 @@ function csnotify {
 log_gpu_mem gpu_memory_usage.log &
 bg_pid=$!
 
-# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_v1.yaml 6 6 --n-epochs 25 --id-suffix cv_v1_25Epochs_6E6Folds --n-procs 9 --remove-cv-results && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_v1.yaml 6 6 --n-epochs 25 --id-suffix cv_base_v1_25Epochs_6E6Folds --n-procs 9 --remove-cv-results && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
 
 # python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_v1.yaml 6 6 --n-epochs 500 --id-suffix cv_v1_500Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
 # python nn_cmds.py train-loc-adj-cv ./configs/nn_gmm_configs/loc_adj_config_v1.yaml --n-epochs 25 --id-suffix cv_locAdjV1_25Epochs_6E6Folds --rel-base-model-dir nn_gmm/results/1231_1247_cv_v1_25Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete." || csnotify "GMM CV training failed. "
-# python nn_cmds.py train-loc-adj-cv ./configs/nn_gmm_configs/loc_adj_config_v2.yaml --n-epochs 25 --id-suffix cv_locAdjV2_25Epochs_6E6Folds --rel-base-model-dir nn_gmm/results/1231_1247_cv_v1_25Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete 2/2." || csnotify "GMM CV training failed 2/2."
 
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0101_2126_cv_locAdjV1_25Epochs_6E6Folds --site-term --n-procs 3 && csnotify "MERA run complete 1/2." || csnotify "MERA run failed 1/2."
-# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0102_0309_cv_locAdjV2_25Epochs_6E6Folds --site-term --n-procs 3 && csnotify "MERA run complete 2/2." || csnotify "MERA run failed 2/2."
+# python nn_cmds.py train-gmm-cv ./configs/nn_gmm_configs/base_gmm_config_trial_095.yaml 6 6 --n-epochs 25 --id-suffix cv_trial095_25Epochs_6E6Folds --n-procs 9 && csnotify "GMM CV training complete." || csnotify "GMM CV training failed."
+
+# python nn_cmds.py run-mera /home/claudy/dev/work/data/nn_gmm/results/0225_0948_cv_base_v1_25Epochs_6E6Folds --site-term --n-procs 3 && csnotify "MERA run complete" || csnotify "MERA run failed"
 
 # python nn_cmds.py train-full-gmm ./configs/nn_gmm_configs/base_gmm_config_v1.yaml --n-epochs 3 --id-suffix full_v1_3Epochs && csnotify "Full GMM model training complete." || csnotify "Full GMM model training failed."
 # python nn_cmds.py train-full-loc-adj-model ./configs/nn_gmm_configs/loc_adj_config_v1.yaml --n-epochs 5 --id-suffix full_locAdjV1_5Epochs --rel-base-model-dir nn_gmm/results/1230_1645_full_v1_3Epochs && csnotify "Full loc-adj model training complete." || csnotify "Full loc-adj model training failed."
 
-python hazard_cmds.py compute-uniform-grid-ds-hazard /home/claudy/dev/work/data/nn_gmm/20251222_CS200_DSSlab_rotd50_imdb.duckdb /home/claudy/dev/work/data/nn_gmm/results/0105_1316_full_locAdjV1_5Epochs --n-procs 12 && csnotify "NN grid hazard complete" || csnotify "NN grid hazard failed"
+# python hazard_cmds.py compute-uniform-grid-ds-hazard /home/claudy/dev/work/data/nn_gmm/20251222_CS200_DSSlab_rotd50_imdb.duckdb /home/claudy/dev/work/data/nn_gmm/results/0105_1316_full_locAdjV1_5Epochs --n-procs 12 && csnotify "NN grid hazard complete" || csnotify "NN grid hazard failed"
 
 kill $bg_pid
 wait $bg_pid 2>/dev/null
