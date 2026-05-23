@@ -95,6 +95,7 @@ def setup_logging(
     # Suppress numba & matplotlib logging
     logging.getLogger("numba").setLevel(logging.WARNING)
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    logging.getLogger("shap").setLevel(logging.WARNING)
 
     return logger
 

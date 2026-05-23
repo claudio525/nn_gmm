@@ -239,10 +239,10 @@ class BaseIMDBDataset(BaseDataset):
         ].sort_index()
         self.source_df = source_df.loc[
             source_df.index.isin(self.record_info_df.rel_int_id)
-        ].sort_index() 
+        ].sort_index()
         self.site_event_df = site_event_df.loc[
             site_event_df.index.isin(self.record_info_df.site_event_int_id)
-        ].sort_index() 
+        ].sort_index()
 
         self.loc_df = None
         if self._return_X_loc:
@@ -310,15 +310,11 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
         self._index_to_site_ix = self.site_df.index.get_indexer(
             self.record_info_df.loc[self.record_int_ids].site_int_id.values
         )
-        self._index_to_source_ix = (
-            self.source_df.index.get_indexer(
-                self.record_info_df.loc[self.record_int_ids].rel_int_id.values
-            )
+        self._index_to_source_ix = self.source_df.index.get_indexer(
+            self.record_info_df.loc[self.record_int_ids].rel_int_id.values
         )
-        self._index_to_site_event_ix = (
-            self.site_event_df.index.get_indexer(
-                self.record_info_df.loc[self.record_int_ids].site_event_int_id.values
-            )
+        self._index_to_site_event_ix = self.site_event_df.index.get_indexer(
+            self.record_info_df.loc[self.record_int_ids].site_event_int_id.values
         )
 
         self._im_data_tensor = torch.tensor(
@@ -328,13 +324,13 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             self.site_df.values,
             device=device,
             dtype=torch.float32,
-        ) 
+        )
         self._source_data_tensor = torch.tensor(
             self.source_df.values, device=device, dtype=torch.float32
-        ) 
+        )
         self._site_event_tensor = torch.tensor(
             self.site_event_df.values, device=device, dtype=torch.float32
-        ) 
+        )
 
         if self._return_X_loc:
             self._loc_data_tensor = torch.tensor(
@@ -393,7 +389,7 @@ class OptimizedIMDBDataset(BaseIMDBDataset):
             X_loc = torch.atleast_2d(
                 self._loc_data_tensor[self._index_to_site_ix[indices], :]
             )
-            
+
         return SimBatchData(
             self.record_int_ids[indices],
             X,
@@ -565,6 +561,10 @@ def get_similar_records(
     limits: dict,
     record_int_ids: np.ndarray = None,
 ):
+    """
+    Get records with similar inputs to the specified fixed inputs,
+    within the specified limits.
+    """
     logging.info("Getting similar records for fixed inputs:")
     for k, v in fixed_inputs.items():
         if k in limits:
@@ -669,3 +669,6 @@ def get_similar_records(
         record_info_df = record_info_df.loc[record_info_df.index.isin(record_int_ids)]
 
     return record_info_df.index.values
+
+
+

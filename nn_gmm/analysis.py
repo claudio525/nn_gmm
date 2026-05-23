@@ -2,14 +2,21 @@ import time
 import logging
 from pathlib import Path
 
+import joblib
+import torch
 import shap
 import numpy as np
 import pandas as pd
+from sklearn.cluster import MiniBatchKMeans
+from shap.utils._legacy import DenseData
+import ml_tools as mlt
 
+from . import data
 from . import constants
 from .empdb import DuckEmpiricalDB
 from .imdb import DuckIMDB
 from . import nn_gmm
+from . import nn_gmm_modules as modules
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +214,7 @@ def run_nn_mera(
     #         site_res_df,
     #         None,
     #     )
-    
+
     if mera_results is None:
         mera_results = event_mera_results
 
@@ -331,11 +338,194 @@ def get_rrup_input_df(
     return input_df
 
 
+def _get_pred_fn(
+    model: modules.BaseNNModel, run_config: nn_gmm.BaseRunConfig, device: str
+):
+    """Gets a prediction function that can be used for SHAP value computation."""
 
-def compute_cv_shape_values(results_dir: Path):
+    def _pred_fn(X: np.ndarray):
+        X = torch.from_numpy(X).to(device)
+
+        model.eval()
+        with torch.no_grad():
+            if model.uses_loc_inputs:
+                raise NotImplementedError()
+            else:
+                pred_mean, pred_ln_std = model(X).chunk(2, dim=-1)
+
+        pred_std = torch.exp(pred_ln_std).cpu().numpy()
+        pred_mean = pred_mean.cpu().numpy()
+
+        return np.concatenate([pred_mean, pred_std], axis=-1)
+
+    return _pred_fn
+
+
+def _shap_kmeans(X, k, round_values=True):
+    """
+    Modified version of shap.kmeans, uses MiniBatchKMeans
+    (https://github.com/shap/shap/blob/6b74c3b86b2a621fd01f1003712be15fbace973b/shap/utils/_legacy.py#L10)
+
+    Summarize a dataset with k mean samples weighted by the number of data points they
+    each represent.
+
+    Parameters
+    ----------
+    X : numpy.array or pandas.DataFrame or any scipy.sparse matrix
+        Matrix of data samples to summarize (# samples x # features)
+
+    k : int
+        Number of means to use for approximation.
+
+    round_values : bool
+        For all i, round the ith dimension of each mean sample to match the nearest value
+        from X[:,i]. This ensures discrete features always get a valid value.
+    """
+    group_names = [str(i) for i in range(X.shape[1])]
+
+    # Specify `n_init` for consistent behaviour between sklearn versions
+    kmeans = MiniBatchKMeans(
+        init="k-means++", n_clusters=k, random_state=0, n_init=10
+    ).fit(X)
+
+    if round_values:
+        for i in range(k):
+            for j in range(X.shape[1]):
+                xj = X[:, j]
+                ind = np.argmin(np.abs(xj - kmeans.cluster_centers_[i, j]))
+                kmeans.cluster_centers_[i, j] = X[ind, j]
+
+    return (
+        DenseData(
+            kmeans.cluster_centers_,
+            group_names,
+            None,
+            1.0 * np.bincount(kmeans.labels_),
+        ),
+        kmeans,
+    )
+
+
+def compute_cv_shape_values(
+    results_dir: Path,
+    device: str,
+    n_procs: int = 8,
+    n_clusters: int = 100,
+    n_val_samples_per_cluster: int = 10,
+):
+    """
+    Compute SHAP values for the specified CV results.
+
+    Parameters
+    ----------
+    results_dir : Path
+        Directory containing the CV results.
+    device : str
+        Device to use for computation (e.g., "cpu" or "cuda").
+    n_procs : int
+        Number of processes to use for parallel computation of SHAP values.
+    n_clusters : int
+        Number of clusters to use for SHAP background samples
+        and validation sample selection.
+    """
+
+    run_config = nn_gmm.load_config(results_dir / "run_config.yaml")
+
     val_df = pd.read_parquet(results_dir / "val_results.parquet")
+    input_df = nn_gmm.get_input_dfs(run_config, val_df.index.values.astype(int))
 
-    print("wtf")
+    comb_shap_explanations = []
+    for cv_ix in val_df["cv_iter"].unique():
+        logger.info(f"Computing SHAP values for CV iteration: {cv_ix}")
+        cv_key = f"cv_{cv_ix:02d}"
+        cur_result_dir = results_dir / cv_key
 
-def compute_shap_values(result_dir: Path):
-    print("wtf")
+        # Loading
+        val_record_int_ids = np.load(cur_result_dir / "val_record_ids.npy")
+        val_mask = np.isin(input_df.index, val_record_int_ids)
+        cur_run_config = nn_gmm.load_config(cur_result_dir / "run_config.yaml")
+        cur_model = torch.load(
+            cur_result_dir / "model.pt", weights_only=False, map_location=device
+        )
+
+        X, X_loc, feature_names, loc_feature_names = nn_gmm.get_input_tensor(
+            cur_run_config, input_df, "cpu", return_feature_names=True
+        )
+
+        logger.info("Running KMeans to select background samples and validation samples for SHAP")
+        X_bg, kmeans = _shap_kmeans(X.numpy(), n_clusters)
+
+        # Create mask for validation records to evaluate
+        val_cluster_indices = kmeans.labels_[val_mask]
+        val_eval_mask = np.zeros(val_mask.sum(), dtype=bool)
+        for cluster_ix in np.unique(val_cluster_indices):
+            cluster_mask = val_cluster_indices == cluster_ix
+
+            # Select a subset of validation samples from this cluster
+            if np.sum(cluster_mask) > n_val_samples_per_cluster:
+                selected_indices = np.random.choice(
+                    np.flatnonzero(cluster_mask),
+                    n_val_samples_per_cluster,
+                    replace=False,
+                )
+                val_eval_mask[selected_indices] = True
+            else:
+                val_eval_mask[cluster_mask] = True
+
+        # Create SHAP explainer
+        explainer = shap.KernelExplainer(
+            _get_pred_fn(cur_model, cur_run_config, device),
+            X_bg,
+            feature_names=feature_names,
+        )
+
+        # Compute SHAP values for selected validation samples
+        logger.info(
+            f"Computing SHAP values for {val_eval_mask.sum()} validation samples..."
+        )
+        eval_X_df = pd.DataFrame(
+            X[val_mask][val_eval_mask].numpy(),
+            columns=feature_names,
+            index=input_df.index[val_mask][val_eval_mask],
+        )
+        def explain_batch(batch: np.ndarray):
+            return explainer(batch, silent=True)
+        batches = np.array_split(eval_X_df, n_procs)
+        results = joblib.Parallel(n_jobs=-1)(
+            joblib.delayed(explain_batch)(b) for b in batches
+        )
+
+        # Combine results and save
+        assert np.all(
+            np.concatenate([res.data for res in results], axis=0) == eval_X_df.values
+        )
+        shap_explanation = shap.Explanation(
+            values=np.concatenate([res.values for res in results], axis=0),
+            base_values=np.concatenate([res.base_values for res in results], axis=0),
+            data=eval_X_df,
+            feature_names=feature_names,
+        )
+        mlt.utils.write_pickle(
+            shap_explanation, cur_result_dir / "shap_explanation.pkl", clobber=True
+        )
+
+        comb_shap_explanations.append(shap_explanation)
+
+    # Combine SHAP explanations from all CV iterations and save
+    comb_shap_explanation = shap.Explanation(
+        values=np.concatenate([exp.values for exp in comb_shap_explanations], axis=0),
+        base_values=np.concatenate(
+            [exp.base_values for exp in comb_shap_explanations], axis=0
+        ),
+        data=pd.concat([exp.data for exp in comb_shap_explanations], axis=0),
+        feature_names=feature_names,
+    )
+
+    mlt.utils.write_pickle(
+        comb_shap_explanation,
+        results_dir / "comb_shap_explanation.pkl",
+        clobber=True,
+    )
+
+    
+

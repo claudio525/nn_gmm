@@ -617,6 +617,7 @@ def hazard_map(
                 im=im,
                 rp=rp,
                 filename_prefix=filename_prefix,
+                plot_type="map",
             ),
             out_ffp.with_suffix(".yaml"),
             clobber=True,
@@ -1037,8 +1038,6 @@ def _gen_im_bias_res_std_plot(
             fill="black",
         )
 
-    bias_metadata = dict(im=im, type="site-bias")
-
     # Residual Standard Deviation
     grid_res_std = plotting.create_grid(site_res_std, im, grid_spacing=grid_spacing)
     res_std_fig = plotting.gen_region_fig(
@@ -1118,10 +1117,10 @@ def _gen_im_bias_res_std_plot(
             output_dir / f"{im}_site_res_std.png", dpi=900, anti_alias=True
         )
         mlt.utils.write_to_yaml(
-            bias_metadata, output_dir / f"{im}_site_bias.yaml", clobber=True
+            dict(im=im, type="site-bias", plot_type="map",), output_dir / f"{im}_site_bias.yaml", clobber=True
         )
         mlt.utils.write_to_yaml(
-            dict(im=im, type="site-res-std"),
+            dict(im=im, type="site-res-std", plot_type="map",),
             output_dir / f"{im}_site_res_std.yaml",
             clobber=True,
         )

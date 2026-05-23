@@ -106,6 +106,23 @@ def emp_gmm_bias_res_std(
         grid_spacing=grid_spacing,
     )
 
+@app.command("bias-res-std-tectonic-type")
+def bias_res_std_tectonic_type(
+    cv_results_dir: Path
+):
+    """
+    Generate site bias and site residual standard deviation plots
+    grouped by tectonic type using NN-GMM CV results.
+    """
+    nng.utils.setup_logging()
+
+    (output_dir := cv_results_dir / "plots").mkdir(exist_ok=True, parents=False)
+    nng.plots.bias_res_std_tect_type(
+        cv_results_dir,
+        output_dir,
+    )
+
+
 
 @app.command("basin-site-map")
 def basin_site_map(
@@ -345,6 +362,21 @@ def pred_vs_res_std(
     nng.utils.setup_logging()
     nng.plots.pred_vs_res_std(model_dir)
 
+
+@app.command("cv-feature-importance")
+def cv_feature_importance(
+    results_dir: Path,
+):
+    """
+    Generate feature importance plot using SHAP values computed from CV results.
+    """
+    nng.utils.setup_logging()
+
+    run_config = nng.nn_gmm.load_config(results_dir / "run_config.yaml")    
+    shap_values = pd.read_pickle(results_dir / "comb_shap_explanation.pkl")
+
+    (output_dir := results_dir / "plots").mkdir(exist_ok=True, parents=False)
+    nng.plots.feature_importance_plots(shap_values, run_config, output_dir)
 
 if __name__ == "__main__":
     app()

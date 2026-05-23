@@ -418,6 +418,10 @@ class GMMRunConfig(BaseRunConfig):
             n_inputs += len(constants.NN_TECT_TYPES) - 1  # One-hot encoding
 
         return n_inputs
+    
+    @property
+    def model_inputs(self) -> list[str]:
+        return self.site_inputs + self.source_inputs + self.source_to_site_inputs
 
     def to_dict(self) -> dict:
         """
@@ -568,6 +572,11 @@ class LocAdjRunConfig(BaseRunConfig):
         return self.base_gmm_run_config.source_to_site_inputs
 
     ### End pass through properties ###
+
+    @property
+    def model_inputs(self) -> list[str]:    
+        """Model inputs for the location adjustment model."""
+        return self.base_gmm_run_config.model_inputs + self.loc_inputs
 
     def to_yaml(self, ffp: Path):
         """Save the RunConfig to a YAML file."""
@@ -962,7 +971,9 @@ def run_model_training(
     source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
     source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
     source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
-    source_df["is_point_source"] = event_df.loc[source_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
+    source_df["is_point_source"] = (
+        event_df.loc[source_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
+    )
 
     logger.info(
         f"Number of active shallow sources: {(source_df.tect_type == 'ACTIVE_SHALLOW').sum()}"
@@ -1541,7 +1552,6 @@ def get_vs30_weights(record_info_df: pd.DataFrame, max_weight: int) -> pd.DataFr
         labels=constants.VS30_WEIGHTING_BIN_NAMES,
     )
 
-
     vs30_bin_counts = record_info_df.vs30_bin.value_counts().sort_index()
 
     vs30_bin_weights = np.clip(
@@ -1637,30 +1647,8 @@ def run_predictions(
     device : str
         Device to run the model on, e.g., 'cpu' or 'cuda'.
     """
-    # Pre-process the input DataFrame
-    pre_site_df = preprocessing.preprocess_site_features(
-        input_df,
-        run_config.site_inputs,
-    )
-    pre_source_df = preprocessing.preprocess_source_features(
-        input_df, run_config.source_inputs
-    )
-    pre_source_site_df = preprocessing.preprocess_event_site_features(
-        input_df, run_config.source_to_site_inputs, run_config.max_rrup
-    )
-
-    pre_input_df = pd.concat(
-        [pre_site_df[run_config.site_inputs], pre_source_df, pre_source_site_df], axis=1
-    )
-    X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
-
-    if model.uses_loc_inputs:
-        pre_loc_input_df = preprocessing.preprocess_site_features(
-            input_df, run_config.loc_inputs
-        )
-        X_loc = torch.from_numpy(pre_loc_input_df.values).to(
-            dtype=torch.float32, device=device
-        )
+    # Get the input tensors
+    X, X_loc = get_input_tensor(run_config, input_df, device)
 
     model.eval()
     with torch.no_grad():
@@ -1684,7 +1672,6 @@ def run_predictions(
     pred_df = pd.concat([input_df, pred_mean_df, pred_std_df], axis=1)
 
     return pred_df
-
 
 def _add_sample_weights(
     run_config: GMMRunConfig,
@@ -1831,3 +1818,103 @@ def run_full_training(
     logger.info(
         f"Took: {(time.time() - start) / 60} minutes to complete model training."
     )
+
+
+def get_input_dfs(run_config: BaseRunConfig, record_int_ids: np.ndarray):
+    """
+    Creates the site, source and site-event dataframes for the specified record ids.
+    """
+    # Load the relevant data
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(add_nztm=True)
+        event_df = imdb.get_event_df()
+        rel_df = imdb.get_rel_df()
+        record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
+        record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+            record_info_df.site_int_id.values, record_info_df.event_int_id.values
+        )
+        site_event_df = imdb.get_site_event_df(
+            site_event_int_ids=record_info_df.site_event_int_id.values
+        )
+
+    ### Build the input dataframes
+    # Site inputs
+    input_df = record_info_df[
+        ["site_int_id", "rel_int_id", "event_int_id", "site_event_int_id"]
+    ].copy()
+    input_df[run_config.site_inputs] = site_df.loc[
+        input_df.site_int_id.values, run_config.site_inputs
+    ].values
+    assert np.isin(run_config.site_inputs, site_df.columns).all()
+
+    # Source inputs
+    if "tect_type" in run_config.source_inputs:
+        input_df["tect_type"] = event_df.loc[input_df.event_int_id].tect_type.values
+    if "dip" in run_config.source_inputs:
+        input_df["dip"] = event_df.loc[input_df.event_int_id].dip.values
+    if "dtop" in run_config.source_inputs:
+        input_df["dtop"] = event_df.loc[input_df.event_int_id].dtop.values
+    if "dbottom" in run_config.source_inputs:
+        input_df["dbottom"] = event_df.loc[input_df.event_int_id].dbottom.values
+    if "is_point_source" in run_config.source_inputs:
+        input_df["is_point_source"] = (
+            event_df.loc[input_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
+        )
+    if "magnitude" in run_config.source_inputs:
+        input_df["magnitude"] = rel_df.loc[input_df.rel_int_id].magnitude.values
+    if "hypo_depth" in run_config.source_inputs:
+        input_df["hypo_depth"] = rel_df.loc[input_df.rel_int_id].hypo_depth.values
+    if "rake" in run_config.source_inputs:
+        input_df["rake"] = rel_df.loc[input_df.rel_int_id].rake.values
+    assert np.isin(run_config.source_inputs, input_df.columns).all()
+
+    # Site-Event inputs
+    input_df[run_config.source_to_site_inputs] = site_event_df.loc[
+        input_df.site_event_int_id.values, run_config.source_to_site_inputs
+    ].values
+    assert np.isin(run_config.source_to_site_inputs, input_df.columns).all()
+
+    return input_df
+
+
+def get_input_tensor(
+    run_config: BaseRunConfig,
+    input_df: pd.DataFrame,
+    device: str,
+    return_feature_names: bool = False,
+):
+    """
+    Pre-processes the input DataFrame and converts it to a tensor for model input.
+    Also processes the loc inputs if it is a location-based model.
+    """
+    # Pre-process the input DataFrame
+    pre_site_df = preprocessing.preprocess_site_features(
+        input_df,
+        run_config.site_inputs,
+    )
+    pre_source_df = preprocessing.preprocess_source_features(
+        input_df, run_config.source_inputs
+    )
+    pre_source_site_df = preprocessing.preprocess_event_site_features(
+        input_df, run_config.source_to_site_inputs, run_config.max_rrup
+    )
+
+    pre_input_df = pd.concat(
+        [pre_site_df, pre_source_df, pre_source_site_df], axis=1
+    )
+    X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
+
+    X_loc, loc_feature_names = None, None
+    if isinstance(run_config, LocAdjRunConfig) and run_config.loc_inputs is not None:
+        pre_loc_input_df = preprocessing.preprocess_site_features(
+            input_df, run_config.loc_inputs
+        )
+        X_loc = torch.from_numpy(pre_loc_input_df.values).to(
+            dtype=torch.float32, device=device
+        )
+        loc_feature_names = pre_loc_input_df.columns.tolist()
+
+    if return_feature_names:
+        return X, X_loc, pre_input_df.columns.tolist(), loc_feature_names
+
+    return X, X_loc

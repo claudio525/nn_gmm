@@ -224,9 +224,10 @@ def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
 
 @app.command("compute-cv-shap-values")
 def compute_cv_shap_values(
-    result_dirs: Path):
+    result_dirs: Path, n_procs: int = 8):
     """Compute SHAP values for the specified CV results."""
-    nng.analysis.compute_cv_shape_values(result_dirs)
+    nng.utils.setup_logging(console_level=logging.DEBUG)
+    nng.analysis.compute_cv_shape_values(result_dirs, device, n_procs=n_procs)
 
 if __name__ == "__main__":
     app()

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import seaborn as sns
+import shap
 
 import ml_tools as mlt
 
@@ -17,7 +18,6 @@ from . import data
 from . import plot_utils
 from . import utils
 from . import hazard
-
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,7 @@ def magnitude_trend_plot(
                     np.exp(comb_mean + comb_std),
                     color=nn_color,
                     alpha=0.2,
-            )
+                )
 
             ax.plot(
                 mean_pred_da.coords["mag"].values,
@@ -252,7 +252,7 @@ def magnitude_trend_plot(
                 linewidth=minor_line_width,
             )
             if fill_between:
-                ax.fill_between(    
+                ax.fill_between(
                     pred_df["magnitude"],
                     np.exp(pred_df[f"{im}_pred"] - pred_df[f"{im}_pred_std"]),
                     np.exp(pred_df[f"{im}_pred"] + pred_df[f"{im}_pred_std"]),
@@ -287,7 +287,7 @@ def rrup_trend_plot(
     minor_line_width: float = 2.0,
     ind_fig_size: tuple = (8, 6),
     ims: list[str] | None = None,
-    dpi: float | None = None,   
+    dpi: float | None = None,
     axs: list[plt.Axes] | None = None,
     nn_color: str = "blue",
     plot_empirical: bool = True,
@@ -320,7 +320,6 @@ def rrup_trend_plot(
     assert axs is None or len(axs) == (
         len(ims) if ims is not None else len(constants.PLOT_IMS)
     ), "If axs is provided, its length must match the number of ims to be plotted."
-
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
@@ -1315,3 +1314,69 @@ def pred_vs_res_std(model_dir: Path):
         model_dir / "plots/pred_vs_res_std.yaml",
         clobber=True,
     )
+
+
+def feature_importance_plots(
+    shap_values: shap.Explanation, run_config: nn_gmm.BaseRunConfig, output_dir: Path
+):
+    """
+    Creates feature importance plots based on SHAP values
+    """
+    # Bar feature importance
+    n_ims = len(run_config.pred_mean_keys)
+    for i in range(n_ims):
+        mean_shap_values = shap_values[:, :, i]
+        std_shap_values = shap_values[:, :, i + n_ims]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 10))
+
+        shap.plots.bar(mean_shap_values, ax=ax1, show=False, max_display=20)
+        shap.plots.bar(std_shap_values, ax=ax2, show=False, max_display=20)
+
+        out_ffp = output_dir / f"shap_feature_importance_{run_config.ims[i]}.png"
+        fig.savefig(out_ffp)
+        plt.close(fig)
+
+        mlt.utils.write_to_yaml(
+            dict(
+                type="shap-feature-importance",
+                im=str(run_config.ims[i]),
+            ),
+            out_ffp.with_suffix(".yaml"),
+            clobber=True,
+        )
+
+
+def bias_res_std_tect_type(cv_results_dir: Path, output_dir: Path):
+    """
+    Creates a bias and residual standard deviation
+    plot grouped by tectonic type
+    """
+    run_config = nn_gmm.load_config(cv_results_dir / "run_config.yaml")
+
+    res_df, pred_df, sim_df, record_info_df = analysis.get_nn_sim_residuals(
+        cv_results_dir
+    )
+
+    with data.DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+    tect_types = event_df["tect_type"].unique().tolist()
+    tect_colors = sns.color_palette("Set1", len(tect_types))
+
+    res_df["tect_type"] = event_df.loc[res_df.event_int_id, "tect_type"].values
+
+    bias_std_plot = GroupedBiasStdPlot(
+        "tect_type",
+        None,
+        tect_types,
+        tect_colors,
+        pSA_keys_periods=(run_config.ims, run_config.pSA_periods),
+        bias_ylim=(-0.2, 0.2),
+        std_ylim=(0, 0.6),
+    )
+    bias_std_plot.add_categorial_results(res_df, add_legend_entries=True)
+    bias_std_plot.add_legend()
+
+    output_ffp = output_dir / "bias_resStd_tectType.png"
+    bias_std_plot.fig.savefig(output_ffp)
+    plt.close(bias_std_plot.fig)
