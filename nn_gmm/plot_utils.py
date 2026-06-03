@@ -21,6 +21,7 @@ def get_pSA_bias_residual_fig(
     std_y_axis_limits: tuple[float, float] = (0.0, 1.0),
     x_axis_limits: tuple[float, float] = (0.01, 10.0),
     dpi: int = None,
+    add_over_under_text: bool = True,
 ):
     """
     Create a figure for pSA bias and residual standard deviation plots.
@@ -53,24 +54,25 @@ def get_pSA_bias_residual_fig(
     ax1.set_ylim(*bias_y_axis_limits)
     ax1.set_xlim(*x_axis_limits)
 
-    ax1.text(
-        0.03,
-        0.03,
-        "Overprediction",
-        transform=ax1.transAxes,
-        # fontsize=sr.constants.FIG_FONT_SIZE,
-        va="bottom",
-        ha="left",
-    )
-    ax1.text(
-        0.03,
-        0.97,
-        "Underprediction",
-        transform=ax1.transAxes,
-        # fontsize=sr.constants.FIG_FONT_SIZE,
-        va="top",
-        ha="left",
-    )
+    if add_over_under_text:
+        ax1.text(
+            0.03,
+            0.03,
+            "Overprediction",
+            transform=ax1.transAxes,
+            # fontsize=sr.constants.FIG_FONT_SIZE,
+            va="bottom",
+            ha="left",
+        )
+        ax1.text(
+            0.03,
+            0.97,
+            "Underprediction",
+            transform=ax1.transAxes,
+            # fontsize=sr.constants.FIG_FONT_SIZE,
+            va="top",
+            ha="left",
+        )
 
     ax2.set_xlabel("Vibration Period, T(s)")
     ax2.set_ylabel("Residual standard deviation")

@@ -25,7 +25,6 @@ from . import utils
 from . import loc_pre
 from . import analysis
 
-
 logger = logging.getLogger(__name__)
 
 DS_HAZARD_IM_LIMITS_MAPPING = {
@@ -185,10 +184,49 @@ class SpatialPlot:
         assert "lat" in im_df.columns, "im_df must contain 'lat' column"
 
         self.plot_values(
-            im_df, key, utils.get_nice_im_name(im), self.IM_LIMITS_MAPPING[im], grid_spacing, **plot_grid_kwargs
+            im_df,
+            key,
+            utils.get_nice_im_name(im),
+            self.IM_LIMITS_MAPPING[im],
+            grid_spacing,
+            **plot_grid_kwargs,
         )
         return self
-    
+
+    def plot_std_values(
+        self,
+        std_df: pd.DataFrame,
+        key: str,
+        cb_label: str,
+        grid_spacing: str = "250e/250e",
+        **plot_grid_kwargs,
+    ):
+        """
+        Plots standard deviation values on a spatial grid using the hot colormap.
+
+        Parameters
+        ----------
+        std_df : pd.DataFrame
+            DataFrame containing 'lon', 'lat', and std column.
+        key : str
+            The std column to plot.
+        grid_spacing : str
+            Grid spacing for interpolation (e.g., "250e/250e").
+        """
+        assert key in std_df.columns, f"Invalid key: {key}"
+        assert "lon" in std_df.columns, "im_df must contain 'lon' column"
+        assert "lat" in std_df.columns, "im_df must contain 'lat' column"
+
+        self.plot_values(
+            std_df,
+            key,
+            cb_label,
+            (0, 1.0, 1.0 / 16),
+            grid_spacing=grid_spacing,
+            **plot_grid_kwargs,
+        )
+        return self
+
     def plot_values(
         self,
         value_df: pd.DataFrame,
@@ -197,7 +235,7 @@ class SpatialPlot:
         cb_limits: tuple[float, float, float],
         grid_spacing: str = "250e/250e",
         **plot_grid_kwargs,
-        ):
+    ):
         """
         Plots the given values on a spatial grid using the hot colormap.
         Generalized version of plot_im_values.
@@ -222,8 +260,13 @@ class SpatialPlot:
         )
 
         return self
-    
-    def plot_basins(self, basin_dir: Path | None = constants.BASIN_BOUNDARIES_DIR, basin_specs: dict[Path, dict] | None = None, **plot_kwargs):
+
+    def plot_basins(
+        self,
+        basin_dir: Path | None = constants.BASIN_BOUNDARIES_DIR,
+        basin_specs: dict[Path, dict] | None = None,
+        **plot_kwargs,
+    ):
         """
         Adds basin polygons to the existing figure.
 
@@ -239,14 +282,22 @@ class SpatialPlot:
         plot_kwargs : dict
             Additional plotting keyword arguments to apply to all basins if basin_specs is None.
         """
-        plot_kwargs = {"fill": "red", "pen": "0.1p,black", "transparency": 35} | plot_kwargs
+        plot_kwargs = {
+            "fill": "red",
+            "pen": "0.1p,black",
+            "transparency": 35,
+        } | plot_kwargs
 
         if basin_specs is None:
             basin_files = list(basin_dir.glob("*.txt"))
             basin_specs = {ffp: plot_kwargs for ffp in basin_files}
 
-        land_df = gpd.read_file(constants.NZ_LAND_SHAPEFILE).to_crs(epsg=2193).loc[[8263, 8322]]
-        
+        land_df = (
+            gpd.read_file(constants.NZ_LAND_SHAPEFILE)
+            .to_crs(epsg=2193)
+            .loc[[8263, 8322]]
+        )
+
         # Combine into a single polygon
         land_polygon = shapely.coverage_union_all(land_df.geometry)
 
@@ -254,26 +305,34 @@ class SpatialPlot:
             plot_specs = plot_kwargs | plot_specs
 
             # Create basin polygon
-            basin_nztm_coords = coordinates.wgs_depth_to_nztm(np.loadtxt(ffp)[:, ::-1])[:, ::-1]
+            basin_nztm_coords = coordinates.wgs_depth_to_nztm(np.loadtxt(ffp)[:, ::-1])[
+                :, ::-1
+            ]
             basin_polygon = shapely.Polygon(basin_nztm_coords)
 
             # Obtain basin land polygon
             basin_land_polygon = basin_polygon.intersection(land_polygon)
-            basin_land_polygon_wgs = shapely.transform(basin_land_polygon, lambda x: coordinates.nztm_to_wgs_depth(x[:, ::-1])[:, ::-1])
+            basin_land_polygon_wgs = shapely.transform(
+                basin_land_polygon,
+                lambda x: coordinates.nztm_to_wgs_depth(x[:, ::-1])[:, ::-1],
+            )
 
             # Plot
             if isinstance(basin_land_polygon_wgs, shapely.geometry.polygon.Polygon):
                 geom_coords = np.array(basin_land_polygon_wgs.exterior.coords)
                 self.fig.plot(x=geom_coords[:, 0], y=geom_coords[:, 1], **plot_specs)
-            elif isinstance(basin_land_polygon_wgs, shapely.geometry.multipolygon.MultiPolygon):
+            elif isinstance(
+                basin_land_polygon_wgs, shapely.geometry.multipolygon.MultiPolygon
+            ):
                 for geom_wgs in basin_land_polygon_wgs.geoms:
                     geom_coords = np.array(geom_wgs.exterior.coords)
-                    self.fig.plot(x=geom_coords[:, 0], y=geom_coords[:, 1], **plot_specs)
+                    self.fig.plot(
+                        x=geom_coords[:, 0], y=geom_coords[:, 1], **plot_specs
+                    )
             else:
                 raise ValueError("Unexpected geometry type for basin land polygon.")
 
         return self
-        
 
     def plot_basin_boundaries(
         self, basin_dir: Path = constants.BASIN_BOUNDARIES_DIR, **plot_kwargs
@@ -445,7 +504,7 @@ def hazard_ratio_map(
             offset="0.5c/-0.5c",
             font=constants.GMT_FIG_FONT_LABEL,
         )
-        
+
         out_ffp = (
             output_dir
             / f"{filename_prefix}hazard_ratio_{utils.get_im_filename(im)}_rp{rp}.png"
@@ -548,7 +607,7 @@ def hazard_map(
         ), "Mismatch in DS and fault hazard site columns"
 
         flt_im_df = pd.DataFrame(index=flt_hazard_df.columns, columns=rps, dtype=float)
-        
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
             for site in flt_hazard_df.columns:
@@ -576,12 +635,14 @@ def hazard_map(
         im_df.loc[:, rps] = ds_im_df[rps] + flt_im_df[rps]
 
     if title is None:
-        title = (
-            "Total Hazard" if add_flt_hazard else "Distributed Seismicity Hazard"
-        )
+        title = "Total Hazard" if add_flt_hazard else "Distributed Seismicity Hazard"
 
     plt_kwargs = {"water_color": "white"}
-    filename_prefix = f"{filename_prefix}" if filename_prefix else f"{'total' if add_flt_hazard else 'ds'}"
+    filename_prefix = (
+        f"{filename_prefix}"
+        if filename_prefix
+        else f"{'total' if add_flt_hazard else 'ds'}"
+    )
     for rp in rps:
         plot = SpatialPlot(plot_kwargs=plt_kwargs).plot_im_values(
             im_df,
@@ -810,6 +871,7 @@ def site_bias_res_std(
                 ],
             )
 
+
 def cv_mean_pred_std_maps(
     cv_model_results_dir: Path,
     output_dir: Path,
@@ -836,14 +898,11 @@ def cv_mean_pred_std_maps(
     mean_pred_std_df = pred_df.groupby("site_int_id")[run_config.pred_std_keys].mean()
     mean_pred_std_df["lon"] = site_df.loc[mean_pred_std_df.index, "lon"]
     mean_pred_std_df["lat"] = site_df.loc[mean_pred_std_df.index, "lat"]
-    
+
     if n_procs == 1:
         for im in ims:
             cv_mean_pred_std_map(
-            mean_pred_std_df,
-                im,
-                output_dir,
-                grid_spacing=grid_spacing
+                mean_pred_std_df, im, output_dir, grid_spacing=grid_spacing
             )
     else:
         logger.info(f"Using {n_procs} processes to generate hazard maps.")
@@ -857,11 +916,12 @@ def cv_mean_pred_std_maps(
         with ctx.Pool(processes=n_procs) as pool:
             list(tqdm(pool.imap_unordered(fn_call, ims), total=len(ims)))
 
+
 def cv_mean_pred_std_map(
     mean_pred_std_df: pd.DataFrame,
     im: str,
     output_dir: Path,
-    grid_spacing: str = "250e/250e"
+    grid_spacing: str = "250e/250e",
 ):
     plt_kwargs = {"water_color": "white"}
     spatial_plot = SpatialPlot(plot_kwargs=plt_kwargs)
@@ -871,7 +931,7 @@ def cv_mean_pred_std_map(
         f"{im}_pred_std",
         f"Mean Predicted Std - {utils.get_nice_im_name(im)}",
         (0.0, 1.0, 0.1),
-        grid_spacing=grid_spacing
+        grid_spacing=grid_spacing,
     )
 
     out_ffp = output_dir / f"cv_mean_pred_std_map_{im}.png"
@@ -941,8 +1001,151 @@ def _gen_im_site_term_map(
     spatial_plot.save(output_dir / f"nn_site_term_map_{im}.png")
 
     mlt.utils.write_to_yaml(
-        dict(type="nn-site-term-map", im=im, is_mera=True),
+        dict(
+            type="nn-site-term-map",
+            im=im,
+            is_mera=True,
+            period=utils.get_pSA_period(im),
+        ),
         output_dir / f"nn_site_term_map_{im}.yaml",
+        clobber=True,
+    )
+
+
+def nn_rem_residual_maps(
+    nn_dir: Path,
+    ims: list[str],
+    output_dir: Path = None,
+    n_procs: int = 1,
+    grid_spacing: str = "500e/500e",
+):
+    """
+    Generate remaining residual term maps using NN-GMM results for specified IMs.
+    I.e. map of delta_S2S + site term
+    """
+    rem_res_ffp = nn_dir / "mera_site_term/rem_res_df.parquet"
+    if not rem_res_ffp.exists():
+        raise FileNotFoundError(
+            f"Remaining residuals file not found: {rem_res_ffp}. "
+            "Please run MERA analysis first."
+        )
+
+    run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
+    logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df()
+
+    rem_res_df = pd.read_parquet(rem_res_ffp)
+    mean_rem_res_df = rem_res_df.groupby("site_id", observed=True)[ims].mean()
+    mean_rem_res_df = mean_rem_res_df.join(
+        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left"
+    )
+    abs_res_df = rem_res_df.copy()
+    abs_res_df[ims] = abs_res_df[ims].abs()
+    mean_abs_rem_res_df = abs_res_df.groupby("site_id", observed=True)[ims].mean()
+    mean_abs_rem_res_df = mean_abs_rem_res_df.join(
+        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left"
+    )
+    std_rem_res_df = rem_res_df.groupby("site_id", observed=True)[ims].std()
+    std_rem_res_df = std_rem_res_df.join(
+        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left" 
+    )
+    
+    if n_procs == 1:
+        for cur_im in ims:
+            _gen_rem_res_map(mean_rem_res_df, mean_abs_rem_res_df, std_rem_res_df, cur_im, grid_spacing, output_dir)
+    else:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(processes=n_procs) as pool:
+            pool.starmap(
+                _gen_rem_res_map,
+                [(mean_rem_res_df, mean_abs_rem_res_df, std_rem_res_df, im, grid_spacing, output_dir) for im in ims],
+            )
+
+
+def _gen_rem_res_map(
+    mean_rem_res_df: pd.DataFrame,
+    mean_abs_rem_res_df: pd.DataFrame,
+    std_rem_res_df: pd.DataFrame,
+    im: str,
+    grid_spacing: str,
+    output_dir: Path,
+):
+    # Mean
+    mean_spatial_plot = SpatialPlot(plot_topo=False)
+    mean_spatial_plot.plot_ratio(
+        mean_rem_res_df,
+        im,
+        grid_spacing=grid_spacing,
+        cmap_limits=(-0.5, 0.5, 1.0 / 10),
+        cb_label=f"{utils.get_nice_im_name(im)} mean(Remaining Residual) ",
+    )
+    mean_spatial_plot.plot_basin_boundaries().plot_sites(
+        mean_rem_res_df, style="p0.015c"
+    )
+    mean_spatial_plot.save(output_dir / f"nn_rem_residual_bias_map_{im}.png")
+    mlt.utils.write_to_yaml(
+        dict(
+            type="nn-rem-residual-map",
+            unique_type="nn-rem-residual-bias-map",
+            is_bias=True,
+            im=im,
+            is_mera=True,
+            period=utils.get_pSA_period(im),
+        ),
+        output_dir / f"nn_rem_residual_bias_map_{im}.yaml",
+        clobber=True,
+    )
+
+    # Mean Absolute
+    mean_abs_spatial_plot = SpatialPlot(plot_topo=False)
+    mean_abs_spatial_plot.plot_values(
+        mean_abs_rem_res_df,
+        im,
+        f"{utils.get_nice_im_name(im)} mean(|Remaining Residual|)",
+        (0.0, 0.5, 0.05),
+        grid_spacing=grid_spacing,
+    )
+    mean_abs_spatial_plot.plot_basin_boundaries().plot_sites(
+        mean_abs_rem_res_df, style="p0.015c"
+    )
+    mean_abs_spatial_plot.save(output_dir / f"nn_rem_residual_mean_abs_map_{im}.png")
+    mlt.utils.write_to_yaml(
+        dict(
+            type="nn-rem-residual-map",
+            unique_type="nn-rem-residual-mean-abs-map",
+            is_bias=True,
+            is_absolute=True,
+            im=im,
+            is_mera=True,
+            period=utils.get_pSA_period(im),
+        ),
+        output_dir / f"nn_rem_residual_mean_abs_map_{im}.yaml",
+        clobber=True,
+    )
+
+    std_spatial_plot = SpatialPlot(plot_topo=False)
+    std_spatial_plot.plot_std_values(
+        std_rem_res_df,
+        im,
+        f"{utils.get_nice_im_name(im)} Remaining Residual (Std)",
+        grid_spacing=grid_spacing,
+    )
+    std_spatial_plot.plot_basin_boundaries().plot_sites(
+        std_rem_res_df, style="p0.015c"
+    )
+    std_spatial_plot.save(output_dir / f"nn_rem_residual_std_map_{im}.png")
+
+    mlt.utils.write_to_yaml(
+        dict(
+            type="nn-rem-residual-map",
+            unique_type="nn-rem-residual-std-map",
+            is_std=True,
+            im=im,
+            is_mera=True,
+            period=utils.get_pSA_period(im),
+        ),
+        output_dir / f"nn_rem_residual_std_map_{im}.yaml",
         clobber=True,
     )
 
@@ -1117,10 +1320,20 @@ def _gen_im_bias_res_std_plot(
             output_dir / f"{im}_site_res_std.png", dpi=900, anti_alias=True
         )
         mlt.utils.write_to_yaml(
-            dict(im=im, type="site-bias", plot_type="map",), output_dir / f"{im}_site_bias.yaml", clobber=True
+            dict(
+                im=im,
+                type="site-bias",
+                plot_type="map",
+            ),
+            output_dir / f"{im}_site_bias.yaml",
+            clobber=True,
         )
         mlt.utils.write_to_yaml(
-            dict(im=im, type="site-res-std", plot_type="map",),
+            dict(
+                im=im,
+                type="site-res-std",
+                plot_type="map",
+            ),
             output_dir / f"{im}_site_res_std.yaml",
             clobber=True,
         )

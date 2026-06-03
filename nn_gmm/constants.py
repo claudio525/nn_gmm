@@ -51,6 +51,8 @@ TECTONIC_TYPE_MAPPING = {
 REVERSE_TECTONIC_TYPE_MAPPING = {v: k for k, v in TECTONIC_TYPE_MAPPING.items()}
 TECT_TYPES = list(TECTONIC_TYPE_MAPPING.keys())
 NN_TECT_TYPES = ["ACTIVE_SHALLOW", "SUBDUCTION_INTERFACE", "VOLCANIC", "SUBDUCTION_SLAB"]
+NN_TECT_TYPES_SHORT_NAME = ["Crustal", "Interface", "Volcanic", "Slab"]
+
 
 PSA_KEYS = [
     "pSA_0.01",
@@ -247,9 +249,16 @@ DS_ERF_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZ_DSmodel_2010.txt"
 DS_SOURCE_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZBCK211_OpenSHA.txt"
 
 LEE_NZ_VAL_BIAS_STD_FFP = WDATA / "nn_gmm/other/lee_nz_validation_2022/PJSvarCompsBiased_sim.csv"
+DUPUIS_SMALL_INT_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_small_mag/dupuis_small_mag_interface.csv"
+DUPUIS_SMALL_SLAB_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_small_mag/dupuis_small_mag_slab.csv"
+DUPUIS_MOD_INT_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_moderate_mag/dupuis_moderate_mag_interface.csv"
+DUPUIS_MOD_SLAB_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_moderate_mag/dupuis_moderate_mag_slab.csv"
 
 PLOT_IMS = ["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 MERA_IMS = ["pSA_0.01", "pSA_0.1", "pSA_1.0", "pSA_2.0", "pSA_3.0", "pSA_4.0", "pSA_5.0", "pSA_6.0", "pSA_7.5", "pSA_10.0"]
+
+# DARKGRAY = "#000000d9"
+DARKGRAY = "#000000cc"
 
 # Default figure settings
 FIG_SIZE = (16, 10)
@@ -275,6 +284,10 @@ if (env_fig_linewidth := os.environ.get("fig_linewidth")) is not None:
 FIG_GROUP_LINEWIDTH = None
 if (env_fig_group_linewidth := os.environ.get("fig_group_linewidth")) is not None:
     FIG_GROUP_LINEWIDTH = float(env_fig_group_linewidth)
+
+FIG_MINOR_LINEWIDTH = None
+if (env_fig_minor_linewidth := os.environ.get("fig_minor_linewidth")) is not None:
+    FIG_MINOR_LINEWIDTH = float(env_fig_minor_linewidth)
 
 GMT_FIG_FONT_LABEL = "14p,Helvetica,black"
 if (env_gmt_fig_font_label := os.environ.get("gmt_fig_font_label")) is not None:

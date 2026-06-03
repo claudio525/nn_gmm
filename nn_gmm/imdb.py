@@ -604,7 +604,7 @@ class DuckIMDB:
 
         return record_info_df
 
-    def get_im_data(self, ims: np.ndarray, record_int_ids: np.ndarray) -> pd.DataFrame:
+    def get_im_data(self, ims: np.ndarray, record_int_ids: np.ndarray, log_ims: bool = False) -> pd.DataFrame:
         """
         Returns a DataFrame containing the IM data for the given record IDs.
         This method uses a temporary table to speed up the query.
@@ -648,6 +648,10 @@ class DuckIMDB:
         )
 
         self._conn.unregister("temp_record_ids")
+
+        if log_ims:
+            im_df = np.log(im_df)
+
         return im_df
 
     def add_site_data(self, site_df: pd.DataFrame) -> None:

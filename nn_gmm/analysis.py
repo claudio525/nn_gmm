@@ -11,7 +11,6 @@ from sklearn.cluster import MiniBatchKMeans
 from shap.utils._legacy import DenseData
 import ml_tools as mlt
 
-from . import data
 from . import constants
 from .empdb import DuckEmpiricalDB
 from .imdb import DuckIMDB
@@ -44,6 +43,7 @@ def get_nn_sim_residuals(
     pred_df: pd.DataFrame = None,
     sim_df: pd.DataFrame = None,
     record_info_df: pd.DataFrame = None,
+    test_results: bool = False,
 ) -> pd.DataFrame:
     """
     Get the residuals of the specified NN model validation results
@@ -51,25 +51,31 @@ def get_nn_sim_residuals(
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
 
     if pred_df is None:
-        pred_df = pd.read_parquet(model_dir / "val_results.parquet")
+        pred_df = (
+            pd.read_parquet(model_dir / "test_results.parquet")
+            if test_results
+            else pd.read_parquet(model_dir / "val_results.parquet")
+        )
+
     pred_df = pred_df.sort_index()
-    val_record_int_ids = pred_df.index.values.astype(int)
-
+    record_int_ids = pred_df.index.values.astype(int)
     assert record_info_df is None or np.all(
-        val_record_int_ids == record_info_df.index.values
+        record_int_ids == record_info_df.index.values
     )
-    assert sim_df is None or np.all(val_record_int_ids == sim_df.index.values)
-
+    assert sim_df is None or np.all(record_int_ids == sim_df.index.values)
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         if sim_df is None:
-            sim_df = imdb.get_im_data(run_config.ims, val_record_int_ids)
+            sim_df = imdb.get_im_data(run_config.ims, record_int_ids)
         if record_info_df is None:
-            record_info_df = imdb.get_record_info_df(record_int_ids=val_record_int_ids)
+            record_info_df = imdb.get_record_info_df(record_int_ids=record_int_ids)
 
     record_info_df = record_info_df.sort_index()
     sim_df = sim_df.sort_index()
     assert sim_df.index.equals(pred_df.index)
 
+    assert np.all(
+        sim_df[run_config.ims] > 0
+    ), "All simulated IM values must not be in log-space to compute residuals"
     res_df = pd.DataFrame(
         data=np.log(sim_df[run_config.ims].values)
         - pred_df[run_config.pred_mean_keys].values,
@@ -79,7 +85,8 @@ def get_nn_sim_residuals(
 
     res_df["event_int_id"] = record_info_df.loc[res_df.index, "event_int_id"]
     res_df["site_int_id"] = record_info_df.loc[res_df.index, "site_int_id"]
-    res_df["cv_iter"] = pred_df.loc[res_df.index, "cv_iter"]
+    if not test_results:
+        res_df["cv_iter"] = pred_df.loc[res_df.index, "cv_iter"]
 
     return res_df, pred_df, sim_df, record_info_df
 
@@ -105,146 +112,113 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
     return emp_res_df
 
 
-def run_nn_mera(
+def run_event_mera(
     result_dir: Path,
     site_term: bool = False,
     out_dir: Path = None,
     n_procs: int = 4,
     ims: list[str] = None,
 ):
-    """Run MERA on the specified NN model results."""
     import mera
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
-    logging.info("Getting NN residuals")
-    res_df, _, __, record_info_df = get_nn_sim_residuals(result_dir)
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+        site_df = imdb.get_site_df()
 
-    # with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
-    # record_info_df = imdb.get_record_info_df(record_int_ids=res_df.index)
+    if not (event_results_ffp := result_dir / "event_val_results.parquet").exists():
+        logger.info("Computing event-level validation results...")
+        raise ValueError(
+            f"Event-level validation results not found at: {event_results_ffp}"
+        )
+
+    event_results_df = pd.read_parquet(result_dir / "event_val_results.parquet")
+
+    # Prepare the residual dataframe
+    res_df = event_results_df[run_config.ln_residual_keys].copy()
+    # res_df = res_df.reset_index(drop=False)
+    res_df["event_id"] = event_df.loc[
+        res_df.index.get_level_values("event_int_id"), "event_id"
+    ].values
+    res_df["site_id"] = site_df.loc[
+        res_df.index.get_level_values("site_int_id"), "site_id"
+    ].values
+    res_df = res_df.rename(
+        columns=dict(zip(run_config.ln_residual_keys, run_config.ims))
+    ).reset_index(drop=True)
+
+    mask = mera.mask_too_few_records(
+        res_df,
+        "event_id",
+        "site_id",
+        min_num_records_per_event=5,
+        min_num_records_per_site=5,
+    )
+
+    logger.info("Running MERA")
+    ims = constants.MERA_IMS if ims is None else ims
+    start = time.time()
+    mera_results = mera.run_mera(
+        res_df,
+        ims,
+        "event_id",
+        "site_id",
+        mask=mask,
+        compute_site_term=site_term,
+        n_procs=n_procs,
+    )
+    logger.info(f"Took: {time.time() - start} to run MERA")
+
+    out_dir = (
+        result_dir / f"event_mera{'_site_term' if site_term else ''}"
+        if out_dir is None
+        else out_dir
+    )
+    out_dir.mkdir(exist_ok=True)
+    mera_results.save_to_parquet(out_dir, save_fit=False)
+    logger.info(f"Wrote event MERA results to: {out_dir}")
+
+
+def run_nn_mera(
+    res_df: pd.DataFrame,
+    record_info_df: pd.DataFrame,
+    out_dir: Path,
+    site_term: bool = False,
+    n_procs: int = 4,
+    ims: list[str] = None,
+):
+    """Run MERA on the specified NN model results."""
+    import mera
+
     res_df["rel_id"] = record_info_df.loc[res_df.index, "rel_id"]
     res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]
 
+    ims = constants.MERA_IMS if ims is None else ims
     mask = mera.mask_too_few_records(
-        res_df[list(run_config.ims) + ["rel_id", "site_id"]],
+        res_df[ims + ["rel_id", "site_id"]],
         "rel_id",
         "site_id",
         min_num_records_per_event=5,
         min_num_records_per_site=5,
     )
 
-    logging.info("Running MERA")
-    ims = constants.MERA_IMS if ims is None else ims
+    logger.info("Running MERA")
     start = time.time()
-    event_mera_results = mera.run_mera(
+    mera_results = mera.run_mera(
         res_df,
         ims,
         "rel_id",
         "site_id",
         mask=mask,
-        # compute_site_term=False,
         compute_site_term=site_term,
         n_procs=n_procs,
     )
-    logging.info(f"Took: {time.time() - start} to run MERA")
+    logger.info(f"Took: {time.time() - start} to run MERA")
 
-    mera_results = None
-    # if site_term:
-    #     logger.info("Computing site terms")
-    #     start_time = time.time()
-
-    #     # Compute remaining residuals
-    #     event_rem_res_df = event_mera_results.rem_res_df.copy()
-    #     event_rem_res_df["site_id"] = res_df.loc[event_rem_res_df.index, "site_id"]
-
-    #     site_terms = []
-    #     rem_residuals = []
-    #     bias_std_values = []
-    #     if n_procs == 1:
-    #         for im in ims:
-    #             cur_res_df = event_rem_res_df.loc[mask[im], [im, "site_id"]]
-
-    #             cur_rem_res, cur_site_res, cur_std_values = _run_site_mera(
-    #                 cur_res_df, im
-    #             )
-
-    #             site_terms.append(cur_site_res)
-    #             rem_residuals.append(cur_rem_res)
-    #             bias_std_values.append(cur_std_values)
-    #     else:
-    #         with mp.Pool(n_procs) as pool:
-    #             results = pool.starmap(
-    #                 _run_site_mera,
-    #                 [
-    #                     (
-    #                         event_rem_res_df.loc[mask[im], [im, "site_id"]],
-    #                         im,
-    #                     )
-    #                     for im in ims
-    #                 ],
-    #             )
-    #         rem_residuals = [res[0] for res in results]
-    #         site_terms = [res[1] for res in results]
-    #         bias_std_values = [res[2] for res in results]
-
-    #     logger.info(f"Took: {time.time() - start_time} to compute site terms")
-
-    #     rem_res_df = pd.concat(rem_residuals, axis=1)
-    #     rem_res_df["site_id"] = event_rem_res_df.loc[rem_res_df.index, "site_id"]
-    #     rem_res_df["rel_id"] = record_info_df.loc[rem_res_df.index, "rel_id"]
-    #     site_res_df = pd.concat(site_terms, axis=1)
-    #     bias_std_df = pd.concat(bias_std_values, axis=1).T
-
-    #     assert bias_std_df.index.equals(event_mera_results.bias_std_df.index)
-    #     bias_std_df["tau"] = event_mera_results.bias_std_df["tau"]
-    #     bias_std_df["bias_event"] = event_mera_results.bias_std_df["bias"]
-    #     bias_std_df["bias"] = bias_std_df["bias_event"] + bias_std_df["bias_site"]
-    #     bias_std_df["sigma"] = np.sqrt(
-    #         bias_std_df["tau"] ** 2
-    #         + bias_std_df["phi_S2S"] ** 2
-    #         + bias_std_df["phi_w"] ** 2
-    #     )
-
-    #     mera_results = mera.MeraResults(
-    #         event_mera_results.event_res_df,
-    #         None,
-    #         rem_res_df,
-    #         bias_std_df,
-    #         None,
-    #         site_res_df,
-    #         None,
-    #     )
-
-    if mera_results is None:
-        mera_results = event_mera_results
-
-    out_dir = (
-        result_dir / f"mera{'_site_term' if site_term else ''}"
-        if out_dir is None
-        else out_dir
-    )
     out_dir.mkdir(exist_ok=True)
     mera_results.save_to_parquet(out_dir, save_fit=False)
-    logging.info(f"Wrote MERA results to: {out_dir}")
-
-
-# def _run_site_mera(res_df: pd.DataFrame, im: str):
-#     site_model = Lmer(f"{im} ~ 1 + (1|site_id)", data=res_df)
-#     site_model.fit(summary=False)
-
-#     site_res = site_model.ranef.iloc[:, 0].rename(im)
-#     rem_res = pd.Series(index=res_df.index, data=site_model.residuals, name=im)
-#     bias_std_values = pd.Series(
-#         index=["bias_site","phi_S2S", "phi_w"],
-#         data=[
-#             site_model.coefs.iloc[0, 0],
-#             site_model.ranef_var.loc["site_id", "Std"],
-#             site_model.ranef_var.loc["Residual", "Std"],
-#         ],
-#         name=im,
-#     )
-
-#     return rem_res, site_res, bias_std_values
+    logger.info(f"Wrote MERA results to: {out_dir}")
 
 
 def get_mag_input_df(
@@ -452,7 +426,9 @@ def compute_cv_shape_values(
             cur_run_config, input_df, "cpu", return_feature_names=True
         )
 
-        logger.info("Running KMeans to select background samples and validation samples for SHAP")
+        logger.info(
+            "Running KMeans to select background samples and validation samples for SHAP"
+        )
         X_bg, kmeans = _shap_kmeans(X.numpy(), n_clusters)
 
         # Create mask for validation records to evaluate
@@ -488,8 +464,10 @@ def compute_cv_shape_values(
             columns=feature_names,
             index=input_df.index[val_mask][val_eval_mask],
         )
+
         def explain_batch(batch: np.ndarray):
             return explainer(batch, silent=True)
+
         batches = np.array_split(eval_X_df, n_procs)
         results = joblib.Parallel(n_jobs=-1)(
             joblib.delayed(explain_batch)(b) for b in batches
@@ -526,6 +504,3 @@ def compute_cv_shape_values(
         results_dir / "comb_shap_explanation.pkl",
         clobber=True,
     )
-
-    
-

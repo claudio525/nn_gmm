@@ -42,6 +42,8 @@ def magnitude_trend_plot(
     legend_labels: bool = True,
     legend: bool = True,
     fill_between: bool = True,
+    min_mag: float = 5.0,
+    max_mag: float = 8.25,
 ):
     """
     Create magnitude trend plots for different IMs, comparing NN-GMM with empirical GMM predictions.
@@ -73,7 +75,6 @@ def magnitude_trend_plot(
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
 
-    min_mag, max_mag = 5.25, 8.25
     input_df = analysis.get_mag_input_df(
         mag_values=np.linspace(min_mag, max_mag, 250),
         run_config=run_config,

@@ -1,4 +1,6 @@
 type: "mag"
+min_mag: 5.0
+max_mag: 7.75
 fixed_inputs:
     vs30: 500
     z1p0: 0.1

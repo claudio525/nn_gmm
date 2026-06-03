@@ -163,6 +163,11 @@ class BaseRunConfig:
     def pred_mean_keys(self) -> np.ndarray:
         """Predicted mean IM keys."""
         return np.array([f"{cur_im}_pred" for cur_im in self.ims])
+    
+    @property
+    def ln_residual_keys(self) -> np.ndarray:
+        """Residual keys."""
+        return np.array([f"{cur_im}_ln_residual" for cur_im in self.ims])
 
     @property
     def pred_pSA_mean_keys(self) -> np.ndarray:
@@ -1918,3 +1923,57 @@ def get_input_tensor(
         return X, X_loc, pre_input_df.columns.tolist(), loc_feature_names
 
     return X, X_loc
+
+
+def compute_full_test_results(model_dir: Path, device: str):
+    """Compute test results for the specified full model."""
+    run_config = load_config(model_dir / "run_config.yaml")
+
+    logger.info("Preparing input dataframe")
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        record_info_df = imdb.get_record_info_df(events=run_config.test_events)
+        event_df = imdb.get_event_df()
+        site_df = imdb.get_site_df(add_nztm=True, min_grid_level=1, max_grid_level=1)
+
+        assert record_info_df.event_id.unique().size == run_config.test_events.size
+        record_info_df = record_info_df.loc[record_info_df.site_int_id.isin(site_df.index)]
+        im_df = imdb.get_im_data(run_config.ims, record_int_ids=record_info_df.index.values)
+
+        # Realisation source info
+        source_df = imdb.get_rel_df(rel_int_ids=record_info_df.rel_int_id.values)
+
+        # Get the distances
+        record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+            record_info_df.site_int_id.values, record_info_df.event_int_id.values
+        )
+
+        site_event_df = imdb.get_site_event_df(site_event_int_ids=record_info_df.site_event_int_id.values)
+
+    # Add event level source data
+    source_df["tect_type"] = event_df.loc[source_df.event_int_id].tect_type.values
+    source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
+    source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
+    source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
+    source_df["is_point_source"] = (
+        event_df.loc[source_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
+    ).astype(np.int32)
+
+    input_df = record_info_df[["site_int_id", "rel_int_id", "event_int_id", "site_event_int_id"]].copy()
+    input_df = input_df.join(site_df[run_config.site_inputs], on="site_int_id")
+    input_df = input_df.join(source_df[run_config.source_inputs], on="rel_int_id")
+    input_df = input_df.join(site_event_df[run_config.source_to_site_inputs], on="site_event_int_id")
+
+    if isinstance(run_config, LocAdjRunConfig) and run_config.loc_inputs is not None:
+        input_df = input_df.join(site_df[run_config.loc_inputs], on="site_int_id")
+
+    logger.info("Running predictions")
+    model = torch.load(
+        model_dir / "model.pt", weights_only=False, map_location=torch.device(device)
+    )
+    test_results_df = run_predictions(model, run_config, input_df, device) 
+
+    # Add true IM values & Save
+    test_results_df = test_results_df.join(im_df, on="record_int_id")    
+    test_results_df.to_parquet(model_dir / "test_results.parquet")
+
+

@@ -17,6 +17,7 @@ from sklearn.model_selection import StratifiedKFold
 
 from . import utils
 from . import nn_gmm
+from . import analysis
 from .imdb import DuckIMDB
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,7 @@ def train_loc_adj_cv(
         run_notebook=run_notebook,
     )
 
+
 def _run_adj_helper(
     cv_dir: Path,
     run_config: nn_gmm.LocAdjRunConfig,
@@ -305,9 +307,7 @@ def _run_adj_helper(
         root_logger.addHandler(file_handler)
     else:
         logger = utils.setup_logging(log_ffp, enable_console=False)
-        logger.info(
-            f"Running CV iteration {cv_dir.stem} on process {p_ix}."
-        )
+        logger.info(f"Running CV iteration {cv_dir.stem} on process {p_ix}.")
         logger.info(f"Sleeping for {10 * p_ix} seconds to stagger process start times.")
         time.sleep(10 * p_ix)
 
@@ -346,7 +346,54 @@ def _run_adj_helper(
         root_logger.removeHandler(file_handler)
 
     return output_dir
-        
+
+
+def compute_event_val_results(results_dir: Path):
+    """
+    Compute event-level validation results for the specified CV results directory,
+    by averaging across the realisations.
+    """
+    val_results = pd.read_parquet(results_dir / "val_results.parquet").sort_index()
+    run_config = nn_gmm.load_config(results_dir / "run_config.yaml")
+
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        record_info_df = imdb.get_record_info_df(
+            record_int_ids=val_results.index.values
+        ).sort_index()
+        sim_df = imdb.get_im_data(
+            run_config.ims, record_int_ids=val_results.index.values, log_ims=True
+        ).sort_index()
+
+    assert np.all(val_results.index.values == record_info_df.index.values)
+    assert np.all(sim_df.index.values == record_info_df.index.values)
+
+    val_results["event_int_id"] = record_info_df.loc[val_results.index, "event_int_id"]
+    val_results["site_int_id"] = record_info_df.loc[val_results.index, "site_int_id"]
+    sim_df["event_int_id"] = record_info_df.loc[sim_df.index, "event_int_id"]
+    sim_df["site_int_id"] = record_info_df.loc[sim_df.index, "site_int_id"]
+
+    # Compute mean event values for prediction and simulation
+    mean_event_preds = val_results.groupby(["event_int_id", "site_int_id"])[
+        run_config.pred_mean_keys
+    ].mean()
+    sim_mean_values = sim_df.groupby(["event_int_id", "site_int_id"])[
+        run_config.ims
+    ].mean()
+
+    # Compute residuals
+    assert mean_event_preds.index.equals(sim_mean_values.index)
+    event_res_df = pd.DataFrame(
+        index=mean_event_preds.index,
+        data=sim_mean_values[run_config.ims].values
+        - mean_event_preds[run_config.pred_mean_keys].values,
+        columns=run_config.ln_residual_keys,
+    )
+
+    event_results_df = pd.concat(
+        [mean_event_preds, sim_mean_values, event_res_df], axis=1
+    )
+    event_results_df.to_parquet(results_dir / "event_val_results.parquet")
+
 
 def _run_postprocessing(
     base_out_dir: Path,

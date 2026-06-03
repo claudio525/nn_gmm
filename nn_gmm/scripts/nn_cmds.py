@@ -2,6 +2,7 @@ import time
 import logging
 from pathlib import Path
 
+import pandas as pd
 import numpy as np
 import torch
 import typer
@@ -170,9 +171,34 @@ def run_mera(
     n_procs: int = 4,
     ims: list[str] = None,
 ):
-    """Run mixed effects residual analysis (MERA) on the CV validation residuals."""
-    nng.utils.setup_logging()
+    """Run mixed effects residual analysis (MERA) on the CV validation realisation residuals."""
+    logger = nng.utils.setup_logging()
+
+    logger.info("Getting NN residuals")
+    res_df, _, __, record_info_df = nng.analysis.get_nn_sim_residuals(result_dir)
+
     nng.analysis.run_nn_mera(
+        res_df,
+        record_info_df,
+        out_dir if out_dir else result_dir / f"mera{'_site_term' if site_term else ''}",
+        site_term=site_term,
+        n_procs=n_procs,
+        ims=ims,
+    )
+
+
+@app.command("run-event-mera")
+def run_event_mera(
+    result_dir: Path,
+    site_term: bool = False,
+    out_dir: Path = None,
+    n_procs: int = 4,
+    ims: list[str] = None,
+):
+    """
+    Run mixed effects residual analysis (MERA) on the CV validation event residuals."""
+    nng.utils.setup_logging()
+    nng.analysis.run_event_mera(
         result_dir, site_term=site_term, out_dir=out_dir, n_procs=n_procs, ims=ims
     )
 
@@ -223,11 +249,58 @@ def continue_hp_opt(study_dir: Path, n_trials: int, n_procs: int = 1):
 
 
 @app.command("compute-cv-shap-values")
-def compute_cv_shap_values(
-    result_dirs: Path, n_procs: int = 8):
+def compute_cv_shap_values(result_dirs: Path, n_procs: int = 8):
     """Compute SHAP values for the specified CV results."""
     nng.utils.setup_logging(console_level=logging.DEBUG)
     nng.analysis.compute_cv_shape_values(result_dirs, device, n_procs=n_procs)
+
+
+@app.command("compute-cv-event-val-results")
+def compute_cv_event_val_results(result_dirs: Path):
+    """
+    Compute event-level validation results for the specified CV results,
+    by averaging across the realisations.
+    """
+    nng.utils.setup_logging(console_level=logging.DEBUG)
+    nng.nn_gmm_cv.compute_event_val_results(result_dirs)
+
+
+@app.command("compute-full-test-results")
+def compute_full_test_results(model_dir: Path):
+    """Compute test results for the specified full model."""
+    nng.utils.setup_logging(console_level=logging.DEBUG)
+    nng.nn_gmm.compute_full_test_results(model_dir, device)
+
+
+@app.command("run-test-mera")
+def run_test_mera(
+    result_dir: Path,
+    site_term: bool = False,
+    out_dir: Path = None,
+    n_procs: int = 4,
+    ims: list[str] = None,
+):
+    """Run mixed effects residual analysis (MERA) on the full model test realisation residuals."""
+    logger = nng.utils.setup_logging()
+
+    if not (result_dir / "test_results.parquet").exists():
+        raise FileNotFoundError(
+            f"Test results not found in {result_dir}. Please run 'compute-full-test-results' command first."
+        )
+
+    logger.info("Getting NN residuals & running MERA")
+    res_df, _, __, record_info_df = nng.analysis.get_nn_sim_residuals(
+        result_dir, test_results=True
+    )
+    nng.analysis.run_nn_mera(
+        res_df,
+        record_info_df,
+        out_dir if out_dir else result_dir / f"test_mera{'_site_term' if site_term else ''}",
+        site_term=site_term,
+        n_procs=n_procs,
+        ims=ims,
+    )
+
 
 if __name__ == "__main__":
     app()

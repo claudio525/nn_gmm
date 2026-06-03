@@ -331,6 +331,24 @@ def get_ds_source_data():
 
 def rp_to_poe_string(rp: int) -> str:
     """Convert return period to nice PoE string."""
-    import seismic_hazard_analysis as sha
-    poe = sha.utils.rp_to_prob(rp, 50)
+    poe = rp_to_prob(rp, 50)
     return f"{int(np.round(poe * 100.0))}% in 50 Years"
+
+
+def rp_to_prob(rp: float, t: float = 1.0):
+    """
+    Converts return period to exceedance probability
+    Based on Poisson distribution
+
+    Parameters
+    ----------
+    rp: float
+        Return period
+    t: float
+        Time period of interest
+
+    Returns
+    -------
+    Exceedance probability
+    """
+    return 1 - np.exp(-t / rp)
