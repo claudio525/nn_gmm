@@ -1048,18 +1048,35 @@ def nn_rem_residual_maps(
     )
     std_rem_res_df = rem_res_df.groupby("site_id", observed=True)[ims].std()
     std_rem_res_df = std_rem_res_df.join(
-        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left" 
+        site_df[["site_id", "lon", "lat"]].set_index("site_id"), how="left"
     )
-    
+
     if n_procs == 1:
         for cur_im in ims:
-            _gen_rem_res_map(mean_rem_res_df, mean_abs_rem_res_df, std_rem_res_df, cur_im, grid_spacing, output_dir)
+            _gen_rem_res_map(
+                mean_rem_res_df,
+                mean_abs_rem_res_df,
+                std_rem_res_df,
+                cur_im,
+                grid_spacing,
+                output_dir,
+            )
     else:
         ctx = mp.get_context("spawn")
         with ctx.Pool(processes=n_procs) as pool:
             pool.starmap(
                 _gen_rem_res_map,
-                [(mean_rem_res_df, mean_abs_rem_res_df, std_rem_res_df, im, grid_spacing, output_dir) for im in ims],
+                [
+                    (
+                        mean_rem_res_df,
+                        mean_abs_rem_res_df,
+                        std_rem_res_df,
+                        im,
+                        grid_spacing,
+                        output_dir,
+                    )
+                    for im in ims
+                ],
             )
 
 
@@ -1131,9 +1148,7 @@ def _gen_rem_res_map(
         f"{utils.get_nice_im_name(im)} Remaining Residual (Std)",
         grid_spacing=grid_spacing,
     )
-    std_spatial_plot.plot_basin_boundaries().plot_sites(
-        std_rem_res_df, style="p0.015c"
-    )
+    std_spatial_plot.plot_basin_boundaries().plot_sites(std_rem_res_df, style="p0.015c")
     std_spatial_plot.save(output_dir / f"nn_rem_residual_std_map_{im}.png")
 
     mlt.utils.write_to_yaml(

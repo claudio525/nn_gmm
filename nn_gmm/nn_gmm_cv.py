@@ -102,6 +102,7 @@ def train_cv(
     fold_combs = [(i, j) for i in range(n_event_folds) for j in range(n_site_folds)]
 
     # Run CV
+    assert run_config.im_scale_params is None
     if n_procs == 1:
         out_dirs = []
         for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
@@ -167,6 +168,7 @@ def _run_helper(
     base_out_dir: Path,
     p_ix: int = None,
 ):
+    assert run_config.im_scale_params is None
     (out_dir := base_out_dir / f"cv_{cv_iter:02d}").mkdir(parents=True)
 
     # Set up logging

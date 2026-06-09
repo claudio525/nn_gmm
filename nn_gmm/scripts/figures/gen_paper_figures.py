@@ -1024,7 +1024,7 @@ def mera_model_bias_std(
 
     if full_base_model_results_dir is not None:
         full_base_test_mera_results = MeraResults.load_from_parquet(
-            full_base_model_results_dir / "test_mera_site_term"
+            full_base_model_results_dir / "test_mera"
         )
         full_base_periods = [
             nng.utils.get_pSA_period(im)
@@ -1035,7 +1035,7 @@ def mera_model_bias_std(
 
     if full_loc_model_results_dir is not None:
         full_loc_test_mera_results = MeraResults.load_from_parquet(
-            full_loc_model_results_dir / "test_mera_site_term"
+            full_loc_model_results_dir / "test_mera"
         )
         full_loc_periods = [
             nng.utils.get_pSA_period(im)
@@ -1221,7 +1221,8 @@ def mera_model_bias_std(
 
     # Remaining standard deviation
     bias_std_plot.add_std(
-        base_std_df["phi_w"], c="green", linestyle="solid", label=r"Remaining, $\phi_w$"
+        base_std_df["phi_w"], c="green", linestyle="solid", label=r"Remaining, $\phi_w$",
+        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
     )
     bias_std_plot.add_std(
         loc_adj_std_df["phi_w"],
@@ -1239,16 +1240,16 @@ def mera_model_bias_std(
     plt.close(bias_std_plot.fig)
 
     # Metadata
-    mlt.utils.write_to_yaml(
-        dict(
-            type=plot_type,
-            model_dir_1=str(base_model_results_dir),
-            model_dir_2=str(loc_adj_results_dir),
-            is_mera=True,
-        ),
-        output_ffp.with_suffix(".yaml"),
-        clobber=True,
-    )
+    # mlt.utils.write_to_yaml(
+    #     dict(
+    #         type=plot_type,
+    #         model_dir_1=str(base_model_results_dir),
+    #         model_dir_2=str(loc_adj_results_dir),
+    #         is_mera=True,
+    #     ),
+    #     output_ffp.with_suffix(".yaml"),
+    #     clobber=True,
+    # )
 
 
 @app.command("nn-gmm-site-term-map")

@@ -187,6 +187,43 @@ def run_mera(
     )
 
 
+# @app.command("run-cv-fold-mera")
+# def run_cv_fold_mera(
+#     result_dir: Path,
+#     site_term: bool = False,
+#     out_dir: Path = None,
+#     n_procs: int = 4,
+#     ims: list[str] = None,
+# ):
+#     """
+#     Run mixed effects residual analysis (MERA)
+#     on each CV fold validation realisation residuals.
+#     """
+#     logger = nng.utils.setup_logging()
+
+#     res_df, _, __, record_info_df = nng.analysis.get_nn_sim_residuals(result_dir)
+
+#     for cv_ix in res_df.cv_iter.unique():
+#         logger.info(f"Processing CV fold: {cv_ix}")
+#         cur_res_df = res_df.loc[res_df.cv_iter == cv_ix].copy()
+#         logger.info(f"Running MERA for CV fold {cv_ix} with {len(cur_res_df)} records")
+
+#         nng.analysis.run_nn_mera(
+#             cur_res_df,
+#             record_info_df,
+#             (
+#                 out_dir / f"cv_{cv_ix:02d}{'_site_term' if site_term else ''}"
+#                 if out_dir
+#                 else result_dir
+#                 / f"cv_{cv_ix:02d}"
+#                 / f"mera{'_site_term' if site_term else ''}"
+#             ),
+#             site_term=site_term,
+#             n_procs=n_procs,
+#             ims=ims,
+#         )
+
+
 @app.command("run-event-mera")
 def run_event_mera(
     result_dir: Path,
@@ -275,7 +312,6 @@ def compute_full_test_results(model_dir: Path):
 @app.command("run-test-mera")
 def run_test_mera(
     result_dir: Path,
-    site_term: bool = False,
     out_dir: Path = None,
     n_procs: int = 4,
     ims: list[str] = None,
@@ -292,11 +328,11 @@ def run_test_mera(
     res_df, _, __, record_info_df = nng.analysis.get_nn_sim_residuals(
         result_dir, test_results=True
     )
+
     nng.analysis.run_nn_mera(
         res_df,
         record_info_df,
-        out_dir if out_dir else result_dir / f"test_mera{'_site_term' if site_term else ''}",
-        site_term=site_term,
+        (out_dir if out_dir else result_dir / "test_mera"),
         n_procs=n_procs,
         ims=ims,
     )

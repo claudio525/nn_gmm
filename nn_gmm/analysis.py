@@ -119,6 +119,12 @@ def run_event_mera(
     n_procs: int = 4,
     ims: list[str] = None,
 ):
+    """
+    Computes MERA on the event-level residuals 
+    i.e., mean event simulation - mean event prediction
+
+    Crucially, this is not MERA at the record level!!!
+    """
     import mera
 
     run_config = nn_gmm.load_config(result_dir / "run_config.yaml")
@@ -187,17 +193,25 @@ def run_nn_mera(
     site_term: bool = False,
     n_procs: int = 4,
     ims: list[str] = None,
+    event_grouping: bool = True
 ):
-    """Run MERA on the specified NN model results."""
+    """
+    Run MERA on the NN residuals, at the record level.
+    
+    If event_grouping is True, then the residuals are grouped by event_id for MERA,
+    otherwise they are grouped by realisation id.!
+    """
     import mera
 
-    res_df["rel_id"] = record_info_df.loc[res_df.index, "rel_id"]
+    event_group_key = "event_id" if event_grouping else "rel_id"
+
+    res_df[event_group_key] = record_info_df.loc[res_df.index, event_group_key]
     res_df["site_id"] = record_info_df.loc[res_df.index, "site_id"]
 
     ims = constants.MERA_IMS if ims is None else ims
     mask = mera.mask_too_few_records(
-        res_df[ims + ["rel_id", "site_id"]],
-        "rel_id",
+        res_df[ims + [event_group_key, "site_id"]],
+        event_group_key,
         "site_id",
         min_num_records_per_event=5,
         min_num_records_per_site=5,
@@ -208,7 +222,7 @@ def run_nn_mera(
     mera_results = mera.run_mera(
         res_df,
         ims,
-        "rel_id",
+        event_group_key,
         "site_id",
         mask=mask,
         compute_site_term=site_term,

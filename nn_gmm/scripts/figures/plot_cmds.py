@@ -124,6 +124,7 @@ def nn_site_term_map(
     output_dir: Path,
     n_procs: int = 1,
     grid_spacing: str = "500e/500e",
+    test: bool = False,
 ):
     """
     Generate site term maps using NN-GMM CV results for specified IMs.
@@ -131,7 +132,7 @@ def nn_site_term_map(
     """
     nng.utils.setup_logging()
     nng.plots_spatial.nn_site_term_maps(
-        nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
+        nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing, test=test
     )
 
 @app.command("nn-rem-residual-map")
@@ -394,6 +395,18 @@ def nn_gmm_compare_site_bias_res_std(
     """
     nng.utils.setup_logging()
     nng.plots.site_bias_res_std_comparison(model_dirs, output_dir, dpi=300)
+
+@app.command("nn-mera-bias-res-std")
+def nn_mera_bias_res_std(
+    model_dir: Path,
+):
+    """
+    Creates bias and residual std plots 
+    (wrt period) from MERA results.
+    """
+    nng.utils.setup_logging()
+
+    nng.plots.nn_mera_bias_res_std(model_dir)
 
 
 @app.command("mera-basin-site-term")

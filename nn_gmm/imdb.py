@@ -471,12 +471,11 @@ class DuckIMDB:
 
             site_event_df = (
                 self._conn.execute(
-                    f"""
+                    """
                 SELECT se.*
                 FROM site_event se
                 INNER JOIN temp_site_ids sf
                 ON sf.site_int_id = se.site_int_id
-                {"WHERE se.rrup <= {}".format(max_rrup) if max_rrup is not None else ""}
                 """
                 )
                 .df()
@@ -499,6 +498,9 @@ class DuckIMDB:
                 .set_index("site_event_int_id")
             )
             logger.info(f"Took: {time.time() - start:.3f} to get all site-event data.")
+
+        if max_rrup is not None:
+            site_event_df = site_event_df[site_event_df["rrup"] <= max_rrup]
 
         site_event_df["site_id"] = self.site_int_to_id_mapping.loc[
             site_event_df.site_int_id.values

@@ -1,3 +1,4 @@
+import copy
 import time
 import os
 import logging
@@ -163,7 +164,7 @@ class BaseRunConfig:
     def pred_mean_keys(self) -> np.ndarray:
         """Predicted mean IM keys."""
         return np.array([f"{cur_im}_pred" for cur_im in self.ims])
-    
+
     @property
     def ln_residual_keys(self) -> np.ndarray:
         """Residual keys."""
@@ -423,7 +424,7 @@ class GMMRunConfig(BaseRunConfig):
             n_inputs += len(constants.NN_TECT_TYPES) - 1  # One-hot encoding
 
         return n_inputs
-    
+
     @property
     def model_inputs(self) -> list[str]:
         return self.site_inputs + self.source_inputs + self.source_to_site_inputs
@@ -579,7 +580,7 @@ class LocAdjRunConfig(BaseRunConfig):
     ### End pass through properties ###
 
     @property
-    def model_inputs(self) -> list[str]:    
+    def model_inputs(self) -> list[str]:
         """Model inputs for the location adjustment model."""
         return self.base_gmm_run_config.model_inputs + self.loc_inputs
 
@@ -863,6 +864,7 @@ def run_model_training(
         List of validation site IDs.
         Set to None to skip validation.
     """
+    run_config = copy.deepcopy(run_config)
     if train_record_ids is not None:
         assert (
             train_events is None
@@ -1678,6 +1680,7 @@ def run_predictions(
 
     return pred_df
 
+
 def _add_sample_weights(
     run_config: GMMRunConfig,
     record_info_df: pd.DataFrame,
@@ -1795,6 +1798,8 @@ def run_full_training(
             (site_df.grid_level == 0)
             | ((site_df["basin"] != "NiB") & (site_df.grid_level == 2))
         ]
+    else:
+        site_df = site_df.loc[site_df.grid_level == 0]
 
     events, sites = event_df.event_id.values.astype(str), site_df.site_id.values.astype(
         str
@@ -1879,6 +1884,8 @@ def get_input_dfs(run_config: BaseRunConfig, record_int_ids: np.ndarray):
     ].values
     assert np.isin(run_config.source_to_site_inputs, input_df.columns).all()
 
+    input_df = input_df.loc[input_df.rrup < run_config.max_rrup]
+
     return input_df
 
 
@@ -1904,9 +1911,7 @@ def get_input_tensor(
         input_df, run_config.source_to_site_inputs, run_config.max_rrup
     )
 
-    pre_input_df = pd.concat(
-        [pre_site_df, pre_source_df, pre_source_site_df], axis=1
-    )
+    pre_input_df = pd.concat([pre_site_df, pre_source_df, pre_source_site_df], axis=1)
     X = torch.from_numpy(pre_input_df.values).to(dtype=torch.float32, device=device)
 
     X_loc, loc_feature_names = None, None
@@ -1932,36 +1937,17 @@ def compute_full_test_results(model_dir: Path, device: str):
     logger.info("Preparing input dataframe")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         record_info_df = imdb.get_record_info_df(events=run_config.test_events)
-        event_df = imdb.get_event_df()
         site_df = imdb.get_site_df(add_nztm=True, min_grid_level=1, max_grid_level=1)
 
         assert record_info_df.event_id.unique().size == run_config.test_events.size
-        record_info_df = record_info_df.loc[record_info_df.site_int_id.isin(site_df.index)]
-        im_df = imdb.get_im_data(run_config.ims, record_int_ids=record_info_df.index.values)
-
-        # Realisation source info
-        source_df = imdb.get_rel_df(rel_int_ids=record_info_df.rel_int_id.values)
-
-        # Get the distances
-        record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
-            record_info_df.site_int_id.values, record_info_df.event_int_id.values
+        record_info_df = record_info_df.loc[
+            record_info_df.site_int_id.isin(site_df.index)
+        ]
+        im_df = imdb.get_im_data(
+            run_config.ims, record_int_ids=record_info_df.index.values
         )
 
-        site_event_df = imdb.get_site_event_df(site_event_int_ids=record_info_df.site_event_int_id.values)
-
-    # Add event level source data
-    source_df["tect_type"] = event_df.loc[source_df.event_int_id].tect_type.values
-    source_df["dip"] = event_df.loc[source_df.event_int_id].dip.values
-    source_df["dtop"] = event_df.loc[source_df.event_int_id].dtop.values
-    source_df["dbottom"] = event_df.loc[source_df.event_int_id].dbottom.values
-    source_df["is_point_source"] = (
-        event_df.loc[source_df.event_int_id].fault_type.values == "DS_POINT_SOURCE"
-    ).astype(np.int32)
-
-    input_df = record_info_df[["site_int_id", "rel_int_id", "event_int_id", "site_event_int_id"]].copy()
-    input_df = input_df.join(site_df[run_config.site_inputs], on="site_int_id")
-    input_df = input_df.join(source_df[run_config.source_inputs], on="rel_int_id")
-    input_df = input_df.join(site_event_df[run_config.source_to_site_inputs], on="site_event_int_id")
+    input_df = get_input_dfs(run_config, record_info_df.index.values)
 
     if isinstance(run_config, LocAdjRunConfig) and run_config.loc_inputs is not None:
         input_df = input_df.join(site_df[run_config.loc_inputs], on="site_int_id")
@@ -1970,10 +1956,8 @@ def compute_full_test_results(model_dir: Path, device: str):
     model = torch.load(
         model_dir / "model.pt", weights_only=False, map_location=torch.device(device)
     )
-    test_results_df = run_predictions(model, run_config, input_df, device) 
+    test_results_df = run_predictions(model, run_config, input_df, device)
 
     # Add true IM values & Save
-    test_results_df = test_results_df.join(im_df, on="record_int_id")    
+    test_results_df = test_results_df.join(im_df, on="record_int_id")
     test_results_df.to_parquet(model_dir / "test_results.parquet")
-
-

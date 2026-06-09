@@ -1381,3 +1381,94 @@ def bias_res_std_tect_type(cv_results_dir: Path, output_dir: Path):
     output_ffp = output_dir / "bias_resStd_tectType.png"
     bias_std_plot.fig.savefig(output_ffp)
     plt.close(bias_std_plot.fig)
+
+
+def nn_mera_bias_res_std(model_dir: Path):
+    """
+    Creates bias and residual standard deviation
+    plot based on MERA results for the NN-GMM model
+    """
+    from mera import MeraResults
+
+    assert (
+        mera_dir := model_dir / "mera_site_term"
+    ).exists(), "MERA results not found in model directory"
+
+    mera_results = MeraResults.load_from_parquet(mera_dir)
+    periods = [
+        utils.get_pSA_period(im)
+        for im in mera_results.bias_std_df.index.values.astype(str)
+    ]
+
+    bias_std_plot = BiasStdPlot(
+        figsize=constants.FIG_SIZE,
+        dpi=constants.FIG_DPI,
+        bias_ylim=(-0.5, 0.5),
+        std_ylim=(0, 0.95),
+        main_wspace=0.175,
+        left=0.07,
+    )
+
+    bias_std_plot.ax1.set_ylabel("Model prediction bias, a", labelpad=-2)
+    bias_std_plot.ax3.set_ylabel(r"Residual Standard Deviation, $\sigma$")
+
+    bias_std_df = mera_results.bias_std_df.copy()
+    bias_std_df.index = periods
+
+    # Bias
+    bias_std_plot.add_bias(
+        bias_std_df["bias"],
+        c="blue",
+        linestyle="-",
+        linewidth=constants.FIG_LINEWIDTH,
+    )
+
+    bias_std_plot.add_std(
+        bias_std_df["sigma"],
+        c="blue",
+        label=r"Total, $\sigma$",
+        linestyle="solid",
+        linewidth=constants.FIG_LINEWIDTH,
+    )
+    bias_std_plot.add_std(
+        bias_std_df["tau"],
+        c="purple",
+        label=r"Between-event, $\tau$",
+        linestyle="solid",
+        linewidth=constants.FIG_GROUP_LINEWIDTH,
+    )
+    bias_std_plot.add_std(
+        bias_std_df["phi_S2S"],
+        c="red",
+        linestyle="solid",
+        label=r"Site-to-site, $\phi_{S2S}$",
+        linewidth=constants.FIG_GROUP_LINEWIDTH,
+    )
+    bias_std_plot.add_std(
+        bias_std_df["phi_w"],
+        c="green",
+        linestyle="solid",
+        label=r"Remaining, $\phi_w$",
+        linewidth=constants.FIG_GROUP_LINEWIDTH,
+    )
+
+    bias_std_plot.add_legend(bias_std_plot.ax3)
+    bias_std_plot.ax3.yaxis.set_major_locator(plt.MultipleLocator(0.2))
+
+    output_ffp = model_dir / "plots/nn_mera_bias_res_std.png"
+    bias_std_plot.fig.savefig(
+        output_ffp,
+        dpi=constants.FIG_DPI,
+    )
+
+    # Metadata
+    mlt.utils.write_to_yaml(
+        dict(
+            type="mera_model_bias_std",
+            model=str(model_dir.name),
+            is_mera=True,
+        ),
+        output_ffp.with_suffix(".yaml"),
+        clobber=True,
+    )
+
