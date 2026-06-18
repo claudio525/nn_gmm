@@ -13,7 +13,6 @@ import nn_gmm as nng
 from qcore import coordinates as coords
 from qcore import nhm
 import workflow.realisations as wr
-from source_modelling import sources
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", level=logging.INFO

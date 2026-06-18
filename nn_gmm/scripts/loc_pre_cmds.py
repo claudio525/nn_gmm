@@ -1,6 +1,5 @@
 import multiprocessing as mp
 import logging
-import functools
 import shutil
 from pathlib import Path
 
