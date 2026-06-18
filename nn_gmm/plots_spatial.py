@@ -81,6 +81,11 @@ class SpatialPlot:
         FONT_LABEL=constants.GMT_FIG_FONT_LABEL,
     )
 
+    
+    CHCH_COORDS = (172.63669300877544, -43.531923487539935)
+    WELLINGTON_COORDS = (174.77791888634852, -41.28387793785542)
+    AUCKLAND_COORDS = (174.76555503318232, -36.850282550438685)
+
     def __init__(
         self, plot_kwargs: dict = None, config_options: dict = None, **fig_kwargs
     ):
@@ -103,6 +108,42 @@ class SpatialPlot:
             config_options=config_options,
             plot_kwargs=plot_kwargs,
         )
+
+    def add_main_city_labels(self, **plot_kwargs):
+        """Adds labels for main cities to the existing figure."""
+        plot_kwargs = {
+            "style": "c0.3c",
+            "pen": "0.75p,black",
+            "fill": None
+        }
+        
+        self.fig.plot(x=self.CHCH_COORDS[0], y=self.CHCH_COORDS[1], **plot_kwargs)
+        self.fig.text(
+            x=self.CHCH_COORDS[0],
+            y=self.CHCH_COORDS[1],
+            text="Christchurch",
+            font=constants.GMT_FIG_FONT_LABEL,
+            offset="1.55c/0.2c",
+        )
+
+        self.fig.plot(x=self.WELLINGTON_COORDS[0], y=self.WELLINGTON_COORDS[1], **plot_kwargs)
+        self.fig.text(
+            x=self.WELLINGTON_COORDS[0],
+            y=self.WELLINGTON_COORDS[1],
+            text="Wellington",
+            font=constants.GMT_FIG_FONT_LABEL,
+            offset="0.5c/-0.45c",
+        )
+
+        self.fig.plot(x=self.AUCKLAND_COORDS[0], y=self.AUCKLAND_COORDS[1], **plot_kwargs)
+        self.fig.text(
+            x=self.AUCKLAND_COORDS[0],
+            y=self.AUCKLAND_COORDS[1],
+            font=constants.GMT_FIG_FONT_LABEL,
+            text="Auckland",
+            offset="-1.3c/0.1c",
+        )
+        
 
     def plot_coastline(self, **plot_kwargs):
         """Adds the coastline to the existing figure."""
@@ -389,7 +430,7 @@ class SpatialPlot:
 
         return self
 
-    def save(self, output_ffp: Path, dpi: int = 900):
+    def save(self, output_ffp: Path, dpi: int = constants.FIG_DPI):
         self.fig.savefig(output_ffp, dpi=dpi, anti_alias=True)
 
 
@@ -449,6 +490,7 @@ def hazard_ratio_map(
     is_mp: bool = False,
     grid_spacing: str = "250e/250e",
     cb_max: float = 2.0,
+    save_metadata: bool = True,
 ):
     if is_mp:
         import pygmt
@@ -494,7 +536,7 @@ def hazard_ratio_map(
             res_df,
             rp,
             grid_spacing=grid_spacing,
-            cmap_limits=(-cb_max, cb_max, (2 * cb_max) / 10),
+            cmap_limits=(-cb_max, cb_max, (2 * cb_max) / 12),
             cb_label=f"{utils.get_nice_im_name(im)} - {cb_label_suffix}",
             transparency=25,
         )
@@ -504,22 +546,31 @@ def hazard_ratio_map(
             offset="0.5c/-0.5c",
             font=constants.GMT_FIG_FONT_LABEL,
         )
+        plot.fig.text(
+            position="TL",
+            text=f"IM: {utils.get_nice_im_name(im)}",
+            offset="0.5c/-1.1c",
+            font=constants.GMT_FIG_FONT_LABEL,
+        )
+
+        plot.add_main_city_labels()
 
         out_ffp = (
             output_dir
             / f"{filename_prefix}hazard_ratio_{utils.get_im_filename(im)}_rp{rp}.png"
         )
         plot.save(out_ffp)
-        mlt.utils.write_to_yaml(
-            dict(
-                type="ds-hazard-ratio-map",
-                im=im,
-                rp=rp,
-                filename_prefix=filename_prefix,
-            ),
-            out_ffp.with_suffix(".yaml"),
-            clobber=True,
-        )
+        if save_metadata:
+            mlt.utils.write_to_yaml(
+                dict(
+                    type="ds-hazard-ratio-map",
+                    im=im,
+                    rp=rp,
+                    filename_prefix=filename_prefix,
+                ),
+                out_ffp.with_suffix(".yaml"),
+                clobber=True,
+            )
 
 
 def hazard_maps(
@@ -574,6 +625,7 @@ def hazard_map(
     grid_spacing: str = "250e/250e",
     title: str | None = None,
     filename_prefix: str | None = None,
+    save_metadata: bool = True,
 ):
     if is_mp:
         import pygmt
@@ -665,6 +717,14 @@ def hazard_map(
             offset="0.5c/-1.1c",
             font=constants.GMT_FIG_FONT_LABEL,
         )
+        plot.fig.text(
+            position="TL",
+            text=f"IM: {utils.get_nice_im_name(im)}",
+            offset="0.5c/-1.7c",
+            font=constants.GMT_FIG_FONT_LABEL,
+        )
+
+        plot.add_main_city_labels()
 
         out_ffp = (
             output_dir
@@ -672,17 +732,18 @@ def hazard_map(
         )
         plot.save(out_ffp)
 
-        mlt.utils.write_to_yaml(
-            dict(
-                type=f"{'total' if add_flt_hazard else 'ds'}-hazard-map",
-                im=im,
-                rp=rp,
-                filename_prefix=filename_prefix,
-                plot_type="map",
-            ),
-            out_ffp.with_suffix(".yaml"),
-            clobber=True,
-        )
+        if save_metadata:
+            mlt.utils.write_to_yaml(
+                dict(
+                    type=f"{'total' if add_flt_hazard else 'ds'}-hazard-map",
+                    im=im,
+                    rp=rp,
+                    filename_prefix=filename_prefix,
+                    plot_type="map",
+                ),
+                out_ffp.with_suffix(".yaml"),
+                clobber=True,
+            )
 
 
 def basin_site_map(
@@ -930,7 +991,7 @@ def cv_mean_pred_std_map(
         mean_pred_std_df,
         f"{im}_pred_std",
         f"Mean Predicted Std - {utils.get_nice_im_name(im)}",
-        (0.0, 1.0, 0.1),
+        (0.2, 0.8, 0.05),
         grid_spacing=grid_spacing,
     )
 

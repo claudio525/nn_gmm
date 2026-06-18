@@ -1,5 +1,8 @@
 rel_base_model_dir: null
 
+extra_basin_sites: True
+extra_basin_sites_weight_factor: null
+
 loc_inputs:
   - "nztm_x"
   - "nztm_y"
@@ -9,13 +12,13 @@ loc_emb_dim: null
 loc_emb_model_config: null
 
 adj_model_config:
-  units: []
-  activation: "leaky_relu"
+  units: [64]
+  activation: "elu"
   use_batch_norm: False
-  dropout_rate: 0.0
-  l2_reg: 0.0005
+  dropout_rate: 0.05
+  l2_reg: 0.001
 
-n_epochs: 100
+n_epochs: 25
 batch_size: 512
 adj_learning_rate: 0.001
 loc_learning_rate: 0.0001

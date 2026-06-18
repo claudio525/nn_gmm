@@ -17,7 +17,6 @@ from sklearn.model_selection import StratifiedKFold
 
 from . import utils
 from . import nn_gmm
-from . import analysis
 from .imdb import DuckIMDB
 
 logger = logging.getLogger(__name__)
@@ -128,7 +127,7 @@ def train_cv(
                 _run_helper,
                 [
                     (
-                        run_config,
+                        copy.deepcopy(run_config),
                         event_df,
                         site_df,
                         event_folds,
@@ -450,13 +449,13 @@ def _run_postprocessing(
             (cur_cv_dir / "val_results.parquet").unlink(missing_ok=True)
             (cur_cv_dir / "train_results.parquet").unlink(missing_ok=True)
 
-    if run_notebook:
-        results_report_notebook_ffp = (
-            Path(__file__).parent / "result_notebooks/cv_result_analysis.ipynb"
-        )
-        mlt.quarto.render_quarto(
-            "mamba activate nn-gmm-gmt",
-            results_report_notebook_ffp,
-            base_out_dir / "results_report.html",
-            result_dir=str(base_out_dir),
-        )
+    # if run_notebook:
+    #     results_report_notebook_ffp = (
+    #         Path(__file__).parent / "result_notebooks/cv_result_analysis.ipynb"
+    #     )
+    #     mlt.quarto.render_quarto(
+    #         "mamba activate nn-gmm-gmt",
+    #         results_report_notebook_ffp,
+    #         base_out_dir / "results_report.html",
+    #         result_dir=str(base_out_dir),
+    #     )

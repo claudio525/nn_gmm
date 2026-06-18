@@ -59,6 +59,9 @@ class BaseRunConfig:
     extra_basin_sites: bool
     """Whether to include extra basin sites."""
 
+    extra_basin_sites_weight_factor: float
+    """Weight factor for extra basin sites. Applied after other sample weighting."""
+
     im_set: str
     """IM set to use"""
 
@@ -228,6 +231,11 @@ class BaseRunConfig:
             "max_rrup": float(self.max_rrup),
             "ignore_events": self.ignore_events,
             "extra_basin_sites": bool(self.extra_basin_sites),
+            "extra_basin_sites_weight_factor": (
+                float(self.extra_basin_sites_weight_factor)
+                if self.extra_basin_sites_weight_factor is not None
+                else None
+            ),
             "device": self.device,
             "im_set": str(self.im_set),
             "scale_ims": self.scale_ims,
@@ -662,6 +670,13 @@ class LocAdjRunConfig(BaseRunConfig):
 
         adj_model_config = ModelConfig.from_dict(d.pop("adj_model_config"))
         d["adj_model_config"] = adj_model_config
+
+        assert (
+            "extra_basin_sites" in d
+        ), "extra_basin_sites must be specified in the config"
+        assert (
+            "extra_basin_sites_weight_factor" in d
+        ), "extra_basin_sites_weight_factor must be specified in the config"
 
         # Add common fields from base GMM config
         missing_base_config_fields = [
@@ -1114,13 +1129,13 @@ def run_model_training(
     metrics_df.to_parquet(output_dir / "metrics.parquet")
 
     np.save(output_dir / "train_record_ids.npy", train_record_ids)
-    np.save(output_dir / "train_events.npy", train_events)
-    np.save(output_dir / "train_sites.npy", train_sites)
+    if train_events is not None:
+        np.save(output_dir / "train_events.npy", train_events)
+        np.save(output_dir / "train_sites.npy", train_sites)
     if val_record_ids is not None:
         np.save(output_dir / "val_record_ids.npy", val_record_ids)
         if val_events is not None:
             np.save(output_dir / "val_events.npy", val_events)
-        if val_sites is not None:
             np.save(output_dir / "val_sites.npy", val_sites)
 
     torch.save(model, output_dir / "model.pt")
@@ -1736,6 +1751,24 @@ def _add_sample_weights(
             0,
             run_config.total_max_weight,
         )
+
+        if (
+            run_config.extra_basin_sites
+            and run_config.extra_basin_sites_weight_factor is not None
+        ):
+            logger.info(
+                f"Applying extra weight factor of {run_config.extra_basin_sites_weight_factor} to basin sites"
+            )
+            extra_basin_records = record_info_df.site_int_id.isin(
+                site_df.loc[site_df.grid_level == 2].index.values
+            )
+            record_info_df.loc[
+                extra_basin_records, "sample_weight"
+            ] = record_info_df.loc[extra_basin_records, "sample_weight"].values.astype(
+                np.float32
+            ) * np.float32(
+                run_config.extra_basin_sites_weight_factor
+            )
 
         assert not record_info_df["sample_weight"].isna().any()
 
