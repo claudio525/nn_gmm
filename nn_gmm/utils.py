@@ -329,6 +329,7 @@ def get_ds_source_data():
 
     return ds_source_df, ds_erf_df
 
+
 def rp_to_poe_string(rp: int) -> str:
     """Convert return period to nice PoE string."""
     poe = rp_to_prob(rp, 50)

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nn_gmm"
+version = "v2026.6.19"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Claudio Schill" }]
+description = "Package for: Combining Direct Simulation and Surrogate Modelling for Simulation-Consistent Probabilistic Seismic Hazard Analysis"
+readme = "README.md"
+dependencies = [
+    "source_modelling==2026.05.1",
+    "pygmt-helper==2025.12.1",
+    "seismic-hazard-analysis==2026.6.1",
+    "qcore-utils==2025.12.2",
+    "oq-wrapper==2026.05.1",
+    "cs-ml-tools==2026.06.1",
+    "openquake-engine==3.25.1",
+    "pygmt==0.16.0",
+    "pandas==2.3.1",
+    "geopandas==1.1.1",
+    "scipy==1.16.1",
+    "torch==2.8.0",
+    "einops==0.8.1",
+    "matplotlib==3.10.1",
+    "scikit-learn==1.7.2",
+    "typer==0.17.4",
+    "optuna==4.5.0",
+    "shap==0.48.0",
+]
+
+[tool.setuptools.package-dir]
+nn_gmm = "nn_gmm"
