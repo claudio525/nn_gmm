@@ -245,8 +245,8 @@ NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-co
 HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/morteza_cs200_hazard"
 
 
-DS_ERF_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZ_DSmodel_2010.txt"
-DS_SOURCE_FFP = WDATA / "nn_gmm/morteza_cs200_hazard/NZBCK211_OpenSHA.txt"
+DS_ERF_FFP = WDATA / "nn_gmm/cs200_hazard/NZ_DSmodel_2010.txt"
+DS_SOURCE_FFP = WDATA / "nn_gmm/cs200_hazard/NZBCK211_OpenSHA.txt"
 
 LEE_NZ_VAL_BIAS_STD_FFP = WDATA / "nn_gmm/other/lee_nz_validation_2022/PJSvarCompsBiased_sim.csv"
 DUPUIS_SMALL_INT_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_small_mag/dupuis_small_mag_interface.csv"

@@ -17,6 +17,7 @@ dependencies = [
     "oq-wrapper==2026.05.1",
     "cs-ml-tools==2026.06.1",
     "openquake-engine==3.25.1",
+    "mera @ git+https://github.com/ucgmsim/mera.git@v2026.06.1",
     "pygmt==0.16.0",
     "pandas==2.3.1",
     "geopandas==1.1.1",
