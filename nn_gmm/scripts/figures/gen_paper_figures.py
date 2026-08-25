@@ -944,9 +944,7 @@ def mera_basin_site_term(
     bias_std_plot.add_legend(bias_std_plot.ax3)
 
     legend_elements = {
-        mlines.Line2D(
-            [], [], color="black", linestyle="--", label="Location"
-        ),
+        mlines.Line2D([], [], color="black", linestyle="--", label="Location"),
         mlines.Line2D([], [], color="black", linestyle="-", label="Base"),
     }
     bias_std_plot.ax1.legend(handles=legend_elements)
@@ -980,6 +978,7 @@ def mera_model_bias_std(
     for MERA results of two models.
     """
     from mera import MeraResults
+
     nng.utils.setup_logging()
     _fig_settings()
 
@@ -1050,7 +1049,7 @@ def mera_model_bias_std(
         std_ylim=(0, 0.95),
         main_wspace=0.175,
         left=0.07,
-        add_over_under_text=False if event_mera else True
+        add_over_under_text=False if event_mera else True,
     )
     if event_mera:
         bias_std_plot.ax1.set_ylabel(
@@ -1085,8 +1084,12 @@ def mera_model_bias_std(
             linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
         )
 
-        dupuis_small_mag_interface = _load_duipuis(nng.constants.DUPUIS_SMALL_INT_BIAS_STD_FFP)
-        dupuis_small_mag_slab = _load_duipuis(nng.constants.DUPUIS_SMALL_SLAB_BIAS_STD_FFP)
+        dupuis_small_mag_interface = _load_duipuis(
+            nng.constants.DUPUIS_SMALL_INT_BIAS_STD_FFP
+        )
+        dupuis_small_mag_slab = _load_duipuis(
+            nng.constants.DUPUIS_SMALL_SLAB_BIAS_STD_FFP
+        )
 
         bias_std_plot.add_bias(
             dupuis_small_mag_interface["bias"],
@@ -1122,19 +1125,62 @@ def mera_model_bias_std(
     bias_std_plot.add_bias(
         base_std_df["bias"],
         c="blue",
-        label="Base",
+        label="Surrogate",
         linestyle="-",
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
-    bias_std_plot.add_bias(
-        loc_adj_std_df["bias"],
-        c="blue",
-        label="Location",
-        linestyle="--",
-        linewidth=nng.constants.FIG_LINEWIDTH,
-    )
+    # bias_std_plot.add_bias(
+    #     loc_adj_std_df["bias"],
+    #     c="blue",
+    #     label="Location",
+    #     linestyle="--",
+    #     linewidth=nng.constants.FIG_LINEWIDTH,
+    # )
 
-    bias_std_plot.add_legend(bias_std_plot.ax1)
+    if show_sim:
+        sim_handles = [
+            mlines.Line2D(
+                [],
+                [],
+                color="k",
+                label="Lee et al. (2022)",
+                linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+            ),
+            mlines.Line2D(
+                [],
+                [],
+                color="gray",
+                linestyle="--",
+                label="Dupuis et al. (2025) - Interface",
+                linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+            ),
+            mlines.Line2D(
+                [],
+                [],
+                color="gray",
+                linestyle="-",
+                label="Dupuis et al. (2025) - Slab",
+                linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+            ),
+        ]
+        sim_legend = bias_std_plot.ax1.legend(
+            handles=sim_handles, loc="upper left", title="Simulation Validation Studies",
+            # title_fontproperties={"weight": "bold"}
+        )
+        sim_legend._legend_box.align = "left"
+        bias_std_plot.ax1.add_artist(sim_legend)
+
+    surrogate_handles = [
+        mlines.Line2D(
+            [],
+            [],
+            color="blue",
+            label="Surrogate",
+            linestyle="-",
+            linewidth=nng.constants.FIG_LINEWIDTH,
+        )
+    ]
+    bias_std_plot.ax1.legend(handles=surrogate_handles, loc="lower right")
 
     # Total standard deviation
     if show_sim:
@@ -1181,56 +1227,56 @@ def mera_model_bias_std(
         linestyle="solid",
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
-    bias_std_plot.add_std(
-        loc_adj_std_df["sigma"],
-        c="blue",
-        linestyle="--",
-        linewidth=nng.constants.FIG_LINEWIDTH,
-    )
+    # bias_std_plot.add_std(
+    #     loc_adj_std_df["sigma"],
+    #     c="blue",
+    #     linestyle="--",
+    #     linewidth=nng.constants.FIG_LINEWIDTH,
+    # )
 
-    # Between-event standard deviation
-    bias_std_plot.add_std(
-        base_std_df["tau"],
-        c="purple",
-        label=r"Between-event, $\tau$",
-        linestyle="solid",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
-    bias_std_plot.add_std(
-        loc_adj_std_df["tau"],
-        c="purple",
-        linestyle="--",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
+    # # Between-event standard deviation
+    # bias_std_plot.add_std(
+    #     base_std_df["tau"],
+    #     c="purple",
+    #     label=r"Between-event, $\tau$",
+    #     linestyle="solid",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
+    # bias_std_plot.add_std(
+    #     loc_adj_std_df["tau"],
+    #     c="purple",
+    #     linestyle="--",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
 
-    # Site-term standard deviation
-    bias_std_plot.add_std(
-        base_std_df["phi_S2S"],
-        c="red",
-        linestyle="solid",
-        label=r"Site-to-site, $\phi_{S2S}$",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
-    bias_std_plot.add_std(
-        loc_adj_std_df["phi_S2S"],
-        c="red",
-        linestyle="--",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
+    # # Site-term standard deviation
+    # bias_std_plot.add_std(
+    #     base_std_df["phi_S2S"],
+    #     c="red",
+    #     linestyle="solid",
+    #     label=r"Site-to-site, $\phi_{S2S}$",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
+    # bias_std_plot.add_std(
+    #     loc_adj_std_df["phi_S2S"],
+    #     c="red",
+    #     linestyle="--",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
 
-    # Remaining standard deviation
-    bias_std_plot.add_std(
-        base_std_df["phi_w"], c="green", linestyle="solid", label=r"Remaining, $\phi_w$",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
-    bias_std_plot.add_std(
-        loc_adj_std_df["phi_w"],
-        c="green",
-        linestyle="dashed",
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
+    # # Remaining standard deviation
+    # bias_std_plot.add_std(
+    #     base_std_df["phi_w"], c="green", linestyle="solid", label=r"Remaining, $\phi_w$",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
+    # bias_std_plot.add_std(
+    #     loc_adj_std_df["phi_w"],
+    #     c="green",
+    #     linestyle="dashed",
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
 
-    bias_std_plot.add_legend(bias_std_plot.ax3)
+    # bias_std_plot.add_legend(bias_std_plot.ax3)
     bias_std_plot.ax3.yaxis.set_major_locator(plt.MultipleLocator(0.2))
 
     plot_type = "event_mera_model_bias_std" if event_mera else "mera_model_bias_std"
@@ -1283,13 +1329,15 @@ def nn_gmm_site_term_map(
     spatial_plot.add_main_city_labels()
 
     spatial_plot.fig.text(
-            position="TL",
-            text=f"IM: {nng.utils.get_nice_im_name(im)}",
-            offset="0.5c/-0.5c",
-            font=nng.constants.GMT_FIG_FONT_LABEL,
-        )
+        position="TL",
+        text=f"IM: {nng.utils.get_nice_im_name(im)}",
+        offset="0.5c/-0.5c",
+        font=nng.constants.GMT_FIG_FONT_LABEL,
+    )
 
-    spatial_plot.save(output_dir / f"{prefix}_site_term_map_{nng.utils.get_im_filename(im)}.png")
+    spatial_plot.save(
+        output_dir / f"{prefix}_site_term_map_{nng.utils.get_im_filename(im)}.png"
+    )
 
 
 @app.command("ds-hazard-map")
@@ -1351,7 +1399,7 @@ def total_hazard_map(
         grid_spacing=grid_spacing,
         title=title,
         filename_prefix=filename_prefix,
-        save_metadata=False
+        save_metadata=False,
     )
 
 
@@ -1384,7 +1432,7 @@ def hazard_ratio_map(
         filename_prefix,
         grid_spacing=grid_spacing,
         cb_max=cb_max,
-        save_metadata=False
+        save_metadata=False,
     )
 
 
@@ -1924,25 +1972,23 @@ def single_site_hazard_plot(
     (base_ds_line,) = ax.loglog(
         base_ds_hazard.index.values,
         base_ds_hazard.values,
-        label="Base Model DS Hazard",
         color="blue",
         linestyle="dashed",
         # linewidth=nng.constants.FIG_LINEWIDTH,
         linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
     )
-    (loc_ds_line,) = ax.loglog(
-        loc_ds_hazard.index.values,
-        loc_ds_hazard.values,
-        label="Location Model DS Hazard",
-        color="red",
-        linestyle="dashed",
-        # linewidth=nng.constants.FIG_LINEWIDTH,
-        linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
-    )
+    # (loc_ds_line,) = ax.loglog(
+    #     loc_ds_hazard.index.values,
+    #     loc_ds_hazard.values,
+    #     label="Location Model DS Hazard",
+    #     color="red",
+    #     linestyle="dashed",
+    #     # linewidth=nng.constants.FIG_LINEWIDTH,
+    #     linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
+    # )
     (emp_ds_line,) = ax.loglog(
         emp_ds_hazard.index.values,
         emp_ds_hazard.values,
-        label="Empirical GM LT DS Hazard",
         color="green",
         linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
         # linewidth=nng.constants.FIG_LINEWIDTH,
@@ -1951,7 +1997,6 @@ def single_site_hazard_plot(
     (cs_flt_line,) = ax.loglog(
         cs_flt_hazard.index.values,
         cs_flt_hazard.values,
-        label="Cybershake Fault Hazard",
         color="black",
         linestyle="dashdot",
         # linewidth=nng.constants.FIG_LINEWIDTH,
@@ -1962,23 +2007,21 @@ def single_site_hazard_plot(
         base_ds_hazard.values + cs_flt_hazard.values,
         color="blue",
         linestyle="solid",
-        label="Base Model Total Hazard",
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
-    (loc_total_line,) = ax.loglog(
-        loc_ds_hazard.index.values,
-        loc_ds_hazard.values + cs_flt_hazard.values,
-        color="red",
-        linestyle="solid",
-        label="Location Model Total Hazard",
-        linewidth=nng.constants.FIG_LINEWIDTH,
-    )
+    # (loc_total_line,) = ax.loglog(
+    #     loc_ds_hazard.index.values,
+    #     loc_ds_hazard.values + cs_flt_hazard.values,
+    #     color="red",
+    #     linestyle="solid",
+    #     label="Location Model Total Hazard",
+    #     linewidth=nng.constants.FIG_LINEWIDTH,
+    # )
     (emp_total_line,) = ax.loglog(
         emp_ds_hazard.index.values,
         emp_ds_hazard.values + cs_flt_hazard.values,
         color="green",
         linestyle="solid",
-        label="Empirical GM LT Total Hazard",
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
 
@@ -2020,12 +2063,12 @@ def single_site_hazard_plot(
                 _make_line_proxy(emp_total_line),
             ),
             (_make_line_proxy(base_ds_line), _make_line_proxy(base_total_line)),
-            (_make_line_proxy(loc_ds_line), _make_line_proxy(loc_total_line)),
+            # (_make_line_proxy(loc_ds_line), _make_line_proxy(loc_total_line)),
         ],
         labels=[
             "Empirical",
-            "Surrogate: Base",
-            "Surrogate: Location",
+            "Surrogate",
+            # "Surrogate: Location",
         ],
         loc="upper right",
         handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
@@ -2039,13 +2082,13 @@ def single_site_hazard_plot(
             (
                 _make_line_proxy(emp_total_line),
                 _make_line_proxy(base_total_line),
-                _make_line_proxy(loc_total_line),
+                # _make_line_proxy(loc_total_line),
             ),
             _make_line_proxy(cs_flt_line),
             (
                 _make_line_proxy(emp_ds_line),
                 _make_line_proxy(base_ds_line),
-                _make_line_proxy(loc_ds_line),
+                # _make_line_proxy(loc_ds_line),
             ),
         ],
         labels=["Total", "Cybershake: Fault", "Distributed Seismicity"],
