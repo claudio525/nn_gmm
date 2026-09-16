@@ -180,7 +180,7 @@ def create_imdb(
 
             # Add hypocentre information
             cur_fault = faults[cur_event]
-            s = ((cur_fault.length / 2) - rel_df.shypo.values) / cur_fault.length
+            s = ((cur_fault.length / 2) + rel_df.shypo.values) / cur_fault.length
             d = rel_df.dhypo.values / cur_fault.width
             hypo_info = np.stack(
                 [
