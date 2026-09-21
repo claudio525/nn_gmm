@@ -1,10 +1,9 @@
 import logging
 from collections.abc import Sequence
 
-import torch
-import torch.nn as nn
-
 import ml_tools as mlt
+import torch
+from torch import nn
 
 logger = logging.getLogger(__name__)
 

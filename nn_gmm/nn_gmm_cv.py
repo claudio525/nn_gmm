@@ -1,22 +1,20 @@
 """Module for running custom CV for NN-GMM models."""
 
-import os
-import gc
-import time
 import copy
+import gc
 import logging
-from pathlib import Path
 import multiprocessing as mp
+import os
+import time
+from pathlib import Path
 
-import torch
 import numpy as np
 import pandas as pd
+import torch
 import xarray as xr
-import ml_tools as mlt
 from sklearn.model_selection import StratifiedKFold
 
-from . import utils
-from . import nn_gmm
+from . import nn_gmm, utils
 from .imdb import DuckIMDB
 
 logger = logging.getLogger(__name__)
@@ -28,7 +26,7 @@ def train_cv(
     n_site_folds: int,
     base_out_dir: Path,
     device: str = "cpu",
-    n_sites: int = None,
+    n_sites: int | None = None,
     n_procs: int = 1,
     run_notebook: bool = True,
     remove_cv_results: bool = False,
@@ -107,7 +105,7 @@ def train_cv(
         for cv_iter, (train_folds_ind, val_fold_ind) in enumerate(
             get_cv_iterator(fold_combs)
         ):
-            logging.info(f"Running CV iteration {cv_iter + 1}/{len(fold_combs)}")
+            logger.info(f"Running CV iteration {cv_iter + 1}/{len(fold_combs)}")
             cur_out_dir = _run_helper(
                 copy.deepcopy(run_config),
                 event_df,
@@ -121,7 +119,7 @@ def train_cv(
             )
             out_dirs.append(cur_out_dir)
     else:
-        logging.info(f"Running CV with {n_procs} processes.")
+        logger.info(f"Running CV with {n_procs} processes.")
         with mp.Pool(n_procs, maxtasksperchild=1) as pool:
             out_dirs = pool.starmap(
                 _run_helper,
@@ -407,7 +405,7 @@ def _run_postprocessing(
     run_config.to_yaml(base_out_dir / "run_config.yaml")
 
     # Combine validation results & metrics
-    logging.info("Combining validation results and metrics.")
+    logger.info("Combining validation results and metrics.")
     val_results, metrics = [], {}
     for cur_out_dir in out_dirs:
         cur_val_result = pd.read_parquet(cur_out_dir / "val_results.parquet")
@@ -428,7 +426,7 @@ def _run_postprocessing(
     )
 
     # Create xarray DataArray from metrics
-    logging.info("Saving metrics")
+    logger.info("Saving metrics")
     cv_iters = list(metrics.keys())
     metrics_array = np.stack([metrics[cv_iter].values for cv_iter in cv_iters], axis=0)
     metrics_da = xr.DataArray(

@@ -1,28 +1,23 @@
 import copy
-import time
-import os
 import logging
-from pathlib import Path
+import os
+import time
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import NamedTuple
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import einops
+import ml_tools as mlt
 import numpy as np
 import pandas as pd
+import torch
+import torch.nn.functional as F
+from torch import nn
 from tqdm import tqdm
 
-import ml_tools as mlt
-
-from . import DuckIMDB
-from . import preprocessing
-from . import data
-from . import obs_data as obsd
-from . import constants
-from . import utils
+from . import DuckIMDB, constants, data, preprocessing, utils
 from . import nn_gmm_modules as modules
+from . import obs_data as obsd
 
 logger = logging.getLogger(__name__)
 
@@ -424,8 +419,8 @@ class GMMRunConfig(BaseRunConfig):
     def n_inputs(self) -> int:
         """Get the number of inputs for the model."""
         n_inputs = (
-            len((self.site_inputs))
-            + len((self.source_inputs))
+            len(self.site_inputs)
+            + len(self.source_inputs)
             + len(self.source_to_site_inputs)
         )
         if "tect_type" in self.source_inputs:

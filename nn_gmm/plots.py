@@ -2,22 +2,14 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import ml_tools as mlt
 import numpy as np
 import pandas as pd
-import xarray as xr
 import seaborn as sns
 import shap
+import xarray as xr
 
-import ml_tools as mlt
-
-from . import nn_gmm
-from . import emp_gmm
-from . import analysis
-from . import constants
-from . import data
-from . import plot_utils
-from . import utils
-from . import hazard
+from . import analysis, constants, data, emp_gmm, hazard, nn_gmm, plot_utils, utils
 
 logger = logging.getLogger(__name__)
 
@@ -1383,6 +1375,108 @@ def bias_res_std_tect_type(cv_results_dir: Path, output_dir: Path):
     plt.close(bias_std_plot.fig)
 
 
+def nn_fault_hazard_bias_res_std(
+    nn_flt_hazard_results_ffp: Path,
+    output_dir: Path,
+    rps: list[int],
+    loc_nn_flt_hazard_results_ffp: Path | None = None,
+    cs_parametric_flt_hazard_ffp: Path | None = None,
+):
+    cs_hazard = pd.read_pickle(constants.CS_FLT_HAZARD_FFP)
+    base_nn_hazard = pd.read_pickle(nn_flt_hazard_results_ffp)
+    _, base_nn_mean_residual, base_nn_residual_std = hazard.compute_fault_nn_hazard_error(
+        base_nn_hazard, cs_hazard, rps
+    )
+
+    cs_param_hazard = None
+    if cs_parametric_flt_hazard_ffp is not None:
+        cs_param_hazard = pd.read_pickle(cs_parametric_flt_hazard_ffp)
+        _, cs_param_mean_residual, cs_param_residual_std = (
+            hazard.compute_fault_nn_hazard_error(cs_param_hazard, cs_hazard, rps)
+        )
+
+    loc_nn_hazard = None
+    if loc_nn_flt_hazard_results_ffp is not None:
+        loc_nn_hazard = pd.read_pickle(loc_nn_flt_hazard_results_ffp)
+        _, loc_nn_mean_residual, loc_nn_residual_std = (
+            hazard.compute_fault_nn_hazard_error(loc_nn_hazard, cs_hazard, rps)
+        )
+
+    bias_std_plot = BiasStdPlot(
+        figsize=constants.FIG_SIZE,
+        dpi=constants.FIG_DPI,
+        bias_ylim=(-0.5, 0.5),
+        std_ylim=(0, 0.95),
+        main_wspace=0.175,
+        left=0.07,
+    )
+
+    linestyles = ["-", "--", "dashdot"]
+    for i, rp in enumerate(rps):
+        bias_std_plot.ax1.plot(
+            constants.PSA_PERIODS,
+            base_nn_mean_residual.loc[constants.PSA_KEYS, rp].values,
+            c="blue",
+            linestyle=linestyles[i],
+            linewidth=constants.FIG_LINEWIDTH,
+            label=f"RP={rp} (Base Surrogate)",
+        )
+        if cs_param_hazard is not None:
+            bias_std_plot.ax1.plot(
+                constants.PSA_PERIODS,
+                cs_param_mean_residual.loc[constants.PSA_KEYS, rp].values,
+                c="black",
+                linestyle=linestyles[i],
+                linewidth=constants.FIG_LINEWIDTH,
+                label=f"RP={rp} (CS Parametric)",
+            )
+        if loc_nn_hazard is not None:
+            bias_std_plot.ax1.plot(
+                constants.PSA_PERIODS,
+                loc_nn_mean_residual.loc[constants.PSA_KEYS, rp].values,
+                c="red",
+                linestyle=linestyles[i],
+                linewidth=constants.FIG_LINEWIDTH,
+                label=f"RP={rp} (Loc Surrogate)",
+            )
+
+        bias_std_plot.ax3.plot(
+            constants.PSA_PERIODS,
+            base_nn_residual_std.loc[constants.PSA_KEYS, rp].values,
+            c="blue",
+            linestyle=linestyles[i],
+            linewidth=constants.FIG_LINEWIDTH,
+            label=f"RP={rp}",
+        )
+        if cs_param_hazard is not None:
+            bias_std_plot.ax3.plot(
+                constants.PSA_PERIODS,
+                cs_param_residual_std.loc[constants.PSA_KEYS, rp].values,
+                c="black",
+                linestyle=linestyles[i],
+                linewidth=constants.FIG_LINEWIDTH,
+                label=f"RP={rp} (CS Parametric)",
+            )
+        if loc_nn_hazard is not None:
+            bias_std_plot.ax3.plot(
+                constants.PSA_PERIODS,
+                loc_nn_residual_std.loc[constants.PSA_KEYS, rp].values,
+                c="red",
+                linestyle=linestyles[i],
+                linewidth=constants.FIG_LINEWIDTH,
+                label=f"RP={rp} (Loc NN)",
+            )
+
+    bias_std_plot.ax1.set_ylabel("Mean hazard residual")
+    bias_std_plot.ax1.legend()
+
+    bias_std_plot.fig.savefig(
+        output_dir / "nn_fault_hazard_bias_res_std.png",
+        dpi=constants.FIG_DPI,
+    )
+    plt.close(bias_std_plot.fig)
+
+
 def nn_mera_bias_res_std(model_dir: Path):
     """
     Creates bias and residual standard deviation
@@ -1472,3 +1566,48 @@ def nn_mera_bias_res_std(model_dir: Path):
         clobber=True,
     )
 
+
+def fault_hazard(
+    cs_flt_hazard: dict,
+    nn_flt_hazard: dict,
+    site: str,
+    im: str,
+    output_ffp: Path,
+    cs_parametric_flt_hazard: dict | None = None,
+):
+    """Plot fault hazard curves for a given site and IM."""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(
+        cs_flt_hazard[im].loc[site].index.values,
+        cs_flt_hazard[im].loc[site].values,
+        label="Cybershake",
+        color="black",
+    )
+    ax.plot(
+        nn_flt_hazard[im].loc[site].index.values,
+        nn_flt_hazard[im].loc[site].values,
+        label="NN-GMM",
+        color="blue",
+    )
+    if cs_parametric_flt_hazard is not None:
+        ax.plot(
+            cs_parametric_flt_hazard[im].loc[site].index.values,
+            cs_parametric_flt_hazard[im].loc[site].values,
+            label="Cybershake Parametric",
+            color="red",
+        )
+    ax.set_xlabel(f"{im} (g)")
+    ax.set_ylabel("Annual Exceedance Probability")
+    ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_ylim(1e-4, 10)
+    ax.set_xlim(
+        nn_flt_hazard[im].loc[site].index.min(),
+        nn_flt_hazard[im].loc[site].index.max(),
+    )
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_ffp, dpi=300)
+    plt.close(fig)

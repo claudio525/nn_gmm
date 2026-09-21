@@ -1,21 +1,20 @@
-import time
 import logging
+import time
 from pathlib import Path
 
 import joblib
-import torch
-import shap
+import ml_tools as mlt
 import numpy as np
 import pandas as pd
-from sklearn.cluster import MiniBatchKMeans
+import shap
+import torch
 from shap.utils._legacy import DenseData
-import ml_tools as mlt
+from sklearn.cluster import MiniBatchKMeans
 
-from . import constants
+from . import constants, nn_gmm
+from . import nn_gmm_modules as modules
 from .empdb import DuckEmpiricalDB
 from .imdb import DuckIMDB
-from . import nn_gmm
-from . import nn_gmm_modules as modules
 
 logger = logging.getLogger(__name__)
 

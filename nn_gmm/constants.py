@@ -1,10 +1,10 @@
 import os
 from enum import StrEnum
 from pathlib import Path
-import numpy as np
-import pandas as pd
 
+import numpy as np
 import oq_wrapper as oqw
+import pandas as pd
 
 WDATA = Path(os.environ["wdata"])
 
@@ -244,6 +244,9 @@ AUTHORITY_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/statsnz
 NZ_LAND_SHAPEFILE = Path(os.environ["wdata"]) / "nn_gmm/site/pre_train/lds-nz-coastlines-and-islands-polygons-topo-150k-SHP/nz-coastlines-and-islands-polygons-topo-150k.shp"
 HAZARD_RESOURCES_DIR = Path(os.environ["wdata"]) / "nn_gmm/morteza_cs200_hazard"
 
+CS_FLT_HAZARD_FFP = HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+FLT_ERF_FFP = HAZARD_RESOURCES_DIR / "NZ_FLTmodel_2010.txt"
+
 
 DS_ERF_FFP = WDATA / "nn_gmm/cs200_hazard/NZ_DSmodel_2010.txt"
 DS_SOURCE_FFP = WDATA / "nn_gmm/cs200_hazard/NZBCK211_OpenSHA.txt"
@@ -253,6 +256,8 @@ DUPUIS_SMALL_INT_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_small_mag/dupuis_sm
 DUPUIS_SMALL_SLAB_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_small_mag/dupuis_small_mag_slab.csv"
 DUPUIS_MOD_INT_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_moderate_mag/dupuis_moderate_mag_interface.csv"
 DUPUIS_MOD_SLAB_BIAS_STD_FFP = WDATA / "nn_gmm/other/dupuis_moderate_mag/dupuis_moderate_mag_slab.csv"
+
+PLOT_RPS = [72, 475, 2475]
 
 PLOT_IMS = ["pSA_0.01", "pSA_0.05", "pSA_0.1", "pSA_0.5", "pSA_1.0", "pSA_3.0", "pSA_5.0", "pSA_10.0"]
 MERA_IMS = ["pSA_0.01", "pSA_0.1", "pSA_1.0", "pSA_2.0", "pSA_3.0", "pSA_4.0", "pSA_5.0", "pSA_6.0", "pSA_7.5", "pSA_10.0"]

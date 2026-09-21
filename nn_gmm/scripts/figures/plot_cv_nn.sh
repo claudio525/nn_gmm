@@ -25,5 +25,4 @@ fi
 # Generate spatial mean predicted std plots
 python plot_cmds.py cv-mean-pred-std-map $model_dir $out_dir pSA_1.0 pSA_3.0 pSA_5.0 pSA_10.0 --n-procs 4 --grid-spacing 250e/250e
 
-# Generate spatial site folds map
-# python plot_cmds.py site-folds-map $model_dir $out_dir/site_folds_map.png
+

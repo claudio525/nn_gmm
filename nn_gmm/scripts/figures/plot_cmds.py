@@ -1,18 +1,19 @@
 from pathlib import Path
 from typing import Annotated
 
+import matplotlib
+import matplotlib.pyplot as plt
+import ml_tools as mlt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
 import typer
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import matplotlib
-import seaborn as sns
 import xarray as xr
-
+from scipy.interpolate.interpolate import interp1d
+from tqdm import tqdm
 
 import nn_gmm as nng
-import ml_tools as mlt
 
 device = "cpu"
 if torch.cuda.is_available():
@@ -22,6 +23,7 @@ if torch.mps.is_available():
 print(f"Using device: {device.upper()}")
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
+
 
 @app.command("plot-loss-curves")
 def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
@@ -34,7 +36,7 @@ def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
 
     metric = "w_loss_hist"
 
-    # Load metrics 
+    # Load metrics
     da = xr.load_dataarray(model_dir / "metrics.nc")
 
     val_values = da.sel(metric=f"{metric}_val")
@@ -46,7 +48,7 @@ def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
         val_values_mean = val_values
 
     train_values = da.sel(metric=f"{metric}_train")
-    train_values_mean,train_values_std = None, None
+    train_values_mean, train_values_std = None, None
     if "cv_iter" in train_values.coords:
         train_values_mean = train_values.mean(dim="cv_iter").values
         train_values_std = train_values.std(dim="cv_iter").values
@@ -55,7 +57,7 @@ def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
 
     epochs = da.coords["epoch"].values + 1
 
-    fig, ax = plt.subplots(figsize=(6,4))
+    fig, ax = plt.subplots(figsize=(6, 4))
 
     ax.plot(epochs, train_values_mean, label="Train Loss", color="blue")
     if train_values_std is not None:
@@ -75,10 +77,12 @@ def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
             color="orange",
             alpha=0.3,
         )
-    
+
     if val_values_mean is not None:
         best_epoch = epochs[np.argmin(val_values_mean)]
-        ax.axvline(best_epoch, color="red", linestyle="--", label=f"Best Epoch: {best_epoch}")
+        ax.axvline(
+            best_epoch, color="red", linestyle="--", label=f"Best Epoch: {best_epoch}"
+        )
 
     ax.set_xlabel("Epoch")
     ax.set_ylabel(metric)
@@ -90,13 +94,73 @@ def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
     out_ffp = output_dir / f"{metric}_curves.png"
     fig.savefig(out_ffp, dpi=300)
     mlt.utils.write_to_yaml(
-            dict(
-                type="loss",
-                metric=metric,
-            ),
-            output_dir / out_ffp.with_suffix(".yaml"),
-            clobber=True,
-        )
+        dict(
+            type="loss",
+            metric=metric,
+        ),
+        output_dir / out_ffp.with_suffix(".yaml"),
+        clobber=True,
+    )
+
+
+@app.command("plot-fault-hazard-curves")
+def plot_fault_hazard_curves(
+    nn_flt_hazard_results_ffp: Path,
+    output_dir: Path,
+    cs_parametric_flt_hazard_ffp: Path | None = None,
+    sites: list[str] | None = None,
+    ims: list[str] = nng.constants.PLOT_IMS,
+):
+    """
+    Generate fault hazard curves for specified sites and IMs.
+    """
+    nng.utils.setup_logging()
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    # Load CS & NN fault hazard
+    cs_flt_hazard = pd.read_pickle(
+        nng.constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
+    )
+    if cs_parametric_flt_hazard_ffp is not None:
+        cs_parametric_flt_hazard = pd.read_pickle(cs_parametric_flt_hazard_ffp)
+    nn_flt_hazard = pd.read_pickle(nn_flt_hazard_results_ffp)
+
+    if sites is None:
+        sites = list(nn_flt_hazard[ims[0]].index.values)
+
+    for cur_site in tqdm(sites, desc="Processing sites"):
+        for cur_im in ims:
+            output_ffp = (
+                output_dir
+                / f"{cur_site}_{nng.utils.get_im_filename(cur_im)}_fault_hazard_curve.png"
+            )
+            nng.plots.fault_hazard(
+                cs_flt_hazard,
+                nn_flt_hazard,
+                cur_site,
+                cur_im,
+                output_ffp,
+                cs_parametric_flt_hazard=cs_parametric_flt_hazard,
+            )
+
+
+@app.command("nn-fault-hazard-bias-res-std")
+def nn_fault_hazard_bias_res_std(
+    base_nn_flt_hazard_results_ffp: Path,
+    output_dir: Path,
+    rps: list[int] | None = nng.constants.PLOT_RPS,
+    loc_nn_flt_hazard_results_ffp: Path | None = None,
+    cs_parametric_flt_hazard_ffp: Path | None = None,
+):
+    nng.utils.setup_logging()
+
+    nng.plots.nn_fault_hazard_bias_res_std(
+        base_nn_flt_hazard_results_ffp,
+        output_dir,
+        rps,
+        loc_nn_flt_hazard_results_ffp=loc_nn_flt_hazard_results_ffp,
+        cs_parametric_flt_hazard_ffp=cs_parametric_flt_hazard_ffp,
+    )
 
 
 @app.command("nn-site-bias-res-std")
@@ -134,6 +198,7 @@ def nn_site_term_map(
     nng.plots_spatial.nn_site_term_maps(
         nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing, test=test
     )
+
 
 @app.command("nn-rem-residual-map")
 def nn_rem_residual_map(
@@ -201,10 +266,9 @@ def emp_gmm_bias_res_std(
         grid_spacing=grid_spacing,
     )
 
+
 @app.command("bias-res-std-tectonic-type")
-def bias_res_std_tectonic_type(
-    cv_results_dir: Path
-):
+def bias_res_std_tectonic_type(cv_results_dir: Path):
     """
     Generate site bias and site residual standard deviation plots
     grouped by tectonic type using NN-GMM CV results.
@@ -216,7 +280,6 @@ def bias_res_std_tectonic_type(
         cv_results_dir,
         output_dir,
     )
-
 
 
 @app.command("basin-site-map")
@@ -292,6 +355,7 @@ def site_folds_map(result_dir: Path, output_ffp: Path):
 
     spatial_plot.save(output_ffp)
 
+
 @app.command("cv-mean-pred-std-map")
 def cv_mean_pred_std_map(
     cv_model_results_dir: Path,
@@ -312,6 +376,7 @@ def cv_mean_pred_std_map(
         n_procs=n_procs,
         grid_spacing=grid_spacing,
     )
+
 
 @app.command("hazard-map")
 def hazard_maps(
@@ -396,12 +461,13 @@ def nn_gmm_compare_site_bias_res_std(
     nng.utils.setup_logging()
     nng.plots.site_bias_res_std_comparison(model_dirs, output_dir, dpi=300)
 
+
 @app.command("nn-mera-bias-res-std")
 def nn_mera_bias_res_std(
     model_dir: Path,
 ):
     """
-    Creates bias and residual std plots 
+    Creates bias and residual std plots
     (wrt period) from MERA results.
     """
     nng.utils.setup_logging()
@@ -479,11 +545,12 @@ def cv_feature_importance(
     """
     nng.utils.setup_logging()
 
-    run_config = nng.nn_gmm.load_config(results_dir / "run_config.yaml")    
+    run_config = nng.nn_gmm.load_config(results_dir / "run_config.yaml")
     shap_values = pd.read_pickle(results_dir / "comb_shap_explanation.pkl")
 
     (output_dir := results_dir / "plots").mkdir(exist_ok=True, parents=False)
     nng.plots.feature_importance_plots(shap_values, run_config, output_dir)
+
 
 if __name__ == "__main__":
     app()

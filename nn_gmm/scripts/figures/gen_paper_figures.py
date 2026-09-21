@@ -1,21 +1,21 @@
-import os
 import io
+import os
 from pathlib import Path
 
-import torch
+import matplotlib.lines as mlines
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import ml_tools as mlt
 import numpy as np
 import pandas as pd
-import xarray as xr
-import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-import matplotlib.ticker as mticker
-from matplotlib.legend_handler import HandlerTuple
 import seaborn as sns
+import torch
 import typer
+import xarray as xr
+from matplotlib.legend_handler import HandlerTuple
+from qcore import nhm
 
 import nn_gmm as nng
-import ml_tools as mlt
-from qcore import nhm
 
 device = "cpu"
 if torch.cuda.is_available():

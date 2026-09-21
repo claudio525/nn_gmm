@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -19,10 +20,46 @@ print(f"Using device: {device.upper()}")
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
 
+@app.command("compute-fault-nn-hazard")
+def compute_fault_nn_hazard(
+    cv_model_dir: Path, flt_erf_ffp: Path, site_grid_level: int
+):
+    """
+    Compute fault hazard using the NN-GMM model.
+    """
+    nng.utils.setup_logging()
+
+    output_ffp = (
+        Path(cv_model_dir)
+        / f"fault_hazard_site_grid_{site_grid_level if site_grid_level >= 0 else "real"}.pkl"
+    )
+    nng.hazard.compute_fault_nn_hazard(
+        cv_model_dir, flt_erf_ffp, site_grid_level, output_ffp, device=device
+    )
+
+
+@app.command("compute-cs-parametric-hazard")
+def compute_cs_parametric_hazard(imdb_ffp: Path, output_dir: Path, site_grid_level: int):
+    """
+    Compute Cybershake hazard using mean and sigma estimated
+    from the realisations in the IMDB.
+    """
+    nng.utils.setup_logging(console_level=logging.WARNING)
+
+    output_ffp = (
+        Path(output_dir)
+        / f"cs_parametric_hazard_site_grid_{site_grid_level if site_grid_level >= 0 else 'real'}.pkl"
+    )
+    nng.hazard.compute_cs_parametric_hazard(
+        imdb_ffp, output_ffp, site_grid_level
+    )
+    
+
 @app.command("compute-uniform-grid-ds-hazard")
-def compute_uniform_grid_ds_hazard(imdb_ffp: Path,
-                                   model_dir: Path,
-                                   n_procs: int = 1,
+def compute_uniform_grid_ds_hazard(
+    imdb_ffp: Path,
+    model_dir: Path,
+    n_procs: int = 1,
 ):
     """
     Compute DS hazard on a uniform grid using a NN-GMM model.
@@ -32,6 +69,7 @@ def compute_uniform_grid_ds_hazard(imdb_ffp: Path,
     nng.hazard.compute_uniform_grid_ds_hazard(
         imdb_ffp, model_dir, device, n_procs=n_procs
     )
+
 
 @app.command("run-site-ds-hazard")
 def run_site_ds_hazard(
@@ -69,6 +107,7 @@ def run_emp_site_ds_hazard(
 
     nng.hazard.run_emp_sites_ds_hazard(imdb_ffp, sites, output_dir, n_procs=n_procs)
 
+
 @app.command("compute-uniform-grid-emp-ds-hazard")
 def compute_uniform_grid_emp_ds_hazard(
     imdb_ffp: Path,
@@ -80,9 +119,7 @@ def compute_uniform_grid_emp_ds_hazard(
     """
     nng.utils.setup_logging()
 
-    nng.hazard.compute_uniform_grid_emp_ds_hazard(
-        imdb_ffp, output_dir, n_procs=n_procs
-    )
+    nng.hazard.compute_uniform_grid_emp_ds_hazard(imdb_ffp, output_dir, n_procs=n_procs)
 
 
 @app.command("run-emp-ds-disagg")
@@ -110,7 +147,13 @@ def run_emp_ds_disagg(
         f"Running empirical DS disaggregation for {len(sites)} sites from {sites_ffp}."
     )
     nng.hazard.run_emp_ds_disagg(
-        sites, imdb_ffp, output_dir, np.asarray(rps), max_rrup=max_rrup, n_procs=n_procs, tect_type=tect_type
+        sites,
+        imdb_ffp,
+        output_dir,
+        np.asarray(rps),
+        max_rrup=max_rrup,
+        n_procs=n_procs,
+        tect_type=tect_type,
     )
 
 
