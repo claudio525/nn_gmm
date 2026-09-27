@@ -25,10 +25,12 @@ EMP_GMM_MAPPING = {
     oqw.constants.TectType.SUBDUCTION_INTERFACE: oqw.constants.GMMLogicTree.NSHM2022,
 }
 
+
 def compute_cs_parametric_hazard(
     imdb_ffp: Path, output_ffp: Path, site_grid_level: int
 ):
     import seismic_hazard_analysis as sha
+
     erf = nhm.load_nhm_df(constants.FLT_ERF_FFP)
     with DuckIMDB(imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df(
@@ -53,15 +55,30 @@ def compute_cs_parametric_hazard(
         # Compute hazard for each site
         hazard_results = None
         for cur_site in tqdm(sites):
-            cur_record_int_ids = record_info_df.loc[record_info_df.site_id == cur_site].index.values
-            cur_im_data = imdb.get_im_data(constants.PSA_KEYS, cur_record_int_ids, log_ims=True)
-            cur_im_data["event_id"] = record_info_df.loc[cur_record_int_ids].event_id.values
+            cur_record_int_ids = record_info_df.loc[
+                record_info_df.site_id == cur_site
+            ].index.values
+            cur_im_data = imdb.get_im_data(
+                constants.PSA_KEYS, cur_record_int_ids, log_ims=True
+            )
+            cur_im_data["event_id"] = record_info_df.loc[
+                cur_record_int_ids
+            ].event_id.values
 
-            cur_gm_params = cur_im_data.groupby("event_id", observed=True).agg(["mean", "std"])
-            cur_gm_params.columns = ['_'.join(map(str, col)).strip('_') for col in cur_gm_params.columns]
+            cur_gm_params = cur_im_data.groupby("event_id", observed=True).agg(
+                ["mean", "std"]
+            )
+            cur_gm_params.columns = [
+                "_".join(map(str, col)).strip("_") for col in cur_gm_params.columns
+            ]
 
             cur_hazard = sha.nshm_2010.compute_gmm_hazard(
-                cur_gm_params, 1 / erf.recur_int_median, constants.PSA_KEYS, mean_col_suffix="_mean", std_col_suffix="_std")
+                cur_gm_params,
+                1 / erf.recur_int_median,
+                constants.PSA_KEYS,
+                mean_col_suffix="_mean",
+                std_col_suffix="_std",
+            )
 
             if hazard_results is None:
                 hazard_results = {
@@ -106,7 +123,7 @@ def compute_fault_nn_hazard(
         event_df = event_df.loc[event_df.sim_type == 4]
 
         # Realisation data
-        rel_df = imdb.get_rel_df(events=event_df.event_id.values.astype(str))
+        # rel_df = imdb.get_rel_df(events=event_df.event_id.values.astype(str))
 
         # Get rupture distances
         record_info_df = imdb.get_record_info_df(
@@ -119,16 +136,16 @@ def compute_fault_nn_hazard(
             site_event_int_ids=record_info_df.site_event_int_id.values
         )
 
-    # Source and realidation inputs keys
-    event_source_keys = np.array(run_config.source_inputs)[
-        np.isin(run_config.source_inputs, event_df.columns)
-    ]
-    rel_source_keys = np.setdiff1d(
-        np.array(run_config.source_inputs)[
-            np.isin(run_config.source_inputs, rel_df.columns)
-        ],
-        event_source_keys,
-    )
+    # # Source and realisation inputs keys
+    # event_source_keys = np.array(run_config.source_inputs)[
+    #     np.isin(run_config.source_inputs, event_df.columns)
+    # ]
+    # rel_source_keys = np.setdiff1d(
+    #     np.array(run_config.source_inputs)[
+    #         np.isin(run_config.source_inputs, rel_df.columns)
+    #     ],
+    #     event_source_keys,
+    # )
 
     gm_params = []
     cv_model_dirs = [ffp for ffp in cv_results_dir.glob("cv_*") if ffp.is_dir()]
@@ -145,27 +162,57 @@ def compute_fault_nn_hazard(
             cur_cv_train_events = np.load(cur_cv_dir / "train_events.npy")
             cur_cv_train_sites = np.load(cur_cv_dir / "train_sites.npy")
 
-        cur_events = event_df.loc[~event_df.event_id.isin(cur_cv_train_events)]
-        cur_sites = site_df.loc[~site_df.site_id.isin(cur_cv_train_sites)]
+        cur_events = event_df.loc[
+            ~event_df.event_id.isin(cur_cv_train_events)
+        ].event_id.values
+        cur_sites = site_df.loc[
+            ~site_df.site_id.isin(cur_cv_train_sites)
+        ].site_id.values
 
-        # Create input df
-        cur_input_df = site_event_df.loc[
-            site_event_df.event_int_id.isin(cur_events.index.values)
-            & site_event_df.site_int_id.isin(cur_sites.index.values)
-        ].copy()
+        # # Create input df
+        # cur_input_df = site_event_df.loc[
+        #     site_event_df.event_id.isin(cur_events)
+        #     & site_event_df.site_id.isin(cur_sites)
+        # ].copy()
 
-        # Add site inputs
-        cur_input_df = cur_input_df.merge(
-            site_df[run_config.site_inputs],
-            left_on="site_int_id",
-            right_index=True,
-            how="left",
+        # # Add site inputs
+        # cur_input_df = cur_input_df.merge(
+        #     site_df[run_config.site_inputs],
+        #     left_on="site_int_id",
+        #     right_index=True,
+        #     how="left",
+        # )
+
+        # # Add location inputs
+        # if isinstance(run_config, nn_gmm.LocAdjRunConfig):
+        #     cur_input_df["nztm_x"] = site_df.loc[
+        #         cur_input_df.site_int_id.values, "nztm_x"
+        #     ].values
+        #     cur_input_df["nztm_y"] = site_df.loc[
+        #         cur_input_df.site_int_id.values, "nztm_y"
+        #     ].values
+
+        # # Add source inputs
+        # cur_input_df = cur_input_df.merge(
+        #     event_df[event_source_keys],
+        #     left_on="event_int_id",
+        #     right_index=True,
+        #     how="left",
+        # )
+        # # Use mean realisation inputs
+        # if len(rel_source_keys) > 0:
+        #     cur_input_df = cur_input_df.merge(
+        #         rel_df.groupby("event_int_id")[rel_source_keys].mean(),
+        #         left_on="event_int_id",
+        #         right_index=True,
+        #         how="left",
+        #     )
+        # if "is_point_source" in run_config.source_inputs:
+        #     cur_input_df["is_point_source"] = False
+
+        cur_input_df = nn_gmm.get_fault_events_sites_input_df(
+            run_config, cur_events, cur_sites
         )
-
-        # Add location inputs
-        if isinstance(run_config, nn_gmm.LocAdjRunConfig):
-            cur_input_df["nztm_x"] = site_df.loc[cur_input_df.site_int_id.values, "nztm_x"].values
-            cur_input_df["nztm_y"] = site_df.loc[cur_input_df.site_int_id.values, "nztm_y"].values
 
         # Drop any that already have results
         if len(gm_params) > 0:
@@ -174,24 +221,6 @@ def compute_fault_nn_hazard(
                     np.concatenate([item.index.values for item in gm_params])
                 )
             ]
-
-        # Add source inputs
-        cur_input_df = cur_input_df.merge(
-            event_df[event_source_keys],
-            left_on="event_int_id",
-            right_index=True,
-            how="left",
-        )
-        # Use mean realisation inputs
-        if len(rel_source_keys) > 0:
-            cur_input_df = cur_input_df.merge(
-                rel_df.groupby("event_int_id")[rel_source_keys].mean(),
-                left_on="event_int_id",
-                right_index=True,
-                how="left",
-            )
-        if "is_point_source" in run_config.source_inputs:
-            cur_input_df["is_point_source"] = False
 
         cur_results_df = nn_gmm.run_predictions_dir(
             cur_cv_dir, cur_input_df, device=device
@@ -229,7 +258,10 @@ def compute_fault_nn_hazard(
 
     mlt.utils.write_pickle(hazard_results, output_ffp)
 
-def compute_fault_nn_hazard_error(hazard_results_1: dict, hazard_results_2: dict, rps: list[int]):
+
+def compute_fault_nn_hazard_error(
+    hazard_results_1: dict, hazard_results_2: dict, rps: list[int]
+):
     """
     Compute the error between the two fault hazard results.
     """
@@ -241,7 +273,9 @@ def compute_fault_nn_hazard_error(hazard_results_1: dict, hazard_results_2: dict
     assert model_1_uhs.coords.equals(model_2_uhs.coords)
 
     residuals = np.log(model_2_uhs.values) - np.log(model_1_uhs.values)
-    mean_residual = pd.DataFrame(index=ims, data=np.nanmean(residuals, axis=0), columns=rps)
+    mean_residual = pd.DataFrame(
+        index=ims, data=np.nanmean(residuals, axis=0), columns=rps
+    )
     # mean_quantiles = xr.DataArray(
     #     data=np.nanquantile(residuals, [0.05, 0.5, 0.95], axis=0),
     #     dims=["quantile", "im", "rp"],
@@ -252,9 +286,12 @@ def compute_fault_nn_hazard_error(hazard_results_1: dict, hazard_results_2: dict
     #     },
     # )
 
-    residual_std = pd.DataFrame(index=ims, data=np.nanstd(residuals, axis=0), columns=rps)
+    residual_std = pd.DataFrame(
+        index=ims, data=np.nanstd(residuals, axis=0), columns=rps
+    )
 
     return residuals, mean_residual, residual_std
+
 
 def compute_nn_ds_uhs(
     ds_results_dir: Path, rps: list[int], sites: list[str] | None = None
@@ -363,10 +400,12 @@ def compute_cs_flt_uhs(sites: list[str], rps: list[int]):
 
     # return uhs_da
 
+
 def compute_flt_uhs(flt_hazard: pd.DataFrame, sites: list[str], rps: list[int]):
     import seismic_hazard_analysis as sha
+
     excd_rates = [sha.utils.rp_to_prob(rp) for rp in rps]
-    
+
     uhs_da = {}
     for site in sites:
         cur_flt_hazard = {
@@ -388,7 +427,7 @@ def compute_flt_uhs(flt_hazard: pd.DataFrame, sites: list[str], rps: list[int]):
     return uhs_da
 
 
-def run_sites_ds_hazard(
+def run_nn_sites_ds_hazard(
     model_dir: Path, sites: list[str], device: str, n_procs: int = 1
 ) -> None:
     """
@@ -526,74 +565,76 @@ def _run_site_ds_hazard(
     import seismic_hazard_analysis as sha
 
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
-    rupture_df = ds_source_df[
-        [
-            "mag",
-            "dip",
-            "rake",
-            "dbot",
-            "dtop",
-            "tectonic_type",
-            "depth",
-            "is_point_source",
-        ]
-    ].copy()
+    # rupture_df = ds_source_df[
+    #     [
+    #         "mag",
+    #         "dip",
+    #         "rake",
+    #         "dbot",
+    #         "dtop",
+    #         "tectonic_type",
+    #         "depth",
+    #         "is_point_source",
+    #     ]
+    # ].copy()
 
-    # Compute site distances
-    rupture_df["rjb"] = (
-        np.sqrt(
-            (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
-            + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
-        )
-        / 1000
-    )
-    rupture_df["rrup"] = (
-        np.sqrt(
-            (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
-            + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
-            + (rupture_df["depth"] * 1000) ** 2
-        )
-        / 1000
-    )
+    # # Compute site distances
+    # rupture_df["rjb"] = (
+    #     np.sqrt(
+    #         (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
+    #         + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
+    #     )
+    #     / 1000
+    # )
+    # rupture_df["rrup"] = (
+    #     np.sqrt(
+    #         (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
+    #         + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
+    #         + (rupture_df["depth"] * 1000) ** 2
+    #     )
+    #     / 1000
+    # )
 
-    # Same as what is done for training for DS point sources
-    rupture_df["rx"] = 0
-    rupture_df["ry"] = 0
+    # # Same as what is done for training for DS point sources
+    # rupture_df["rx"] = 0
+    # rupture_df["ry"] = 0
 
-    # Apply max-rrup limit
-    rupture_df = rupture_df.loc[rupture_df.rrup <= run_config.max_rrup]
+    # # Apply max-rrup limit
+    # rupture_df = rupture_df.loc[rupture_df.rrup <= run_config.max_rrup]
 
-    # Add site properties
-    rupture_df["vs30"] = site_series.loc["vs30"]
-    rupture_df["z1p0"] = site_series.loc["z1p0"]
-    rupture_df["z2p5"] = site_series.loc["z2p5"]
+    # # Add site properties
+    # rupture_df["vs30"] = site_series.loc["vs30"]
+    # rupture_df["z1p0"] = site_series.loc["z1p0"]
+    # rupture_df["z2p5"] = site_series.loc["z2p5"]
 
-    if isinstance(run_config, nn_gmm.LocAdjRunConfig):
-        rupture_df["nztm_x"] = site_series.loc["nztm_x"]
-        rupture_df["nztm_y"] = site_series.loc["nztm_y"]
+    # if isinstance(run_config, nn_gmm.LocAdjRunConfig):
+    #     rupture_df["nztm_x"] = site_series.loc["nztm_x"]
+    #     rupture_df["nztm_y"] = site_series.loc["nztm_y"]
 
-    # Rename columns to match expected input names
-    rupture_df = rupture_df.rename(
-        columns={
-            "mag": "magnitude",
-            "tectonic_type": "tect_type",
-            "dbot": "dbottom",
-            "depth": "hypo_depth",
-        }
-    )
+    # # Rename columns to match expected input names
+    # rupture_df = rupture_df.rename(
+    #     columns={
+    #         "mag": "magnitude",
+    #         "tectonic_type": "tect_type",
+    #         "dbot": "dbottom",
+    #         "depth": "hypo_depth",
+    #     }
+    # )
 
-    assert np.all(
-        np.isin(run_config.source_inputs, rupture_df.columns)
-    ), "Source inputs missing"
-    assert np.all(
-        np.isin(run_config.site_inputs, rupture_df.columns)
-    ), "Site inputs missing"
-    assert np.all(
-        np.isin(run_config.source_to_site_inputs, rupture_df.columns)
-    ), "Source-to-site inputs missing"
-    assert not isinstance(run_config, nn_gmm.LocAdjRunConfig) or np.all(
-        np.isin(run_config.loc_inputs, rupture_df.columns)
-    ), "Location adjustment inputs missing"
+    # assert np.all(
+    #     np.isin(run_config.source_inputs, rupture_df.columns)
+    # ), "Source inputs missing"
+    # assert np.all(
+    #     np.isin(run_config.site_inputs, rupture_df.columns)
+    # ), "Site inputs missing"
+    # assert np.all(
+    #     np.isin(run_config.source_to_site_inputs, rupture_df.columns)
+    # ), "Source-to-site inputs missing"
+    # assert not isinstance(run_config, nn_gmm.LocAdjRunConfig) or np.all(
+    #     np.isin(run_config.loc_inputs, rupture_df.columns)
+    # ), "Location adjustment inputs missing"
+
+    rupture_df = nn_gmm.get_ds_input_df(run_config, site_series, ds_source_df)
 
     pred_df = nn_gmm.run_predictions_dir(model_dir, rupture_df, device)
 
@@ -644,6 +685,62 @@ def _run_site_ds_hazard(
         "crustal": crustal_hazard_results,
         "subduction_slab": subduction_slab_hazard_results,
     }
+
+
+def compute_fault_emp_hazard(imdb_ffp: Path, site_grid_level: int, output_ffp: Path):
+    """
+    Compute empirical hazard for fault sources using empirical GMMs
+    """
+    import seismic_hazard_analysis as sha
+
+    erf = nhm.load_nhm_df(constants.FLT_ERF_FFP)
+    flt_definitions = nhm.load_nhm(constants.FLT_ERF_FFP)
+    with DuckIMDB(imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(
+            add_nztm=True,
+            min_grid_level=site_grid_level,
+            max_grid_level=site_grid_level,
+        ).set_index("site_id")
+        site_df["backarc"] = False
+        site_df["vs30measured"] = False
+        site_df["depth"] = 0
+
+        # Relevant events
+        event_df = imdb.get_event_df()
+        event_df = event_df.loc[event_df.sim_type == 4]
+
+        # Drop faults that are not in the IMDB to ensure fair comparison
+        flt_definitions = {
+            flt_id: flt
+            for flt_id, flt in flt_definitions.items()
+            if flt_id in event_df.event_id.values
+        }
+
+    hazard_results = None
+    for cur_site in tqdm(site_df.index.values.astype(str), desc="Computing hazard"):
+        cur_hazard = sha.nshm_2010.compute_gmm_flt_hazard(
+            site_df.loc[cur_site, ["nztm_x", "nztm_y", "depth"]].astype(float).values,
+            site_df.loc[
+                cur_site, ["vs30", "z1p0", "z2p5", "backarc", "vs30measured"]
+            ].to_dict(),
+            erf,
+            constants.GMM_MAPPING,
+            constants.PSA_KEYS,
+            flt_definitions=flt_definitions,
+        )
+
+        if hazard_results is None:
+            hazard_results = {
+                cur_im: pd.DataFrame(
+                    index=site_df.index, columns=cur_hazard[cur_im].index
+                )
+                for cur_im in cur_hazard
+            }
+
+        for cur_im in cur_hazard:
+            hazard_results[cur_im].loc[cur_site] = cur_hazard[cur_im]
+
+    mlt.utils.write_pickle(hazard_results, output_ffp)
 
 
 def run_emp_sites_ds_hazard(
@@ -821,6 +918,167 @@ def _run_emp_site_ds_hazard(
         "crustal": crustal_hazard,
         "subduction": subduction_hazard,
     }
+
+
+def compute_site_disagg(
+    full_model_dir: Path, sites: list[str], im: str, rp: float, device: str
+):
+    """
+    Compute disaggregation for specified sites using the
+    NN-GMM model for DS hazard and simulations for fault sources
+    """
+    import seismic_hazard_analysis as sha
+
+    # Setup
+    cs_hazard = pd.read_pickle(constants.CS_FLT_HAZARD_FFP)[im]
+    (output_dir := full_model_dir / "disagg").mkdir(parents=True, exist_ok=True)
+    run_config = nn_gmm.load_config(full_model_dir / "run_config.yaml")
+
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(add_nztm=True).set_index("site_id").loc[sites]
+        assert np.all(~np.isin(sites, np.load(full_model_dir / "train_sites.npy")))
+
+        # Relevant events
+        event_df = imdb.get_event_df().set_index("event_id")
+        event_df = event_df.loc[event_df.sim_type == 4]
+
+        # Relevant records
+        record_info_df = imdb.get_record_info_df(
+            sites=sites, events=event_df.index.values.astype(str)
+        )
+        site_event_df = imdb.get_site_event_df(sites=sites)
+
+        # Load erf
+        ds_source_df, ds_erf_df = nn_gmm.utils.get_ds_source_data()
+        flt_erf_df = nhm.load_nhm_df(constants.FLT_ERF_FFP)
+        annual_rec_prob = pd.concat(
+            [ds_erf_df["annual_rec_prob"], 1 / flt_erf_df["recur_int_median"]]
+        )
+
+        # Compute disagg
+        for cur_site in sites:
+            # Compute the im-level
+            cur_im_level = sha.utils.exceedance_to_im(
+                sha.utils.rp_to_prob(rp),
+                cs_hazard.loc[cur_site].index.values.astype(float),
+                cs_hazard.loc[cur_site].values.astype(float),
+            )
+
+            # Compute P(IM > im_level) for all fault sources
+            # using CS simulations
+            cur_flt_im_df = imdb.get_im_data(
+                ims=[im],
+                record_int_ids=record_info_df.loc[
+                    record_info_df.site_id == cur_site
+                ].index.values,
+            )
+            cur_flt_im_df["event_id"] = record_info_df.loc[
+                cur_flt_im_df.index.values, "event_id"
+            ].values
+            cur_flt_im_df["rel_id"] = record_info_df.loc[
+                cur_flt_im_df.index.values, "rel_id"
+            ].values
+            cur_flt_im_df = cur_flt_im_df.set_index(["event_id", "rel_id"]).squeeze()
+
+            cur_flt_gm_prob_excd = sha.hazard.non_parametric_gm_excd_prob(
+                np.asarray([cur_im_level]), cur_flt_im_df
+            )
+            cur_flt_events = cur_flt_gm_prob_excd.index.values.astype(str)
+
+            # NN-Model DS Predictions
+            cur_ds_nn_input_df = nn_gmm.get_ds_input_df(
+                run_config, site_df.loc[cur_site], ds_source_df
+            )
+            cur_ds_nn_preds = nn_gmm.run_predictions_dir(
+                full_model_dir, cur_ds_nn_input_df, device
+            )
+
+            # Compute P(IM > im_level) for all DS sources using NN-GMM predictions
+            cur_ds_nn_gm_prob_excd = sha.hazard.parametric_gm_excd_prob(
+                np.asarray([cur_im_level]),
+                cur_ds_nn_preds[[f"{im}_pred", f"{im}_pred_std"]],
+                mean_col=f"{im}_pred",
+                std_col=f"{im}_pred_std",
+            )
+            cur_cs_nn_gm_prob_exd = pd.concat(
+                [cur_flt_gm_prob_excd, cur_ds_nn_gm_prob_excd], axis=0
+            )
+            cur_cs_nn_disagg = sha.disagg.disagg_exceedance(
+                cur_cs_nn_gm_prob_exd.squeeze(),
+                annual_rec_prob.squeeze(),
+            ).to_frame(name="contribution")
+
+            # Add magnitude/distance columns
+            cur_cs_nn_disagg = cur_cs_nn_disagg.merge(
+                cur_ds_nn_input_df[["magnitude", "rrup", "tect_type"]],
+                left_index=True,
+                right_index=True,
+                how="left",
+            ).astype({"tect_type": "str"})
+            cur_cs_nn_disagg.loc[cur_flt_events, ["magnitude", "tect_type"]] = event_df.loc[
+                cur_flt_events, ["magnitude", "tect_type"]
+            ].astype({"tect_type": "str"})
+            cur_cs_nn_disagg.loc[cur_flt_events, "rrup"] = (
+                site_event_df.loc[site_event_df.site_id == cur_site]
+                .set_index("event_id")
+                .loc[cur_flt_events]
+            )
+
+            # Save
+            cur_cs_nn_disagg.index = cur_cs_nn_disagg.index.astype(str)
+            cur_cs_nn_disagg.to_parquet(
+                output_dir
+                / f"{cur_site}_{utils.get_im_filename(im)}_RP{int(rp)}_CS_NN_disagg.parquet"
+            )
+
+            # Compute P(IM > im_level) for all DS sources using empirical GMMs
+            cur_site_properties = {
+                "vs30": site_df.loc[cur_site, "vs30"],
+                "vs30measured": False,
+                "z1p0": site_df.loc[cur_site, "z1p0"],
+                "z2p5": site_df.loc[cur_site, "z2p5"],
+                "backarc": False
+            }
+            cur_ds_emp_rupture_df = sha.nshm_2010.get_oq_ds_rupture_df(ds_source_df, site_df.loc[cur_site, ["nztm_x", "nztm_y"]], cur_site_properties)
+            cur_ds_emp_gm_params_df = sha.nshm_2010.get_emp_gm_params(
+                cur_ds_emp_rupture_df, constants.GMM_MAPPING, [im]
+            ).sort_index()
+            cur_ds_emp_gm_prob_excd = sha.hazard.parametric_gm_excd_prob(
+                np.asarray([cur_im_level]),
+                cur_ds_emp_gm_params_df[[f"{im}_mean", f"{im}_std_Total"]],
+                mean_col=f"{im}_mean",
+                std_col=f"{im}_std_Total",
+            )
+            cur_cs_emp_gm_prob_excd = pd.concat(
+                [cur_flt_gm_prob_excd, cur_ds_emp_gm_prob_excd], axis=0
+            )
+            cur_cs_emp_disagg = sha.disagg.disagg_exceedance(
+                cur_cs_emp_gm_prob_excd.squeeze(),
+                annual_rec_prob.squeeze(),
+            ).to_frame(name="contribution")
+
+            # Add magnitude/distance columns
+            cur_cs_emp_disagg = cur_cs_emp_disagg.merge(
+                cur_ds_emp_rupture_df[["mag", "rrup", "tectonic_type"]],
+                left_index=True,
+                right_index=True,
+                how="left",
+            ).astype({"tectonic_type": "str"}).rename(columns={"tectonic_type": "tect_type", "mag": "magnitude"})
+            cur_cs_emp_disagg.loc[cur_flt_events, ["magnitude", "tect_type"]] = event_df.loc[
+                cur_flt_events, ["magnitude", "tect_type"]
+            ].astype({"tect_type": "str"})
+            cur_cs_emp_disagg.loc[cur_flt_events, "rrup"] = (
+                site_event_df.loc[site_event_df.site_id == cur_site]
+                .set_index("event_id")
+                .loc[cur_flt_events]
+            )
+
+            # Save
+            cur_cs_emp_disagg.index = cur_cs_emp_disagg.index.astype(str)
+            cur_cs_emp_disagg.to_parquet(
+                output_dir
+                / f"{cur_site}_{utils.get_im_filename(im)}_RP{int(rp)}_CS_EMP_disagg.parquet"
+            )
 
 
 def run_emp_ds_disagg(

@@ -298,6 +298,10 @@ GMT_FIG_FONT_LABEL = "14p,Helvetica,black"
 if (env_gmt_fig_font_label := os.environ.get("gmt_fig_font_label")) is not None:
     GMT_FIG_FONT_LABEL = env_gmt_fig_font_label
 
+MINOR_GMT_FIG_FONT_LABEL = "10p,Helvetica,black"
+if (env_gmt_fig_font_label := os.environ.get("minor_gmt_fig_font_label")) is not None:
+    MINOR_GMT_FIG_FONT_LABEL = env_gmt_fig_font_label
+
 GMT_FIG_BOLD_FONT_LABEL = "14p,Helvetica-Bold,black"
 if (env_gmt_fig_bold_font_label := os.environ.get("gmt_fig_bold_font_label")) is not None:
     GMT_FIG_BOLD_FONT_LABEL = env_gmt_fig_bold_font_label

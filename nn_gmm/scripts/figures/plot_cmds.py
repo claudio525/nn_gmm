@@ -10,7 +10,7 @@ import seaborn as sns
 import torch
 import typer
 import xarray as xr
-from scipy.interpolate.interpolate import interp1d
+from pygmt_helper import plots
 from tqdm import tqdm
 
 import nn_gmm as nng
@@ -163,6 +163,74 @@ def nn_fault_hazard_bias_res_std(
     )
 
 
+@app.command("plot-disagg")
+def plot_disagg(
+    disagg_results_ffp: Path,
+    output_dir: Path,
+    title: str | None = None,
+):
+    """
+    Generate disaggregation plots for specified disagg results.
+    """
+    disagg_df = pd.read_parquet(disagg_results_ffp)
+    disagg_df["contribution"] = disagg_df["contribution"] * 100
+
+    # Maximum distance
+    disagg_df = disagg_df[disagg_df["rrup"] < 200]
+
+    mag_step_size = 0.25
+    mag_bins = np.arange(5.0, 8.5 + 0.25, 0.25)
+    dist_bins = np.arange(0, 200 + 10, 10)
+
+    disagg_df["mag_bin"] = pd.cut(
+        disagg_df["magnitude"],
+        bins=mag_bins,
+        labels=mag_bins[:-1] + (mag_step_size / 2),
+    )
+    disagg_df["rrup_bin"] = pd.cut(
+        disagg_df["rrup"], bins=dist_bins, labels=dist_bins[:-1] + 5
+    )
+
+    disagg_df = (
+        disagg_df.groupby(["mag_bin", "rrup_bin", "tect_type"], observed=True)[
+            "contribution"
+        ]
+        .sum()
+        .reset_index()
+    )
+    disagg_df = disagg_df.rename(columns={"mag_bin": "mag", "rrup_bin": "dist"})
+    disagg_df["dist_bin_width"] = 10
+    disagg_df["mag_bin_width"] = mag_step_size
+
+    fig = plots.disagg_plot(
+        disagg_df,
+        (0, 200, 5.0, 8.5),
+        plots.DisaggPlotType.TectonicType,
+        "tect_type",
+        category_specs={
+            "ACTIVE_SHALLOW": (None, "blue"),
+            "SUBDUCTION_INTERFACE": (None, "orange"),
+            "SUBDUCTION_SLAB": (None, "red"),
+        },
+    )
+
+    if title is not None:
+        fig.text(
+            position="TL",
+            justify="TL",
+            text=title,
+            offset="0.2c/-0.2c",  
+            font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+        )
+
+    fig.savefig(
+        output_dir / f"{disagg_results_ffp.stem}_disagg_plot.png",
+        dpi=900,
+        anti_alias=True,
+    )
+
+
+
 @app.command("nn-site-bias-res-std")
 def nn_site_bias_res_std(
     nn_dir: Path,
@@ -188,7 +256,6 @@ def nn_site_term_map(
     output_dir: Path,
     n_procs: int = 1,
     grid_spacing: str = "500e/500e",
-    test: bool = False,
 ):
     """
     Generate site term maps using NN-GMM CV results for specified IMs.
@@ -196,7 +263,7 @@ def nn_site_term_map(
     """
     nng.utils.setup_logging()
     nng.plots_spatial.nn_site_term_maps(
-        nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing, test=test
+        nn_dir, ims, output_dir, n_procs=n_procs, grid_spacing=grid_spacing
     )
 
 

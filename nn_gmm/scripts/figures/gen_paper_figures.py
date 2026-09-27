@@ -705,6 +705,8 @@ def fault_map(output_dir: Path, imdb_ffp: Path):
         plot_kwargs={"water_color": "white"},
     )
 
+    
+
     basin_specs = {
         Path(
             "/Users/claudy/dev/work/code/nn_gmm/nn_gmm/resources/basin_boundaries/Kaikoura_outline_WGS84.txt"
@@ -775,6 +777,9 @@ def fault_map(output_dir: Path, imdb_ffp: Path):
         label="Sources Not Simulated",
         pen="0.5p,black",
     )
+
+    spatial_plot.add_minor_city_labels()
+    spatial_plot.add_main_city_labels()
 
     spatial_plot.fig.plot(
         x=horc_location[0],

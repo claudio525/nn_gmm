@@ -53,7 +53,23 @@ def compute_cs_parametric_hazard(imdb_ffp: Path, output_dir: Path, site_grid_lev
     nng.hazard.compute_cs_parametric_hazard(
         imdb_ffp, output_ffp, site_grid_level
     )
-    
+
+@app.command("compute-fault-emp-hazard")
+def compute_fault_emp_hazard(
+    imdb_ffp: Path, output_dir: Path,site_grid_level: int
+):
+    """
+    Compute fault hazard using empirical distributions from the IMDB.
+    """
+    nng.utils.setup_logging()
+
+    output_ffp = (
+        output_dir
+        / f"fault_emp_hazard_site_grid_{site_grid_level if site_grid_level >= 0 else 'real'}.pkl"
+    )
+    nng.hazard.compute_fault_emp_hazard(
+        imdb_ffp, site_grid_level, output_ffp
+    )
 
 @app.command("compute-uniform-grid-ds-hazard")
 def compute_uniform_grid_ds_hazard(
@@ -87,7 +103,7 @@ def run_site_ds_hazard(
         logger.info("Running DS hazard for all reference sites.")
         sites = list(nng.constants.HAZARD_REF_SITES.keys())
 
-    nng.hazard.run_sites_ds_hazard(model_dir, sites, device, n_procs=n_procs)
+    nng.hazard.run_nn_sites_ds_hazard(model_dir, sites, device, n_procs=n_procs)
 
 
 @app.command("run-emp-site-ds-hazard")
@@ -122,6 +138,19 @@ def compute_uniform_grid_emp_ds_hazard(
     nng.hazard.compute_uniform_grid_emp_ds_hazard(imdb_ffp, output_dir, n_procs=n_procs)
 
 
+@app.command("run-site-disagg")
+def run_site_disagg(
+    full_model_dir: Path, sites: list[str], im: str, rp: float, 
+):
+    """
+    Compute disaggregation for specified sites using the
+    NN-GMM model for DS hazard and simulations for fault sources
+    """
+    nng.utils.setup_logging()
+
+    nng.hazard.compute_site_disagg(full_model_dir, sites, im, rp, device)
+    
+
 @app.command("run-emp-ds-disagg")
 def run_emp_ds_disagg(
     sites_ffp: Path,
@@ -137,6 +166,9 @@ def run_emp_ds_disagg(
     Compute empirical DS disaggregation for specified sites.
 
     tect_type has to be either None, SUBDUCTION_SLAB or ACTIVE_SHALLOW
+
+    Note: This was used to assist in selecting the DS ruptures for 
+    simulation!
     """
     logger = nng.utils.setup_logging()
 

@@ -419,7 +419,7 @@ def compute_cv_shape_values(
     run_config = nn_gmm.load_config(results_dir / "run_config.yaml")
 
     val_df = pd.read_parquet(results_dir / "val_results.parquet")
-    input_df = nn_gmm.get_input_dfs(run_config, val_df.index.values.astype(int))
+    input_df = nn_gmm.get_records_input_df(run_config, val_df.index.values.astype(int))
 
     comb_shap_explanations = []
     for cv_ix in val_df["cv_iter"].unique():

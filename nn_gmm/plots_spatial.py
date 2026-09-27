@@ -1,29 +1,24 @@
-from functools import partial
-import multiprocessing as mp
 import logging
-from pathlib import Path
-from importlib import reload
+import multiprocessing as mp
+import typing
 import warnings
+from functools import partial
+from importlib import reload
+from pathlib import Path
 
-import torch
-import pandas as pd
 import geopandas as gpd
-import shapely
-import numpy as np
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-
-from pygmt_helper import plotting
-from qcore import nhm, coordinates
 import ml_tools as mlt
+import numpy as np
+import pandas as pd
+import shapely
+import torch
+from pygmt_helper import plotting
+from qcore import coordinates, nhm
+from tqdm import tqdm
 
-from . import nn_gmm
-from .imdb import DuckIMDB
+from . import analysis, constants, loc_pre, nn_gmm, utils
 from .empdb import DuckEmpiricalDB
-from . import constants
-from . import utils
-from . import loc_pre
-from . import analysis
+from .imdb import DuckIMDB
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +45,7 @@ TOTAL_HAZARD_IM_LIMITS_MAPPING = {
 
 class SpatialPlot:
 
-    IM_LIMITS_MAPPING = {
+    IM_LIMITS_MAPPING : typing.ClassVar = {
         "pSA_0.01": (0.0, 1.0, 0.05),
         "pSA_0.1": (0.0, 2.5, 0.125),
         "pSA_0.5": (0.0, 1.5, 0.075),
@@ -60,7 +55,7 @@ class SpatialPlot:
         "pSA_10.0": (0.0, 0.025, 0.00125),
     }
 
-    DEFAULT_PLT_KWARGS = {
+    DEFAULT_PLT_KWARGS : typing.ClassVar = {
         "topo_cmap_min": -250,
         "topo_cmap_max": 6000,
         "topo_cmap_inc": 10,
@@ -71,23 +66,26 @@ class SpatialPlot:
         "coastline_pen_color": "black",
     }
 
-    DEFAULT_CONFIG_OPTIONS = dict(
-        MAP_FRAME_TYPE="plain",
+    DEFAULT_CONFIG_OPTIONS : typing.ClassVar = {
+        "MAP_FRAME_TYPE": "plain",
         # FORMAT_GEO_MAP="ddd.xx",
-        MAP_TICK_PEN_PRIMARY="0.5p,black",
-        MAP_FRAME_PEN="0.5p,black",
-        MAP_FRAME_AXES="wsne",
-        FONT_ANNOT_PRIMARY=constants.GMT_FIG_FONT_ANNOT_PRIMARY,
-        FONT_LABEL=constants.GMT_FIG_FONT_LABEL,
-    )
+        "MAP_TICK_PEN_PRIMARY": "0.5p,black",
+        "MAP_FRAME_PEN": "0.5p,black",
+        "MAP_FRAME_AXES": "wsne",
+        "FONT_ANNOT_PRIMARY": constants.GMT_FIG_FONT_ANNOT_PRIMARY,
+        "FONT_LABEL": constants.GMT_FIG_FONT_LABEL,
+    }
 
     
     CHCH_COORDS = (172.63669300877544, -43.531923487539935)
     WELLINGTON_COORDS = (174.77791888634852, -41.28387793785542)
     AUCKLAND_COORDS = (174.76555503318232, -36.850282550438685)
+    NELSON_COORDS = (173.246953726745, -41.29896111466095)
+    THAMES_COORDS = (175.54019372639644, -37.13816860135462)
+    HAMILTON_COORDS = (175.25243436298052, -37.782667727885766)
 
     def __init__(
-        self, plot_kwargs: dict = None, config_options: dict = None, **fig_kwargs
+        self, plot_kwargs: dict | None = None, config_options: dict | None = None, **fig_kwargs
     ):
         plot_kwargs = (
             self.DEFAULT_PLT_KWARGS
@@ -108,6 +106,42 @@ class SpatialPlot:
             config_options=config_options,
             plot_kwargs=plot_kwargs,
         )
+
+    def add_minor_city_labels(self, **plot_kwargs):
+        """Adds labels for minor cities to the existing figure."""
+        plot_kwargs = {
+            "style": "c0.2c",
+            "pen": "0.75p,black",
+            "fill": None
+        }
+
+        self.fig.plot(x=self.NELSON_COORDS[0], y=self.NELSON_COORDS[1], **plot_kwargs)
+        self.fig.text(
+            x=self.NELSON_COORDS[0],
+            y=self.NELSON_COORDS[1],
+            text="Nelson",
+            font=constants.MINOR_GMT_FIG_FONT_LABEL,
+            offset="0c/0.35c",
+        )
+
+        self.fig.plot(x=self.THAMES_COORDS[0], y=self.THAMES_COORDS[1], **plot_kwargs | {"style": "c0.15c"})
+        self.fig.text(
+            x=self.THAMES_COORDS[0],
+            y=self.THAMES_COORDS[1],
+            text="Thames",
+            font=constants.MINOR_GMT_FIG_FONT_LABEL,
+            offset="0.2c/-0.275c",
+        )
+
+        self.fig.plot(x=self.HAMILTON_COORDS[0], y=self.HAMILTON_COORDS[1], **plot_kwargs)
+        self.fig.text(
+            x=self.HAMILTON_COORDS[0],
+            y=self.HAMILTON_COORDS[1],
+            text="Hamilton",
+            font=constants.MINOR_GMT_FIG_FONT_LABEL,
+            offset="-0.9c/-0.13c",
+        )
+
 
     def add_main_city_labels(self, **plot_kwargs):
         """Adds labels for main cities to the existing figure."""
@@ -1024,7 +1058,7 @@ def nn_site_term_maps(
         )
 
     run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
-    logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    logger.info(f"Loading IMDB data from {run_config.imdb_ffp}")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
 

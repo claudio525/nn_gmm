@@ -1858,7 +1858,168 @@ def run_full_training(
     )
 
 
-def get_input_dfs(run_config: BaseRunConfig, record_int_ids: np.ndarray):
+def get_ds_input_df(run_config: BaseRunConfig, site_series: pd.Series, ds_source_df: pd.DataFrame):
+    rupture_df = ds_source_df[
+        [
+            "mag",
+            "dip",
+            "rake",
+            "dbot",
+            "dtop",
+            "tectonic_type",
+            "depth",
+            "is_point_source",
+        ]
+    ].copy()
+
+    # Compute site distances
+    rupture_df["rjb"] = (
+        np.sqrt(
+            (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
+            + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
+        )
+        / 1000
+    )
+    rupture_df["rrup"] = (
+        np.sqrt(
+            (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
+            + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
+            + (rupture_df["depth"] * 1000) ** 2
+        )
+        / 1000
+    )
+
+    # Same as what is done for training for DS point sources
+    rupture_df["rx"] = 0
+    rupture_df["ry"] = 0
+
+    # Apply max-rrup limit
+    rupture_df = rupture_df.loc[rupture_df.rrup <= run_config.max_rrup]
+
+    # Add site properties
+    rupture_df["vs30"] = site_series.loc["vs30"]
+    rupture_df["z1p0"] = site_series.loc["z1p0"]
+    rupture_df["z2p5"] = site_series.loc["z2p5"]
+
+    if isinstance(run_config, LocAdjRunConfig):
+        rupture_df["nztm_x"] = site_series.loc["nztm_x"]
+        rupture_df["nztm_y"] = site_series.loc["nztm_y"]
+
+    # Rename columns to match expected input names
+    rupture_df = rupture_df.rename(
+        columns={
+            "mag": "magnitude",
+            "tectonic_type": "tect_type",
+            "dbot": "dbottom",
+            "depth": "hypo_depth",
+        }
+    )
+
+    assert np.all(
+        np.isin(run_config.source_inputs, rupture_df.columns)
+    ), "Source inputs missing"
+    assert np.all(
+        np.isin(run_config.site_inputs, rupture_df.columns)
+    ), "Site inputs missing"
+    assert np.all(
+        np.isin(run_config.source_to_site_inputs, rupture_df.columns)
+    ), "Source-to-site inputs missing"
+    assert not isinstance(run_config, LocAdjRunConfig) or np.all(
+        np.isin(run_config.loc_inputs, rupture_df.columns)
+    ), "Location adjustment inputs missing"
+
+    return rupture_df
+
+
+def get_fault_events_sites_input_df(run_config: BaseRunConfig, events: np.ndarray, sites: np.ndarray):
+    """
+    Creates the site, source and site-event dataframes for the specified events and sites.
+
+    Note - Event-level inputs are used, NOT realisation-level, i.e., the event-site pairs do 
+    not match records in the IMDB. Required for computing ERF fault results, since the 
+    IMDB does not have the median realisation for each event.
+    For inputs that are at the realisation-level, the mean of the realisations is used for each event.
+    """
+    with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        site_df = imdb.get_site_df(
+            add_nztm=True, 
+        ).set_index("site_id").loc[sites]
+        sites = site_df.index.values.astype(str)
+
+        # Relevant events
+        event_df = imdb.get_event_df().set_index("event_id")
+        event_df = event_df.loc[events]
+
+        # Realisation data
+        rel_df = imdb.get_rel_df(events=event_df.index.values.astype(str))
+
+        # Get rupture distances
+        record_info_df = imdb.get_record_info_df(
+            sites=sites, events=event_df.index.values.astype(str)
+        )
+        record_info_df["site_event_int_id"] = utils.get_site_event_int_id(
+            record_info_df.site_int_id.values, record_info_df.event_int_id.values
+        )
+        site_event_df = imdb.get_site_event_df(
+            site_event_int_ids=record_info_df.site_event_int_id.values
+        )
+
+    # Source and realisation inputs keys
+    event_source_keys = np.array(run_config.source_inputs)[
+        np.isin(run_config.source_inputs, event_df.columns)
+    ]
+    rel_source_keys = np.setdiff1d(
+        np.array(run_config.source_inputs)[
+            np.isin(run_config.source_inputs, rel_df.columns)
+        ],
+        event_source_keys,
+    )
+
+    # Create input df
+    input_df = site_event_df.loc[
+        site_event_df.event_id.isin(events)
+        & site_event_df.site_id.isin(sites)
+    ].copy()
+
+    # Add site inputs
+    input_df = input_df.merge(
+        site_df[run_config.site_inputs],
+        left_on="site_id",
+        right_index=True,
+        how="left",
+    )
+
+    # Add location inputs
+    if isinstance(run_config, LocAdjRunConfig):
+        input_df["nztm_x"] = site_df.loc[
+            input_df.site_id.values, "nztm_x"
+        ].values
+        input_df["nztm_y"] = site_df.loc[
+            input_df.site_id.values, "nztm_y"
+        ].values
+
+    # Add source inputs
+    input_df = input_df.merge(
+        event_df[event_source_keys],
+        left_on="event_id",
+        right_index=True,
+        how="left",
+    )
+    # Use mean realisation inputs
+    if len(rel_source_keys) > 0:
+        input_df = input_df.merge(
+            rel_df.groupby("event_int_id")[rel_source_keys].mean(),
+            left_on="event_int_id",
+            right_index=True,
+            how="left",
+        )
+    if "is_point_source" in run_config.source_inputs:
+        input_df["is_point_source"] = False
+
+    return input_df
+    
+
+def get_records_input_df(run_config: BaseRunConfig, record_int_ids: np.ndarray):
     """
     Creates the site, source and site-event dataframes for the specified record ids.
     """
@@ -1975,7 +2136,7 @@ def compute_full_test_results(model_dir: Path, device: str):
             run_config.ims, record_int_ids=record_info_df.index.values
         )
 
-    input_df = get_input_dfs(run_config, record_info_df.index.values)
+    input_df = get_records_input_df(run_config, record_info_df.index.values)
 
     if isinstance(run_config, LocAdjRunConfig) and run_config.loc_inputs is not None:
         input_df = input_df.join(site_df[run_config.loc_inputs], on="site_int_id")
