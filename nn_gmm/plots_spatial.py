@@ -1058,7 +1058,7 @@ def nn_site_term_maps(
         )
 
     run_config = nn_gmm.load_config(nn_dir / "run_config.yaml")
-    logger.info(f"Loading IMDB data from {run_config.imdb_ffp}")
+    logging.info(f"Loading IMDB data from {run_config.imdb_ffp}")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
         site_df = imdb.get_site_df()
 

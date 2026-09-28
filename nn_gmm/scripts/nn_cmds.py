@@ -2,6 +2,7 @@ import time
 import logging
 from pathlib import Path
 
+import pandas as pd
 import torch
 import typer
 
@@ -185,43 +186,6 @@ def run_mera(
     )
 
 
-# @app.command("run-cv-fold-mera")
-# def run_cv_fold_mera(
-#     result_dir: Path,
-#     site_term: bool = False,
-#     out_dir: Path = None,
-#     n_procs: int = 4,
-#     ims: list[str] = None,
-# ):
-#     """
-#     Run mixed effects residual analysis (MERA)
-#     on each CV fold validation realisation residuals.
-#     """
-#     logger = nng.utils.setup_logging()
-
-#     res_df, _, __, record_info_df = nng.analysis.get_nn_sim_residuals(result_dir)
-
-#     for cv_ix in res_df.cv_iter.unique():
-#         logger.info(f"Processing CV fold: {cv_ix}")
-#         cur_res_df = res_df.loc[res_df.cv_iter == cv_ix].copy()
-#         logger.info(f"Running MERA for CV fold {cv_ix} with {len(cur_res_df)} records")
-
-#         nng.analysis.run_nn_mera(
-#             cur_res_df,
-#             record_info_df,
-#             (
-#                 out_dir / f"cv_{cv_ix:02d}{'_site_term' if site_term else ''}"
-#                 if out_dir
-#                 else result_dir
-#                 / f"cv_{cv_ix:02d}"
-#                 / f"mera{'_site_term' if site_term else ''}"
-#             ),
-#             site_term=site_term,
-#             n_procs=n_procs,
-#             ims=ims,
-#         )
-
-
 @app.command("run-event-mera")
 def run_event_mera(
     result_dir: Path,
@@ -298,6 +262,63 @@ def compute_cv_event_val_results(result_dirs: Path):
     """
     nng.utils.setup_logging(console_level=logging.DEBUG)
     nng.nn_gmm_cv.compute_event_val_results(result_dirs)
+
+
+@app.command("compute-sigma-ept")
+def compute_sigma_ept(
+    cv_model_dir: Path,
+    mag_bins: list[float] = [3.0, 6.0, 6.5, 7.0, 7.5, 9.0],
+):
+    """
+    Compute the surrogate epistemic uncertainty per 
+    tectonic type and magnitude bin, based on the CV residuals.
+    """
+    run_config = nng.nn_gmm.load_config(cv_model_dir / "run_config.yaml")
+
+    with nng.DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
+        event_df = imdb.get_event_df()
+
+    event_df["tect_type"] = event_df["tect_type"].astype(str)
+    mag_bin = pd.cut(event_df["magnitude"], mag_bins, right=False)
+    event_df["mag_bin"] = mag_bin.astype(str)
+    event_df["mag_bin_min"] = mag_bin.map(lambda b: b.left).astype(float)
+    event_df["mag_bin_max"] = mag_bin.map(lambda b: b.right).astype(float)
+
+    res_df = (
+        pd.read_parquet(cv_model_dir / "event_val_results.parquet")[
+            run_config.ln_residual_keys
+        ]
+        .rename(columns=dict(zip(run_config.ln_residual_keys, run_config.ims)))
+        .reset_index()
+        .join(
+            event_df[["tect_type", "mag_bin", "mag_bin_min", "mag_bin_max"]],
+            on="event_int_id",
+        )
+    )
+    res_groups = res_df.groupby(["tect_type", "mag_bin"])
+    sigma_ept_df = (
+        pd.concat(
+            {
+                "sigma_ept": res_groups[run_config.ims].std(),
+                "bias": res_groups[run_config.ims].mean(),
+            },
+            names=["stat"],
+        )
+        .reset_index("stat")
+        .join(
+            res_groups.agg(
+                mag_bin_min=("mag_bin_min", "first"),
+                mag_bin_max=("mag_bin_max", "first"),
+                n_events=("event_int_id", "nunique"),
+                n_pairs=("event_int_id", "size"),
+            )
+        )
+        .set_index("stat", append=True)
+        .sort_index()
+    )
+
+    out_ffp = cv_model_dir / "sigma_ept.csv"
+    sigma_ept_df.to_csv(out_ffp)
 
 
 @app.command("compute-full-test-results")

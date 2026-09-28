@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 import xarray as xr
 from qcore import nhm
+from scipy import stats
 from tqdm import tqdm
 
 from . import constants, nn_gmm, utils
@@ -428,7 +429,12 @@ def compute_flt_uhs(flt_hazard: pd.DataFrame, sites: list[str], rps: list[int]):
 
 
 def run_nn_sites_ds_hazard(
-    model_dir: Path, sites: list[str], device: str, n_procs: int = 1
+    model_dir: Path,
+    sites: list[str],
+    device: str,
+    n_procs: int = 1,
+    sigma_ept_ffp: Path | None = None,
+    quantile: float | None = None,
 ) -> None:
     """
     Run DS hazard calculations for multiple sites using the specified NN-GMM model.
@@ -443,6 +449,12 @@ def run_nn_sites_ds_hazard(
         Device to use for model predictions (e.g., 'cpu', 'cuda').
     n_procs : int, optional
         Number of processes to use for parallel computation. Default is 1.
+    sigma_ept_ffp : Path, optional
+        Path to the sigma_ept.csv file (from compute-sigma-ept).
+        If given, the hazard is computed at the specified quantile of the
+        surrogate epistemic uncertainty and saved in ref_sites_q{quantile}.
+    quantile : float, optional
+        Hazard quantile to compute, e.g. 0.95, requires sigma_ept_ffp.
     """
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
     with DuckIMDB(run_config.imdb_ffp, readonly=True) as imdb:
@@ -451,13 +463,22 @@ def run_nn_sites_ds_hazard(
     # Load DS source data
     ds_source_df, ds_erf_df = nn_gmm.utils.get_ds_source_data()
 
-    (out_dir := model_dir / "ds_hazard/ref_sites").mkdir(parents=True, exist_ok=True)
+    out_dir = model_dir / (
+        "ds_hazard/ref_sites" if quantile is None else f"ds_hazard/ref_sites_q{str(quantile).replace('.', 'p')}"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
     if n_procs == 1:
         hazard_results = {}
         for cur_site in sites:
             logger.info(f"Running DS hazard for site: {cur_site}")
             hazard_results[cur_site] = _run_site_ds_hazard(
-                model_dir, site_df.loc[cur_site], ds_source_df, ds_erf_df, device
+                model_dir,
+                site_df.loc[cur_site],
+                ds_source_df,
+                ds_erf_df,
+                device,
+                sigma_ept_ffp=sigma_ept_ffp,
+                quantile=quantile,
             )
     else:
         logger.info(
@@ -467,7 +488,16 @@ def run_nn_sites_ds_hazard(
             hazard_results = p.starmap(
                 _run_site_ds_hazard,
                 [
-                    (model_dir, site_df.loc[cur_site], ds_source_df, ds_erf_df, device)
+                    (
+                        model_dir,
+                        site_df.loc[cur_site],
+                        ds_source_df,
+                        ds_erf_df,
+                        device,
+                        True,
+                        sigma_ept_ffp,
+                        quantile,
+                    )
                     for cur_site in sites
                 ],
             )
@@ -548,9 +578,14 @@ def _run_site_ds_hazard(
     ds_erf_df: pd.DataFrame,
     device: str,
     tect_type_hazard: bool = True,
+    sigma_ept_ffp: Path | None = None,
+    quantile: float | None = None,
 ) -> dict[str, dict[str, pd.Series]]:
     """
     Run DS hazard calculations for a single site using a NN-GMM model.
+
+    If sigma_ept_ffp is given, the predicted median of every rupture is shifted
+    by norm.ppf(quantile) * sigma_ept(IM, tect type, magnitude bin)
 
     Returns
     -------
@@ -565,78 +600,37 @@ def _run_site_ds_hazard(
     import seismic_hazard_analysis as sha
 
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
-    # rupture_df = ds_source_df[
-    #     [
-    #         "mag",
-    #         "dip",
-    #         "rake",
-    #         "dbot",
-    #         "dtop",
-    #         "tectonic_type",
-    #         "depth",
-    #         "is_point_source",
-    #     ]
-    # ].copy()
-
-    # # Compute site distances
-    # rupture_df["rjb"] = (
-    #     np.sqrt(
-    #         (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
-    #         + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
-    #     )
-    #     / 1000
-    # )
-    # rupture_df["rrup"] = (
-    #     np.sqrt(
-    #         (site_series.loc["nztm_x"] - ds_source_df["nztm_x"]) ** 2
-    #         + (site_series.loc["nztm_y"] - ds_source_df["nztm_y"]) ** 2
-    #         + (rupture_df["depth"] * 1000) ** 2
-    #     )
-    #     / 1000
-    # )
-
-    # # Same as what is done for training for DS point sources
-    # rupture_df["rx"] = 0
-    # rupture_df["ry"] = 0
-
-    # # Apply max-rrup limit
-    # rupture_df = rupture_df.loc[rupture_df.rrup <= run_config.max_rrup]
-
-    # # Add site properties
-    # rupture_df["vs30"] = site_series.loc["vs30"]
-    # rupture_df["z1p0"] = site_series.loc["z1p0"]
-    # rupture_df["z2p5"] = site_series.loc["z2p5"]
-
-    # if isinstance(run_config, nn_gmm.LocAdjRunConfig):
-    #     rupture_df["nztm_x"] = site_series.loc["nztm_x"]
-    #     rupture_df["nztm_y"] = site_series.loc["nztm_y"]
-
-    # # Rename columns to match expected input names
-    # rupture_df = rupture_df.rename(
-    #     columns={
-    #         "mag": "magnitude",
-    #         "tectonic_type": "tect_type",
-    #         "dbot": "dbottom",
-    #         "depth": "hypo_depth",
-    #     }
-    # )
-
-    # assert np.all(
-    #     np.isin(run_config.source_inputs, rupture_df.columns)
-    # ), "Source inputs missing"
-    # assert np.all(
-    #     np.isin(run_config.site_inputs, rupture_df.columns)
-    # ), "Site inputs missing"
-    # assert np.all(
-    #     np.isin(run_config.source_to_site_inputs, rupture_df.columns)
-    # ), "Source-to-site inputs missing"
-    # assert not isinstance(run_config, nn_gmm.LocAdjRunConfig) or np.all(
-    #     np.isin(run_config.loc_inputs, rupture_df.columns)
-    # ), "Location adjustment inputs missing"
 
     rupture_df = nn_gmm.get_ds_input_df(run_config, site_series, ds_source_df)
 
     pred_df = nn_gmm.run_predictions_dir(model_dir, rupture_df, device)
+
+    if sigma_ept_ffp is not None:
+        sigma_ept_df = pd.read_csv(sigma_ept_ffp, index_col=[0, 1, 2]).xs(
+            "sigma_ept", level="stat"
+        )
+        mag_bin_edges = np.unique(sigma_ept_df[["mag_bin_min", "mag_bin_max"]])
+        sigma_ept_df = (
+            sigma_ept_df.reset_index("mag_bin", drop=True)
+            .set_index("mag_bin_min", append=True)
+            .sort_index()
+        )
+
+        # Bins constrained by a single event (i.e. slab M < 6) use the next magnitude bin
+        sigma_ept_df.loc[sigma_ept_df.n_events < 2, run_config.ims] = np.nan
+        sigma_ept_df = sigma_ept_df.groupby("tect_type")[run_config.ims].bfill()
+
+        rupture_mag_bin_min = pd.cut(
+            pred_df.magnitude, mag_bin_edges, right=False, labels=mag_bin_edges[:-1]
+        ).astype(float)
+        rupture_sigma_ept = sigma_ept_df.reindex(
+            pd.MultiIndex.from_arrays(
+                [pred_df.tect_type.astype(str), rupture_mag_bin_min]
+            )
+        ).values
+        assert not np.isnan(rupture_sigma_ept).any(), "Missing sigma_ept for some ruptures"
+
+        pred_df[run_config.pred_mean_keys] += stats.norm.ppf(quantile) * rupture_sigma_ept
 
     total_hazard_results = sha.nshm_2010.compute_gmm_hazard(
         pred_df,

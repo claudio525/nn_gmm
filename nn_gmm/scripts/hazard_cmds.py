@@ -89,13 +89,25 @@ def compute_uniform_grid_ds_hazard(
 
 @app.command("run-site-ds-hazard")
 def run_site_ds_hazard(
-    model_dir: Path, sites: list[str] | None = None, n_procs: int = 1
+    model_dir: Path,
+    sites: list[str] | None = None,
+    n_procs: int = 1,
+    sigma_ept_ffp: Path | None = None,
+    quantile: float | None = None,
 ):
     """
     Compute DS hazard for specified sites
     or reference sites if not provided.
+
+    If sigma_ept_ffp (from compute-sigma-ept) and quantile are given,
+    computes the hazard at that quantile of the surrogate epistemic uncertainty.
     """
     logger = nng.utils.setup_logging()
+
+    if (sigma_ept_ffp is None) != (quantile is None):
+        raise ValueError("sigma_ept_ffp and quantile have to be specified together.")
+    if quantile is not None and not 0 < quantile < 1:
+        raise ValueError(f"Quantile has to be in (0, 1), got {quantile}.")
 
     if sites is not None:
         logger.info(f"Running DS hazard for specified sites: {sites}")
@@ -103,7 +115,14 @@ def run_site_ds_hazard(
         logger.info("Running DS hazard for all reference sites.")
         sites = list(nng.constants.HAZARD_REF_SITES.keys())
 
-    nng.hazard.run_nn_sites_ds_hazard(model_dir, sites, device, n_procs=n_procs)
+    nng.hazard.run_nn_sites_ds_hazard(
+        model_dir,
+        sites,
+        device,
+        n_procs=n_procs,
+        sigma_ept_ffp=sigma_ept_ffp,
+        quantile=quantile,
+    )
 
 
 @app.command("run-emp-site-ds-hazard")
