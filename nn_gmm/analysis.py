@@ -96,19 +96,19 @@ def get_emp_sim_residuals(empdb_ffp: Path, sim_df: pd.DataFrame):
     the specified simulation results.
     """
     with DuckEmpiricalDB(empdb_ffp, readonly=True) as empdb:
-        val_emp_df = empdb.get_gm_params_tmp_table(
+        emp_gm_params_df = empdb.get_gm_params_tmp_table(
             sim_df.index.values.astype(int)
         ).sort_index()
-    assert val_emp_df.index.equals(sim_df.index)
+    assert emp_gm_params_df.index.equals(sim_df.index)
 
     emp_res_df = pd.DataFrame(
         data=np.log(sim_df[constants.PSA_KEYS].values)
-        - val_emp_df[constants.GMM_PSA_MEAN_KEYS].values,
-        index=val_emp_df.index,
+        - emp_gm_params_df[constants.GMM_PSA_MEAN_KEYS].values,
+        index=emp_gm_params_df.index,
         columns=constants.PSA_KEYS,
     )
 
-    return emp_res_df
+    return emp_res_df, emp_gm_params_df
 
 
 def run_event_mera(

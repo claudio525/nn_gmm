@@ -1039,25 +1039,38 @@ def mera_basin_site_term_comparison(
 
 
 def site_hazard(
-    ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None
+    ds_results_dir: Path,
+    output_dir: Path,
+    emp_ds_results_dir: Path | None = None,
+    lower_ds_results_dir: Path | None = None,
+    upper_ds_results_dir: Path | None = None,
 ):
+    """
+    Lower/upper DS results directories are the lower/upper branch
+    (e.g. 5th/95th quantile) NN-GMM DS hazard results, shown as a band.
+    """
+    if (lower_ds_results_dir is None) != (upper_ds_results_dir is None):
+        raise ValueError(
+            "lower_ds_results_dir and upper_ds_results_dir have to be specified together."
+        )
+
+    def load_ds_hazard(results_dir: Path | None) -> dict:
+        if results_dir is None:
+            return {}
+        return {
+            cur_ffp.stem: pd.read_pickle(cur_ffp)
+            for cur_ffp in results_dir.glob("*.pkl")
+        }
+
     # Load Cybershake fault hazard
     cs_flt_hazard = pd.read_pickle(
         constants.HAZARD_RESOURCES_DIR / "flt/Cybershake_hazard_data.pkl"
     )
 
-    # Load NN-GMM DS hazard results
-    nn_ds_hazard = {
-        cur_ffp.stem: pd.read_pickle(ds_results_dir / f"{cur_ffp.stem}.pkl")
-        for cur_ffp in ds_results_dir.glob("*.pkl")
-    }
-
-    # Load empirical DS hazard results
-    if emp_ds_results_dir is not None:
-        emp_ds_hazard = {
-            cur_ffp.stem: pd.read_pickle(emp_ds_results_dir / f"{cur_ffp.stem}.pkl")
-            for cur_ffp in emp_ds_results_dir.glob("*.pkl")
-        }
+    nn_ds_hazard = load_ds_hazard(ds_results_dir)
+    emp_ds_hazard = load_ds_hazard(emp_ds_results_dir)
+    lower_ds_hazard = load_ds_hazard(lower_ds_results_dir)
+    upper_ds_hazard = load_ds_hazard(upper_ds_results_dir)
 
     for site, hazard_result in nn_ds_hazard.items():
         logger.info(f"Creating hazard plots for site: {site}")
@@ -1068,9 +1081,9 @@ def site_hazard(
                 cur_im,
                 output_dir / f"{site}_hazard_{cur_im}.png",
                 cs_flt_hazard=cs_flt_hazard[cur_im],
-                emp_ds_hazard=(
-                    emp_ds_hazard.get(site) if emp_ds_results_dir is not None else None
-                ),
+                emp_ds_hazard=emp_ds_hazard.get(site),
+                lower_nn_ds_hazard=lower_ds_hazard.get(site),
+                upper_nn_ds_hazard=upper_ds_hazard.get(site),
             )
 
 
@@ -1081,6 +1094,8 @@ def _create_hazard_plot(
     output_ffp: Path,
     cs_flt_hazard: pd.DataFrame = None,
     emp_ds_hazard: dict[str, pd.Series] | None = None,
+    lower_nn_ds_hazard: dict[str, dict[str, pd.Series]] | None = None,
+    upper_nn_ds_hazard: dict[str, dict[str, pd.Series]] | None = None,
     dpi: int = 300,
     figsize: tuple = (8, 6),
 ):
@@ -1089,6 +1104,21 @@ def _create_hazard_plot(
     im_levels = nn_ds_hazard["total"][im].index.values
 
     ax.plot(im_levels, nn_ds_hazard["total"][im].values, label="NN-GMM DS", color="b")
+    if lower_nn_ds_hazard is not None and upper_nn_ds_hazard is not None:
+        assert np.allclose(
+            lower_nn_ds_hazard["total"][im].index.values, im_levels
+        ) and np.allclose(
+            upper_nn_ds_hazard["total"][im].index.values, im_levels
+        ), "Lower/upper DS hazard IM levels do not match NN-GMM DS hazard IM levels"
+        ax.fill_between(
+            im_levels,
+            lower_nn_ds_hazard["total"][im].values,
+            upper_nn_ds_hazard["total"][im].values,
+            color="b",
+            alpha=0.2,
+            linewidth=0,
+            label="NN-GMM DS Epistemic Band",
+        )
     # ax.plot(im_levels, nn_ds_hazard["crustal"][im].values, label="NN-GMM DS Crustal", color="b", linestyle="--")
     # ax.plot(im_levels, nn_ds_hazard["subduction_slab"][im].values, label="NN-GMM DS Subduction", color="b", linestyle=":")
 

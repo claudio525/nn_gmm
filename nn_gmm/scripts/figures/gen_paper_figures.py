@@ -3114,6 +3114,85 @@ def site_distribution_maps(imdb_ffp: Path, output_dir: Path):
     )
 
 
+@app.command("standardized-residuals")
+def standardized_residuals(
+    base_model_results_dir: Path,
+    loc_adj_results_dir: Path,
+    empdb_ffp: Path,
+    output_dir: Path,
+):
+    """
+    Plot the standard deviation of the standardized residuals,
+    (obs - pred) / pred_std, against period for the base and location
+    NN-GMM CV validation results and the empirical GMM, to assess the
+    calibration of the predicted standard deviation.
+    """
+    nng.utils.setup_logging()
+    _fig_settings()
+
+    run_config = nng.nn_gmm.load_config(base_model_results_dir / "run_config.yaml")
+    assert np.all(
+        run_config.ims == np.asarray(nng.constants.PSA_KEYS)
+    ), "Model IMs do not match the empirical GMM IMs"
+
+    base_res_df, base_pred_df, sim_df, record_info_df = (
+        nng.analysis.get_nn_sim_residuals(base_model_results_dir)
+    )
+    # Passing the base sim_df also asserts that both models have the same records
+    loc_res_df, loc_pred_df, *_ = nng.analysis.get_nn_sim_residuals(
+        loc_adj_results_dir, sim_df=sim_df, record_info_df=record_info_df
+    )
+    emp_res_df, emp_gm_params_df = nng.analysis.get_emp_sim_residuals(
+        empdb_ffp, sim_df
+    )
+
+    fig, ax = plt.subplots(figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI)
+    for res_df, pred_std_df, color, linestyle, label in [
+        (
+            base_res_df[run_config.ims],
+            base_pred_df[run_config.pred_std_keys],
+            "blue",
+            "-",
+            "Base",
+        ),
+        (
+            loc_res_df[run_config.ims],
+            loc_pred_df[run_config.pred_std_keys],
+            "blue",
+            "--",
+            "Location",
+        ),
+        (
+            emp_res_df[nng.constants.PSA_KEYS],
+            emp_gm_params_df[nng.constants.GMM_PSA_TOTAL_STD_KEYS],
+            "green",
+            "-",
+            "Empirical GMM",
+        ),
+    ]:
+        ax.plot(
+            run_config.pSA_periods,
+            (res_df.values / pred_std_df.values).std(axis=0),
+            c=color,
+            linestyle=linestyle,
+            label=label,
+            linewidth=nng.constants.FIG_LINEWIDTH,
+        )
+    ax.axhline(1.0, c="gray", linestyle=":", linewidth=0.75)
+
+    ax.set_xscale("log")
+    ax.set_xlim(0.01, 10.0)
+    ax.set_xlabel("Vibration Period, T (s)")
+    ax.set_ylim(0.6, 1.4)
+    ax.set_ylabel("Normalized Residual Standard Deviation")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--", which="both")
+    ax.legend()
+    fig.tight_layout()
+
+    fig.savefig(output_dir / f"std_residuals.{nng.constants.FIG_FORMAT}")
+    plt.close(fig)
+
+
 @app.command("site-to-site-residual-hist")
 def site_to_site_residual_hist(
     im: str,

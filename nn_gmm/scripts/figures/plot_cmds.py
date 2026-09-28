@@ -562,15 +562,24 @@ def mera_basin_site_term(
 
 @app.command("gen-site-hazard-plots")
 def gen_site_hazard_plots(
-    ds_results_dir: Path, output_dir: Path, emp_ds_results_dir: Path | None = None
+    ds_results_dir: Path,
+    output_dir: Path,
+    emp_ds_results_dir: Path | None = None,
+    lower_ds_results_dir: Path | None = None,
+    upper_ds_results_dir: Path | None = None,
 ):
     """
     Generate site hazard plots for DS hazard results.
-    Also adds empirical DS & simulation flt hazard curves.
+    Also adds empirical DS & simulation flt hazard curves,
+    and the NN-GMM DS epistemic band if lower/upper results are given.
     """
     nng.utils.setup_logging()
     nng.plots.site_hazard(
-        ds_results_dir, output_dir, emp_ds_results_dir=emp_ds_results_dir
+        ds_results_dir,
+        output_dir,
+        emp_ds_results_dir=emp_ds_results_dir,
+        lower_ds_results_dir=lower_ds_results_dir,
+        upper_ds_results_dir=upper_ds_results_dir,
     )
 
 
