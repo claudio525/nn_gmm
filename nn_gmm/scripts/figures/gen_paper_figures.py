@@ -1635,12 +1635,23 @@ def single_site_ds_hazard_plot(
     loc_nn_ds_dir: Path,
     emp_ds_dir: Path,
     out_dir: Path,
+    lower_base_ds_dir: Path | None = None,
+    upper_base_ds_dir: Path | None = None,
 ):
     """
     DS Hazard plot for two NN-GMM models and
     empirical DS hazard for one site and one IM,
     broken down by tectonic source type.
+
+    If the lower/upper branch base model DS hazard directories
+    (i.e. from run-site-ds-hazard with a quantile) are given,
+    these are shown as a band for the base model total DS hazard.
     """
+    if (lower_base_ds_dir is None) != (upper_base_ds_dir is None):
+        raise ValueError(
+            "lower_base_ds_dir and upper_base_ds_dir have to be specified together."
+        )
+
     nng.utils.setup_logging()
     _fig_settings()
 
@@ -1789,6 +1800,25 @@ def single_site_ds_hazard_plot(
     #     linewidth=nng.constants.FIG_LINEWIDTH,
     # )
 
+    band_handles, band_labels = [], []
+    if lower_base_ds_dir is not None:
+        lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")["total"][im]
+        upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")["total"][im]
+        assert lower_ds_hazard.index.equals(
+            base_ds_hazard[site]["total"][im].index
+        ) and upper_ds_hazard.index.equals(
+            base_ds_hazard[site]["total"][im].index
+        ), "Lower/upper DS hazard and base DS hazard do not have the same intensity measure levels"
+        base_band = ax.fill_between(
+            lower_ds_hazard.index.values,
+            lower_ds_hazard.values,
+            upper_ds_hazard.values,
+            color="blue",
+            alpha=0.15,
+            linewidth=0,
+        )
+        band_handles, band_labels = [base_band], ["Surrogate: Base Epistemic Band"]
+
     ax.set_ylim(1e-5, 0.1)
     ax.set_xlim(0.01, 1.0)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
@@ -1823,8 +1853,9 @@ def single_site_ds_hazard_plot(
     ax.add_artist(legend_1)
 
     ax.legend(
-        handles=[_make_line_proxy(emp_ds_line), _make_line_proxy(base_ds_line)],
-        labels=["Empirical", "Surrogate: Base"],
+        handles=[_make_line_proxy(emp_ds_line), _make_line_proxy(base_ds_line)]
+        + band_handles,
+        labels=["Empirical", "Surrogate: Base"] + band_labels,
         loc="upper right",
     )
 
@@ -1844,12 +1875,23 @@ def single_site_hazard_plot(
     loc_nn_ds_dir: Path,
     emp_ds_dir: Path,
     out_dir: Path,
+    lower_base_ds_dir: Path | None = None,
+    upper_base_ds_dir: Path | None = None,
 ):
     """
     Hazard plot (CS Fault, DS - Model, Total) for
     two NN-GMM models and empirical DS hazard
     for one site and one IM
+
+    If the lower/upper branch base model DS hazard directories
+    (i.e. from run-site-ds-hazard with a quantile) are given,
+    these are shown as a band for the base model DS and total hazard.
     """
+    if (lower_base_ds_dir is None) != (upper_base_ds_dir is None):
+        raise ValueError(
+            "lower_base_ds_dir and upper_base_ds_dir have to be specified together."
+        )
+
     nng.utils.setup_logging()
     _fig_settings()
 
@@ -1892,39 +1934,6 @@ def single_site_hazard_plot(
     fig, ax = plt.subplots(figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI)
 
     _plot_poe_lines(ax)
-
-    # rp_475_prob = sha.utils.rp_to_prob(475)
-    # ax.axhline(
-    #     rp_475_prob,
-    #     linestyle="dashed",
-    #     color=nng.constants.DARKGRAY,
-    #     linewidth=nng.constants.FIG_MINOR_LINEWIDTH,
-    # )
-    # ax.text(
-    #     0.01,
-    #     rp_475_prob * 1.05,
-    #     "10% in 50 years",
-    #     transform=ax.get_yaxis_transform(),
-    #     va="bottom",
-    #     ha="left",
-    #     color=nng.constants.DARKGRAY,
-    # )
-    # rp_2475_prob = sha.utils.rp_to_prob(2475)
-    # ax.axhline(
-    #     rp_2475_prob,
-    #     linestyle="dashed",
-    #     color=nng.constants.DARKGRAY,
-    #     linewidth=nng.constants.FIG_MINOR_LINEWIDTH,
-    # )
-    # ax.text(
-    #     0.01,
-    #     rp_2475_prob * 1.05,
-    #     "2% in 50 years",
-    #     transform=ax.get_yaxis_transform(),
-    #     va="bottom",
-    #     ha="left",
-    #     color=nng.constants.DARKGRAY,
-    # )
 
     (base_ds_line,) = ax.loglog(
         base_ds_hazard.index.values,
@@ -1987,6 +1996,34 @@ def single_site_hazard_plot(
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
 
+    band_handles, band_labels = [], []
+    if lower_base_ds_dir is not None:
+        lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")["total"][im]
+        upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")["total"][im]
+        assert lower_ds_hazard.index.equals(
+            base_ds_hazard.index
+        ) and upper_ds_hazard.index.equals(
+            base_ds_hazard.index
+        ), "Lower/upper DS hazard and base DS hazard do not have the same intensity measure levels"
+
+        base_band = ax.fill_between(
+            base_ds_hazard.index.values,
+            lower_ds_hazard.values,
+            upper_ds_hazard.values,
+            color="blue",
+            alpha=0.15,
+            linewidth=0,
+        )
+        ax.fill_between(
+            base_ds_hazard.index.values,
+            lower_ds_hazard.values + cs_flt_hazard.values,
+            upper_ds_hazard.values + cs_flt_hazard.values,
+            color="blue",
+            alpha=0.15,
+            linewidth=0,
+        )
+        band_handles, band_labels = [base_band], ["Surrogate: Base Epistemic Band"]
+
     ax.set_ylim(1e-5, 0.1)
     ax.set_xlim(0.01, 1.0)
     ax.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
@@ -2002,21 +2039,6 @@ def single_site_hazard_plot(
     )
     ax.set_xlabel(nng.utils.get_nice_im_name(im))
 
-    # legend = ax.legend(
-    #     handles=[
-    #         cs_flt_line,
-    #         emp_ds_line,
-    #         base_ds_line,
-    #         loc_ds_line,
-    #         emp_total_line,
-    #         base_total_line,
-    #         loc_total_line,
-    #     ],
-    #     loc="upper right",
-    # )
-    # for legline in legend.get_lines():
-    # legline.set_linewidth(1.5)
-
     # Legend
     legend_1 = ax.legend(
         handles=[
@@ -2026,12 +2048,14 @@ def single_site_hazard_plot(
             ),
             (_make_line_proxy(base_ds_line), _make_line_proxy(base_total_line)),
             (_make_line_proxy(loc_ds_line), _make_line_proxy(loc_total_line)),
-        ],
+        ]
+        + band_handles,
         labels=[
             "Empirical",
             "Surrogate: Base",
             "Surrogate: Location",
-        ],
+        ]
+        + band_labels,
         loc="upper right",
         handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
         handlelength=4.0,
