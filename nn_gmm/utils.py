@@ -333,7 +333,7 @@ def get_ds_source_data():
 def rp_to_poe_string(rp: int) -> str:
     """Convert return period to nice PoE string."""
     poe = rp_to_prob(rp, 50)
-    return f"{int(np.round(poe * 100.0))}% in 50 Years"
+    return f"{int(np.round(poe * 100.0))}% in 50 years"
 
 
 def rp_to_prob(rp: float, t: float = 1.0):

@@ -167,7 +167,9 @@ def nn_fault_hazard_bias_res_std(
 def plot_disagg(
     disagg_results_ffp: Path,
     output_dir: Path,
-    title: str | None = None,
+    site: str,
+    im: str,
+    rp: int,
 ):
     """
     Generate disaggregation plots for specified disagg results.
@@ -214,14 +216,27 @@ def plot_disagg(
         },
     )
 
-    if title is not None:
-        fig.text(
-            position="TL",
-            justify="TL",
-            text=title,
-            offset="0.2c/-0.2c",  
-            font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
-        )
+    fig.text(
+        position="TL",
+        justify="TL",
+        text=f"Site: {site}",
+        offset="0.2c/-0.2c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    fig.text(
+        position="TL",
+        justify="TL",
+        text=f"IM: {nng.utils.get_nice_im_name(im)}",
+        offset="0.2c/-0.8c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
+    fig.text(
+        position="TL",
+        justify="TL",
+        text=f"PoE: {nng.utils.rp_to_poe_string(rp)}",
+        offset="0.2c/-1.4c",
+        font=nng.constants.GMT_FIG_BOLD_FONT_LABEL,
+    )
 
     fig.savefig(
         output_dir / f"{disagg_results_ffp.stem}_disagg_plot.png",

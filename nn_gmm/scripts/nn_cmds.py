@@ -1,12 +1,12 @@
-import time
 import logging
+import time
 from pathlib import Path
 
+import ml_tools as mlt
 import pandas as pd
 import torch
 import typer
 
-import ml_tools as mlt
 import nn_gmm as nng
 
 torch.multiprocessing.set_start_method("spawn", force=True)

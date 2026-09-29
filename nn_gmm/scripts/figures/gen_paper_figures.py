@@ -1686,38 +1686,6 @@ def single_site_ds_hazard_plot(
 
     _plot_poe_lines(ax)
 
-    # rp_475_prob = sha.utils.rp_to_prob(475)
-    # ax.axhline(
-    #     rp_475_prob,
-    #     linestyle="dashed",
-    #     color=nng.constants.DARKGRAY,
-    #     linewidth=nng.constants.FIG_MINOR_LINEWIDTH,
-    # )
-    # ax.text(
-    #     0.01,
-    #     rp_475_prob * 1.05,
-    #     "10% in 50 years",
-    #     transform=ax.get_yaxis_transform(),
-    #     va="bottom",
-    #     ha="left",
-    #     color=nng.constants.DARKGRAY,
-    # )
-    # rp_2475_prob = sha.utils.rp_to_prob(2475)
-    # ax.axhline(
-    #     rp_2475_prob,
-    #     linestyle="dashed",
-    #     color=nng.constants.DARKGRAY,
-    #     linewidth=nng.constants.FIG_MINOR_LINEWIDTH,
-    # )
-    # ax.text(
-    #     0.01,
-    #     rp_2475_prob * 1.05,
-    #     "2% in 50 years",
-    #     transform=ax.get_yaxis_transform(),
-    #     va="bottom",
-    #     ha="left",
-    #     color=nng.constants.DARKGRAY,
-    # )
 
     (emp_ds_line,) = ax.loglog(
         emp_ds_hazard[site]["total"][im].index.values,
@@ -1763,14 +1731,7 @@ def single_site_ds_hazard_plot(
         linewidth=nng.constants.FIG_GROUP_LINEWIDTH,
         # linewidth=nng.constants.FIG_LINEWIDTH,
     )
-    # (crustal_loc_ds_line,) = ax.loglog(
-    #     loc_ds_hazard[site]["crustal"][im].index.values,
-    #     loc_ds_hazard[site]["crustal"][im].values,
-    #     label="Location Model Crustal DS Hazard",
-    #     color="red",
-    #     linestyle="dashed",
-    #     linewidth=nng.constants.FIG_LINEWIDTH,
-    # )
+
 
     # Subduction Slab
     (slab_emp_ds_line,) = ax.loglog(
@@ -1800,7 +1761,7 @@ def single_site_ds_hazard_plot(
     #     linewidth=nng.constants.FIG_LINEWIDTH,
     # )
 
-    band_handles, band_labels = [], []
+    base_handle = _make_line_proxy(base_ds_line)
     if lower_base_ds_dir is not None:
         lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")["total"][im]
         upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")["total"][im]
@@ -1817,7 +1778,8 @@ def single_site_ds_hazard_plot(
             alpha=0.15,
             linewidth=0,
         )
-        band_handles, band_labels = [base_band], ["Surrogate: Base Epistemic Band"]
+        # Shaded band behind the line in the legend
+        base_handle = (base_band, base_handle)
 
     ax.set_ylim(1e-5, 0.1)
     ax.set_xlim(0.01, 1.0)
@@ -1837,26 +1799,27 @@ def single_site_ds_hazard_plot(
     # Legend
     legend_1 = ax.legend(
         handles=[
-            (_make_line_proxy(emp_ds_line), _make_line_proxy(base_ds_line)),
-            (
-                _make_line_proxy(crustal_emp_ds_line),
-                _make_line_proxy(crustal_base_ds_line),
-            ),
-            (_make_line_proxy(slab_emp_ds_line), _make_line_proxy(slab_base_ds_line)),
+            mlines.Line2D([], [], color="k", linestyle=cur_line.get_linestyle(), linewidth=1.0)
+            for cur_line in (base_ds_line, crustal_base_ds_line, slab_base_ds_line)
         ],
         labels=["Total", "Crustal", "Subduction Slab"],
+        title="Tectonic Type",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
         loc="lower left",
-        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
         handlelength=4.0,
         # bbox_to_anchor=(1.0, 0.875),
     )
     ax.add_artist(legend_1)
 
     ax.legend(
-        handles=[_make_line_proxy(emp_ds_line), _make_line_proxy(base_ds_line)]
-        + band_handles,
-        labels=["Empirical", "Surrogate: Base"] + band_labels,
+        handles=[_make_line_proxy(emp_ds_line), base_handle],
+        labels=["Empirical", "Surrogate: Base"],
+        title="Model",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
         loc="upper right",
+        handlelength=4.0,
     )
 
     fig.tight_layout()
@@ -1996,7 +1959,8 @@ def single_site_hazard_plot(
         linewidth=nng.constants.FIG_LINEWIDTH,
     )
 
-    band_handles, band_labels = [], []
+    base_handle = (_make_line_proxy(base_ds_line), _make_line_proxy(base_total_line))
+    handler_map = {tuple: HandlerTuple(ndivide=None, pad=0.6)}
     if lower_base_ds_dir is not None:
         lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")["total"][im]
         upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")["total"][im]
@@ -2022,7 +1986,9 @@ def single_site_hazard_plot(
             alpha=0.15,
             linewidth=0,
         )
-        band_handles, band_labels = [base_band], ["Surrogate: Base Epistemic Band"]
+        # Shaded band behind both (DS & total) lines in the legend entry
+        base_handle = (base_band, base_handle)
+        handler_map[base_handle] = HandlerTuple(ndivide=1)
 
     ax.set_ylim(1e-5, 0.1)
     ax.set_xlim(0.01, 1.0)
@@ -2046,18 +2012,19 @@ def single_site_hazard_plot(
                 _make_line_proxy(emp_ds_line),
                 _make_line_proxy(emp_total_line),
             ),
-            (_make_line_proxy(base_ds_line), _make_line_proxy(base_total_line)),
+            base_handle,
             (_make_line_proxy(loc_ds_line), _make_line_proxy(loc_total_line)),
-        ]
-        + band_handles,
+        ],
         labels=[
             "Empirical",
             "Surrogate: Base",
             "Surrogate: Location",
-        ]
-        + band_labels,
+        ],
+        title="Distributed Seismicity Model",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
         loc="upper right",
-        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
+        handler_map=handler_map,
         handlelength=4.0,
         # bbox_to_anchor=(1.0, 0.875),
     )
@@ -2065,19 +2032,13 @@ def single_site_hazard_plot(
 
     ax.legend(
         handles=[
-            (
-                _make_line_proxy(emp_total_line),
-                _make_line_proxy(base_total_line),
-                _make_line_proxy(loc_total_line),
-            ),
-            _make_line_proxy(cs_flt_line),
-            (
-                _make_line_proxy(emp_ds_line),
-                _make_line_proxy(base_ds_line),
-                _make_line_proxy(loc_ds_line),
-            ),
+            mlines.Line2D([], [], color="k", linestyle=cur_line.get_linestyle(), linewidth=1.0)
+            for cur_line in (base_total_line, cs_flt_line, base_ds_line)
         ],
         labels=["Total", "Cybershake: Fault", "Distributed Seismicity"],
+        title="Hazard Component",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
         loc="lower left",
         handlelength=4.0,
     )
@@ -2398,17 +2359,25 @@ def _plot_poe_lines(ax: plt.Axes, right: bool = False):
 
 @app.command("site-hazard-2-plot")
 def site_hazard_2_plot(
-    base_nn_ds_dir: Path, loc_nn_ds_dir: Path, emp_ds_dir: Path, out_dir: Path
+    base_nn_ds_dir: Path,
+    loc_nn_ds_dir: Path,
+    emp_ds_dir: Path,
+    out_dir: Path,
+    im: str = "pSA_5.0",
+    y_min: float = 1e-5,
+    y_max: float = 0.1,
+    poe_label_right: bool = True,
+    legend_loc: str = "upper right",
+    site_label_x: float = 0.9,
 ):
     """
     Hazard plots for two NN-GMM models and
-    empirical DS hazard for two sites and two IMs
+    empirical DS hazard for two sites and the given IM
     """
     nng.utils.setup_logging()
     _fig_settings()
 
     site1, site2 = "HORC", "LHUS"
-    im = "pSA_5.0"
 
     # Load Cybershake fault hazard
     cs_flt_hazard = pd.read_pickle(
@@ -2433,7 +2402,7 @@ def site_hazard_2_plot(
         for cur_ffp in emp_ds_dir.glob("*.pkl")
     }
 
-    site_txt_offset = (0.03, 0.97)
+    site_txt_offset = (site_label_x, 0.97)
     bbox_dict = dict(boxstyle="round", fc="w", ec="0.8", alpha=0.8)
     fig, (ax1, ax2) = mlt.plotting.get_fig_axes(
         2, 2, 1, ind_figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI
@@ -2445,7 +2414,7 @@ def site_hazard_2_plot(
     cur_loc_ds = loc_ds_hazard[site1]["total"][im]
     cur_emp_ds = emp_ds_hazard[site1]["total"][im]
 
-    _plot_poe_lines(ax1, True)
+    _plot_poe_lines(ax1, poe_label_right)
 
     (
         cur_cs_flt_line,
@@ -2457,7 +2426,7 @@ def site_hazard_2_plot(
         cur_loc_total_line,
     ) = _plot_hazard(ax1, cur_cs_flt, cur_emp_ds, cur_base_ds, cur_loc_ds)
 
-    ax1.set_ylim(1e-5, 0.1)
+    ax1.set_ylim(y_min, y_max)
     ax1.set_xlim(0.01, 0.8)
     ax1.grid(which="both", linewidth=0.5, alpha=0.5, linestyle="--")
     # ax1.tick_params(labelbottom=False)
@@ -2468,42 +2437,40 @@ def site_hazard_2_plot(
         site_txt_offset[1],
         site1,
         transform=ax1.transAxes,
-        horizontalalignment="left",
+        horizontalalignment="center",
         verticalalignment="top",
         # fontweight="bold",
         bbox=bbox_dict,
     )
 
     # Legend
-    legend_1 = ax1.legend(
+    ax2.legend(
         handles=[
-            _make_line_proxy(cur_emp_total_line),
-            _make_line_proxy(cur_base_total_line),
-            _make_line_proxy(cur_loc_total_line),
+            (_make_line_proxy(cur_emp_ds_line), _make_line_proxy(cur_emp_total_line)),
+            (_make_line_proxy(cur_base_ds_line), _make_line_proxy(cur_base_total_line)),
+            (_make_line_proxy(cur_loc_ds_line), _make_line_proxy(cur_loc_total_line)),
         ],
         labels=["Empirical", "Surrogate: Base", "Surrogate: Location"],
-        loc="upper right",
+        title="Distributed Seismicity Model",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
+        loc=legend_loc,
+        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
+        handlelength=4.0,
     )
     # ax2.add_artist(legend_1)
 
-    ax2.legend(
+    ax1.legend(
         handles=[
-            _make_line_proxy(cur_cs_flt_line),
-            (
-                _make_line_proxy(cur_emp_ds_line),
-                _make_line_proxy(cur_base_ds_line),
-                _make_line_proxy(cur_loc_ds_line),
-            ),
-            (
-                _make_line_proxy(cur_emp_total_line),
-                _make_line_proxy(cur_base_total_line),
-                _make_line_proxy(cur_loc_total_line),
-            ),
+            mlines.Line2D([], [], color="k", linestyle=cur_line.get_linestyle(), linewidth=1.0)
+            for cur_line in (cur_base_total_line, cur_cs_flt_line, cur_base_ds_line)
         ],
-        labels=["Cybershake: Fault", "Distributed", "Total"],
-        loc="upper right",
-        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.6)},
-        handlelength=6.0,
+        labels=["Total", "Cybershake: Fault", "Distributed Seismicity"],
+        title="Hazard Component",
+        title_fontproperties={"weight": "bold"},
+        alignment="left",
+        loc=legend_loc,
+        handlelength=4.0,
         # bbox_to_anchor=(1.0, 0.775),
     )
 
@@ -2516,7 +2483,7 @@ def site_hazard_2_plot(
     cur_loc_ds = loc_ds_hazard[site2]["total"][im]
     cur_emp_ds = emp_ds_hazard[site2]["total"][im]
 
-    _plot_poe_lines(ax2, True)
+    _plot_poe_lines(ax2, poe_label_right)
 
     _plot_hazard(ax2, cur_cs_flt, cur_emp_ds, cur_base_ds, cur_loc_ds)
 
@@ -2529,7 +2496,7 @@ def site_hazard_2_plot(
         site_txt_offset[1],
         site2,
         transform=ax2.transAxes,
-        horizontalalignment="left",
+        horizontalalignment="center",
         verticalalignment="top",
         # fontweight="bold",
         bbox=bbox_dict,
@@ -2545,7 +2512,10 @@ def site_hazard_2_plot(
         wspace=0.075,
         hspace=0.15,
     )
-    fig.savefig(out_dir / f"site_hazard_2_plot.{nng.constants.FIG_FORMAT}")
+    fig.savefig(
+        out_dir
+        / f"site_hazard_2_plot_{nng.utils.get_im_filename(im)}.{nng.constants.FIG_FORMAT}"
+    )
     plt.close(fig)
 
 
@@ -2723,7 +2693,7 @@ def model_trends(
         raise ValueError(f"Unknown trend type: {config['type']}")
 
     legend_handles.append(
-        mlines.Line2D([], [], color="g", label="Empirical - Bradley (2013)")
+        mlines.Line2D([], [], color="g", label="Empirical")
     )
     axs[0].legend(handles=legend_handles)
     axs[0].set_xticklabels([])
@@ -2748,9 +2718,14 @@ def model_trends(
             ax.set_ylim(MAG_IM_YAXIS_LIMITS[im])
         elif config["type"] == "rrup":
             ax.set_ylim(RRUP_IM_YAXIS_LIMITS[im])
+    axs[0].set_ylabel("Pseudo-Spectral Acceleration (g)", labelpad=3)
+    axs[1].set_ylabel(None)
+    axs[2].set_ylabel("Pseudo-Spectral Acceleration (g)", labelpad=3)
+    axs[3].set_ylabel(None)
 
     fig.subplots_adjust(
-        left=0.06, right=0.98, top=0.99, bottom=0.07, wspace=0.04, hspace=0.025
+        # left=0.06, right=0.98, top=0.99, bottom=0.07, wspace=0.04, hspace=0.025
+        left=0.09, right=0.98, top=0.99, bottom=0.07, wspace=0.04, hspace=0.04
     )
     fig.savefig(
         output_dir
@@ -3320,6 +3295,46 @@ def site_to_site_residual_hist(
         out_dir
         / f"site_to_site_residual_hist_{nng.utils.get_im_filename(im)}.{nng.constants.FIG_FORMAT}",
     )
+
+
+@app.command("combine-disagg-figures")
+def combine_disagg_figures(
+    left_fig_ffp: Path,
+    right_fig_ffp: Path,
+    output_ffp: Path,
+    left_label: str = "Empirical",
+    right_label: str = "Surrogate",
+    fig_width: float = 8.3,
+    dpi: int = 300,
+):
+    """
+    Combine two disaggregation figures side-by-side into one figure.
+    """
+    left_img, right_img = plt.imread(left_fig_ffp), plt.imread(right_fig_ffp)
+    fig, axs = plt.subplots(
+        nrows=1,
+        ncols=2,
+        figsize=(fig_width, fig_width / 2 * left_img.shape[0] / left_img.shape[1]),
+        dpi=dpi,
+    )
+
+    for ax, img, label in zip(axs, (left_img, right_img), (left_label, right_label)):
+        ax.imshow(img, aspect="equal")
+        ax.text(
+            0.5,
+            0.98,
+            label,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            horizontalalignment="center",
+            fontsize=8,
+            fontweight="bold",
+        )
+        ax.axis("off")
+
+    plt.subplots_adjust(wspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
+    fig.savefig(output_ffp)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
