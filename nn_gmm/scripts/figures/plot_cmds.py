@@ -9,7 +9,6 @@ import pandas as pd
 import seaborn as sns
 import torch
 import typer
-import xarray as xr
 from pygmt_helper import plots
 from tqdm import tqdm
 
@@ -23,84 +22,6 @@ if torch.mps.is_available():
 print(f"Using device: {device.upper()}")
 
 app = typer.Typer(pretty_exceptions_show_locals=False)
-
-
-@app.command("plot-loss-curves")
-def plot_loss_curves(model_dir: Path, output_dir: Path | None = None):
-    """
-    Generate training and validation loss curves from NN-GMM training results.
-    """
-    nng.utils.setup_logging()
-    output_dir = output_dir if output_dir is not None else model_dir / "plots"
-    output_dir.mkdir(exist_ok=True, parents=False)
-
-    metric = "w_loss_hist"
-
-    # Load metrics
-    da = xr.load_dataarray(model_dir / "metrics.nc")
-
-    val_values = da.sel(metric=f"{metric}_val")
-    val_values_mean, val_values_std = None, None
-    if "cv_iter" in val_values.coords:
-        val_values_mean = val_values.mean(dim="cv_iter").values
-        val_values_std = val_values.std(dim="cv_iter").values
-    else:
-        val_values_mean = val_values
-
-    train_values = da.sel(metric=f"{metric}_train")
-    train_values_mean, train_values_std = None, None
-    if "cv_iter" in train_values.coords:
-        train_values_mean = train_values.mean(dim="cv_iter").values
-        train_values_std = train_values.std(dim="cv_iter").values
-    else:
-        train_values_mean = train_values.values
-
-    epochs = da.coords["epoch"].values + 1
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    ax.plot(epochs, train_values_mean, label="Train Loss", color="blue")
-    if train_values_std is not None:
-        ax.fill_between(
-            epochs,
-            train_values_mean - train_values_std,
-            train_values_mean + train_values_std,
-            color="blue",
-            alpha=0.3,
-        )
-    ax.plot(epochs, val_values_mean, label="Validation Loss", color="orange")
-    if val_values_std is not None:
-        ax.fill_between(
-            epochs,
-            val_values_mean - val_values_std,
-            val_values_mean + val_values_std,
-            color="orange",
-            alpha=0.3,
-        )
-
-    if val_values_mean is not None:
-        best_epoch = epochs[np.argmin(val_values_mean)]
-        ax.axvline(
-            best_epoch, color="red", linestyle="--", label=f"Best Epoch: {best_epoch}"
-        )
-
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel(metric)
-    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
-    ax.set_xlim(1, epochs[-1])
-    ax.legend()
-    fig.tight_layout()
-
-    out_ffp = output_dir / f"{metric}_curves.png"
-    fig.savefig(out_ffp, dpi=300)
-    mlt.utils.write_to_yaml(
-        dict(
-            type="loss",
-            metric=metric,
-        ),
-        output_dir / out_ffp.with_suffix(".yaml"),
-        clobber=True,
-    )
 
 
 @app.command("plot-fault-hazard-curves")
@@ -150,15 +71,17 @@ def nn_fault_hazard_bias_res_std(
     output_dir: Path,
     rps: list[int] | None = nng.constants.PLOT_RPS,
     loc_nn_flt_hazard_results_ffp: Path | None = None,
+    emp_flt_hazard_results_ffp: Path | None = None,
     cs_parametric_flt_hazard_ffp: Path | None = None,
 ):
     nng.utils.setup_logging()
 
     nng.plots.nn_fault_hazard_bias_res_std(
         base_nn_flt_hazard_results_ffp,
-        output_dir,
         rps,
+        output_dir=output_dir,
         loc_nn_flt_hazard_results_ffp=loc_nn_flt_hazard_results_ffp,
+        emp_flt_hazard_results_ffp=emp_flt_hazard_results_ffp,
         cs_parametric_flt_hazard_ffp=cs_parametric_flt_hazard_ffp,
     )
 

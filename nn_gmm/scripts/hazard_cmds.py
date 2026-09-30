@@ -22,19 +22,19 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 
 @app.command("compute-fault-nn-hazard")
 def compute_fault_nn_hazard(
-    cv_model_dir: Path, flt_erf_ffp: Path, site_grid_level: int
+    cv_model_dir: Path, site_grid_level: int
 ):
     """
     Compute fault hazard using the NN-GMM model.
     """
-    nng.utils.setup_logging()
+    nng.utils.setup_logging(console_level=logging.WARNING)
 
     output_ffp = (
         Path(cv_model_dir)
         / f"fault_hazard_site_grid_{site_grid_level if site_grid_level >= 0 else "real"}.pkl"
     )
     nng.hazard.compute_fault_nn_hazard(
-        cv_model_dir, flt_erf_ffp, site_grid_level, output_ffp, device=device
+        cv_model_dir, site_grid_level, output_ffp, device=device
     )
 
 
@@ -56,7 +56,7 @@ def compute_cs_parametric_hazard(imdb_ffp: Path, output_dir: Path, site_grid_lev
 
 @app.command("compute-fault-emp-hazard")
 def compute_fault_emp_hazard(
-    imdb_ffp: Path, output_dir: Path,site_grid_level: int
+    imdb_ffp: Path, output_dir: Path, site_grid_level: int
 ):
     """
     Compute fault hazard using empirical distributions from the IMDB.

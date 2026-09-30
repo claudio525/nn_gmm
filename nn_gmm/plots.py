@@ -534,6 +534,7 @@ class BiasStdPlot:
         bias_ylim: tuple[float, float] = (-0.8, 0.8),
         std_ylim: tuple[float, float] = (0, 0.8),
         x_axis_limits: tuple[float, float] = (0.01, 10.0),
+        add_over_under_text: bool = True,
         **fig_kwargs,
     ):
         """
@@ -561,6 +562,7 @@ class BiasStdPlot:
             bias_y_axis_limits=bias_ylim,
             std_y_axis_limits=std_ylim,
             x_axis_limits=x_axis_limits,
+            add_over_under_text=add_over_under_text,
             **fig_kwargs,
         )
 
@@ -1407,97 +1409,67 @@ def bias_res_std_tect_type(cv_results_dir: Path, output_dir: Path):
 
 def nn_fault_hazard_bias_res_std(
     nn_flt_hazard_results_ffp: Path,
-    output_dir: Path,
     rps: list[int],
+    output_dir: Path | None = None,
     loc_nn_flt_hazard_results_ffp: Path | None = None,
+    emp_flt_hazard_results_ffp: Path | None = None,
     cs_parametric_flt_hazard_ffp: Path | None = None,
+    **bias_std_plot_kwargs
 ):
-    cs_hazard = pd.read_pickle(constants.CS_FLT_HAZARD_FFP)
-    base_nn_hazard = pd.read_pickle(nn_flt_hazard_results_ffp)
-    _, base_nn_mean_residual, base_nn_residual_std = hazard.compute_fault_nn_hazard_error(
-        base_nn_hazard, cs_hazard, rps
-    )
+    """
+    Bias and residual standard deviation of the NN (and optionally
+    empirical/CS parametric) fault hazard (UHS at the given
+    return periods) relative to Cybershake.
+    If output_dir is None, the plot is returned without a legend
+    instead of being saved.
+    """
+    linestyles = ["-", "--", "dashdot"]
+    assert len(rps) <= len(linestyles), f"At most {len(linestyles)} return periods supported"
 
-    cs_param_hazard = None
-    if cs_parametric_flt_hazard_ffp is not None:
-        cs_param_hazard = pd.read_pickle(cs_parametric_flt_hazard_ffp)
-        _, cs_param_mean_residual, cs_param_residual_std = (
-            hazard.compute_fault_nn_hazard_error(cs_param_hazard, cs_hazard, rps)
-        )
-
-    loc_nn_hazard = None
-    if loc_nn_flt_hazard_results_ffp is not None:
-        loc_nn_hazard = pd.read_pickle(loc_nn_flt_hazard_results_ffp)
-        _, loc_nn_mean_residual, loc_nn_residual_std = (
-            hazard.compute_fault_nn_hazard_error(loc_nn_hazard, cs_hazard, rps)
-        )
-
-    bias_std_plot = BiasStdPlot(
-        figsize=constants.FIG_SIZE,
-        dpi=constants.FIG_DPI,
+    default_kwargs = dict(
         bias_ylim=(-0.5, 0.5),
         std_ylim=(0, 0.95),
         main_wspace=0.175,
         left=0.07,
     )
+    bias_std_plot_kwargs = default_kwargs | bias_std_plot_kwargs
 
-    linestyles = ["-", "--", "dashdot"]
-    for i, rp in enumerate(rps):
-        bias_std_plot.ax1.plot(
-            constants.PSA_PERIODS,
-            base_nn_mean_residual.loc[constants.PSA_KEYS, rp].values,
-            c="blue",
-            linestyle=linestyles[i],
-            linewidth=constants.FIG_LINEWIDTH,
-            label=f"RP={rp} (Base Surrogate)",
-        )
-        if cs_param_hazard is not None:
-            bias_std_plot.ax1.plot(
-                constants.PSA_PERIODS,
-                cs_param_mean_residual.loc[constants.PSA_KEYS, rp].values,
-                c="black",
-                linestyle=linestyles[i],
-                linewidth=constants.FIG_LINEWIDTH,
-                label=f"RP={rp} (CS Parametric)",
-            )
-        if loc_nn_hazard is not None:
-            bias_std_plot.ax1.plot(
-                constants.PSA_PERIODS,
-                loc_nn_mean_residual.loc[constants.PSA_KEYS, rp].values,
-                c="red",
-                linestyle=linestyles[i],
-                linewidth=constants.FIG_LINEWIDTH,
-                label=f"RP={rp} (Loc Surrogate)",
-            )
+    bias_std_plot = BiasStdPlot(
+        figsize=constants.FIG_SIZE,
+        dpi=constants.FIG_DPI,
+        **bias_std_plot_kwargs
+    )
 
-        bias_std_plot.ax3.plot(
-            constants.PSA_PERIODS,
-            base_nn_residual_std.loc[constants.PSA_KEYS, rp].values,
-            c="blue",
-            linestyle=linestyles[i],
-            linewidth=constants.FIG_LINEWIDTH,
-            label=f"RP={rp}",
+    cs_hazard = pd.read_pickle(constants.CS_FLT_HAZARD_FFP)
+    for label, (hazard_ffp, color) in {
+        "Base Surrogate": (nn_flt_hazard_results_ffp, "blue"),
+        "Loc Surrogate": (loc_nn_flt_hazard_results_ffp, "red"),
+        "Empirical": (emp_flt_hazard_results_ffp, "green"),
+        "CS Parametric": (cs_parametric_flt_hazard_ffp, "black"),
+    }.items():
+        if hazard_ffp is None:
+            continue
+        _, mean_residual, residual_std = hazard.compute_fault_nn_hazard_error(
+            pd.read_pickle(hazard_ffp), cs_hazard, rps
         )
-        if cs_param_hazard is not None:
-            bias_std_plot.ax3.plot(
-                constants.PSA_PERIODS,
-                cs_param_residual_std.loc[constants.PSA_KEYS, rp].values,
-                c="black",
-                linestyle=linestyles[i],
-                linewidth=constants.FIG_LINEWIDTH,
-                label=f"RP={rp} (CS Parametric)",
-            )
-        if loc_nn_hazard is not None:
-            bias_std_plot.ax3.plot(
-                constants.PSA_PERIODS,
-                loc_nn_residual_std.loc[constants.PSA_KEYS, rp].values,
-                c="red",
-                linestyle=linestyles[i],
-                linewidth=constants.FIG_LINEWIDTH,
-                label=f"RP={rp} (Loc NN)",
-            )
+        for rp, linestyle in zip(rps, linestyles):
+            for ax, values in (
+                (bias_std_plot.ax1, mean_residual),
+                (bias_std_plot.ax3, residual_std),
+            ):
+                ax.plot(
+                    constants.PSA_PERIODS,
+                    values.loc[constants.PSA_KEYS, rp].values,
+                    c=color,
+                    linestyle=linestyle,
+                    linewidth=constants.FIG_LINEWIDTH,
+                    label=f"RP={rp} ({label})",
+                )
 
     bias_std_plot.ax1.set_ylabel("Mean hazard residual")
+    if output_dir is None:
+        return bias_std_plot
+
     bias_std_plot.ax1.legend()
 
     bias_std_plot.fig.savefig(

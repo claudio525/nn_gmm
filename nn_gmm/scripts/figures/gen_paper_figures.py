@@ -3297,6 +3297,68 @@ def site_to_site_residual_hist(
     )
 
 
+@app.command("nn-fault-hazard-bias-res-std")
+def nn_fault_hazard_bias_res_std(
+    base_nn_flt_hazard_results_ffp: Path,
+    loc_nn_flt_hazard_results_ffp: Path,
+    output_dir: Path,
+    rps: list[int] = nng.constants.PLOT_RPS,
+    emp_flt_hazard_results_ffp: Path | None = None,
+):
+    """
+    Bias and residual standard deviation of the base & location
+    surrogate (and optionally empirical) fault hazard relative to Cybershake.
+    """
+    nng.utils.setup_logging()
+    _fig_settings()
+
+    bias_std_plot = nng.plots.nn_fault_hazard_bias_res_std(
+        base_nn_flt_hazard_results_ffp,
+        rps,
+        loc_nn_flt_hazard_results_ffp=loc_nn_flt_hazard_results_ffp,
+        emp_flt_hazard_results_ffp=emp_flt_hazard_results_ffp,
+        left=0.075,
+        add_over_under_text = False,
+        main_wspace=0.18,
+    )
+    bias_std_plot.ax1.set_ylabel("Mean Hazard Residual", labelpad=1)
+    bias_std_plot.ax3.set_ylabel("Hazard Residual Standard Deviation", labelpad=3)
+
+    legend_kwargs = dict(
+        title_fontproperties={"weight": "bold"}, alignment="left", handlelength=4.0
+    )
+    model_labels_colors = [("Surrogate: Base", "blue"), ("Surrogate: Location", "red")]
+    if emp_flt_hazard_results_ffp is not None:
+        model_labels_colors.insert(0, ("Empirical", "green"))
+    bias_std_plot.ax1.legend(
+        handles=[
+            mlines.Line2D([], [], color=cur_color, linewidth=1.0)
+            for _, cur_color in model_labels_colors
+        ],
+        labels=[cur_label for cur_label, _ in model_labels_colors],
+        title="Model",
+        loc="upper right",
+        **legend_kwargs,
+    )
+    bias_std_plot.ax3.legend(
+        handles=[
+            mlines.Line2D([], [], color="k", linestyle=cur_line.get_linestyle(), linewidth=1.0)
+            # Base surrogate lines, one per return period
+            for cur_line in bias_std_plot.ax3.get_lines()
+            if cur_line.get_color() == "blue"
+        ],
+        labels=[nng.utils.rp_to_poe_string(rp) for rp in rps],
+        title="Probability of Exceedance",
+        loc="upper right",
+        **legend_kwargs,
+    )
+
+    bias_std_plot.fig.savefig(
+        output_dir / f"nn_fault_hazard_bias_res_std.{nng.constants.FIG_FORMAT}"
+    )
+    plt.close(bias_std_plot.fig)
+
+
 @app.command("combine-disagg-figures")
 def combine_disagg_figures(
     left_fig_ffp: Path,
@@ -3336,6 +3398,46 @@ def combine_disagg_figures(
     fig.savefig(output_ffp)
     plt.close(fig)
 
+
+@app.command("plot-loss-curves")
+def plot_loss_curves(model_dir: Path, output_dir: Path):
+    """
+    Training and validation loss curves of the NN-GMM
+    (mean across CV iterations, if CV results).
+    """
+    nng.utils.setup_logging()
+    _fig_settings()
+
+    metric_da = xr.load_dataarray(model_dir / "metrics.nc")
+    epochs = metric_da.coords["epoch"].values + 1
+
+    fig, ax = plt.subplots(figsize=nng.constants.FIG_SIZE, dpi=nng.constants.FIG_DPI)
+    for split, label, color in (
+        ("train", "Training Loss", "blue"),
+        ("val", "Validation Loss", "orange"),
+    ):
+        values = metric_da.sel(metric=f"w_loss_hist_{split}")
+        ax.plot(
+            epochs,
+            values.mean(dim="cv_iter").values if "cv_iter" in values.dims else values.values,
+            label=label,
+            color=color,
+            linewidth=nng.constants.FIG_LINEWIDTH,
+        )
+
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Weighted Loss")
+    ax.grid(linewidth=0.5, alpha=0.5, linestyle="--")
+    ax.set_xlim(1, epochs[-1])
+    ax.set_ylim(-2.8, -1.8)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+
+    fig.savefig(
+        output_dir
+        / f"{model_dir.name}_loss_curves.{nng.constants.FIG_FORMAT}"
+    )
+    plt.close(fig)
 
 if __name__ == "__main__":
     app()

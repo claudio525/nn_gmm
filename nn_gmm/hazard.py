@@ -95,7 +95,6 @@ def compute_cs_parametric_hazard(
 
 def compute_fault_nn_hazard(
     cv_results_dir: Path,
-    flt_erf_ffp: Path,
     site_grid_level: int,
     output_ffp: Path,
     device: str | None = None,
@@ -123,9 +122,6 @@ def compute_fault_nn_hazard(
         event_df = imdb.get_event_df()
         event_df = event_df.loc[event_df.sim_type == 4]
 
-        # Realisation data
-        # rel_df = imdb.get_rel_df(events=event_df.event_id.values.astype(str))
-
         # Get rupture distances
         record_info_df = imdb.get_record_info_df(
             sites=sites, events=event_df.event_id.values.astype(str)
@@ -136,17 +132,6 @@ def compute_fault_nn_hazard(
         site_event_df = imdb.get_site_event_df(
             site_event_int_ids=record_info_df.site_event_int_id.values
         )
-
-    # # Source and realisation inputs keys
-    # event_source_keys = np.array(run_config.source_inputs)[
-    #     np.isin(run_config.source_inputs, event_df.columns)
-    # ]
-    # rel_source_keys = np.setdiff1d(
-    #     np.array(run_config.source_inputs)[
-    #         np.isin(run_config.source_inputs, rel_df.columns)
-    #     ],
-    #     event_source_keys,
-    # )
 
     gm_params = []
     cv_model_dirs = [ffp for ffp in cv_results_dir.glob("cv_*") if ffp.is_dir()]
@@ -170,47 +155,6 @@ def compute_fault_nn_hazard(
             ~site_df.site_id.isin(cur_cv_train_sites)
         ].site_id.values
 
-        # # Create input df
-        # cur_input_df = site_event_df.loc[
-        #     site_event_df.event_id.isin(cur_events)
-        #     & site_event_df.site_id.isin(cur_sites)
-        # ].copy()
-
-        # # Add site inputs
-        # cur_input_df = cur_input_df.merge(
-        #     site_df[run_config.site_inputs],
-        #     left_on="site_int_id",
-        #     right_index=True,
-        #     how="left",
-        # )
-
-        # # Add location inputs
-        # if isinstance(run_config, nn_gmm.LocAdjRunConfig):
-        #     cur_input_df["nztm_x"] = site_df.loc[
-        #         cur_input_df.site_int_id.values, "nztm_x"
-        #     ].values
-        #     cur_input_df["nztm_y"] = site_df.loc[
-        #         cur_input_df.site_int_id.values, "nztm_y"
-        #     ].values
-
-        # # Add source inputs
-        # cur_input_df = cur_input_df.merge(
-        #     event_df[event_source_keys],
-        #     left_on="event_int_id",
-        #     right_index=True,
-        #     how="left",
-        # )
-        # # Use mean realisation inputs
-        # if len(rel_source_keys) > 0:
-        #     cur_input_df = cur_input_df.merge(
-        #         rel_df.groupby("event_int_id")[rel_source_keys].mean(),
-        #         left_on="event_int_id",
-        #         right_index=True,
-        #         how="left",
-        #     )
-        # if "is_point_source" in run_config.source_inputs:
-        #     cur_input_df["is_point_source"] = False
-
         cur_input_df = nn_gmm.get_fault_events_sites_input_df(
             run_config, cur_events, cur_sites
         )
@@ -230,7 +174,7 @@ def compute_fault_nn_hazard(
     gm_params = pd.concat(gm_params, axis=0)
 
     # Compute hazard
-    erf = nhm.load_nhm_df(flt_erf_ffp)
+    erf = nhm.load_nhm_df(constants.FLT_ERF_FFP)
     hazard_results = None
     for cur_site in tqdm(sites, desc="Computing PSHA"):
         cur_site_gm_params = gm_params.loc[gm_params.site_id == cur_site].set_index(
