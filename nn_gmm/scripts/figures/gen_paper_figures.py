@@ -1645,7 +1645,7 @@ def single_site_ds_hazard_plot(
 
     If the lower/upper branch base model DS hazard directories
     (i.e. from run-site-ds-hazard with a quantile) are given,
-    these are shown as a band for the base model total DS hazard.
+    these are shown as a band for the base model crustal & subduction slab DS hazard.
     """
     if (lower_base_ds_dir is None) != (upper_base_ds_dir is None):
         raise ValueError(
@@ -1763,21 +1763,24 @@ def single_site_ds_hazard_plot(
 
     base_handle = _make_line_proxy(base_ds_line)
     if lower_base_ds_dir is not None:
-        lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")["total"][im]
-        upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")["total"][im]
-        assert lower_ds_hazard.index.equals(
-            base_ds_hazard[site]["total"][im].index
-        ) and upper_ds_hazard.index.equals(
-            base_ds_hazard[site]["total"][im].index
-        ), "Lower/upper DS hazard and base DS hazard do not have the same intensity measure levels"
-        base_band = ax.fill_between(
-            lower_ds_hazard.index.values,
-            lower_ds_hazard.values,
-            upper_ds_hazard.values,
-            color="blue",
-            alpha=0.15,
-            linewidth=0,
-        )
+        lower_ds_hazard = pd.read_pickle(lower_base_ds_dir / f"{site}.pkl")
+        upper_ds_hazard = pd.read_pickle(upper_base_ds_dir / f"{site}.pkl")
+        for cur_tect_type in ("crustal", "subduction_slab"):
+            cur_lower = lower_ds_hazard[cur_tect_type][im]
+            cur_upper = upper_ds_hazard[cur_tect_type][im]
+            assert cur_lower.index.equals(
+                base_ds_hazard[site][cur_tect_type][im].index
+            ) and cur_upper.index.equals(
+                base_ds_hazard[site][cur_tect_type][im].index
+            ), "Lower/upper DS hazard and base DS hazard do not have the same intensity measure levels"
+            base_band = ax.fill_between(
+                cur_lower.index.values,
+                cur_lower.values,
+                cur_upper.values,
+                color="blue",
+                alpha=0.3 if cur_tect_type == "crustal" else 0.15,
+                linewidth=0,
+            )
         # Shaded band behind the line in the legend
         base_handle = (base_band, base_handle)
 
@@ -1983,7 +1986,7 @@ def single_site_hazard_plot(
             lower_ds_hazard.values + cs_flt_hazard.values,
             upper_ds_hazard.values + cs_flt_hazard.values,
             color="blue",
-            alpha=0.15,
+            alpha=0.4,
             linewidth=0,
         )
         # Shaded band behind both (DS & total) lines in the legend entry

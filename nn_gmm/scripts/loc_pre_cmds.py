@@ -1,13 +1,13 @@
-import multiprocessing as mp
 import logging
+import multiprocessing as mp
 import shutil
 from pathlib import Path
 
+import ml_tools as mlt
+import optuna as opt
 import torch
 import typer
-import optuna as opt
 
-import ml_tools as mlt
 import nn_gmm as nng
 
 torch.multiprocessing.set_start_method("spawn", force=True)
@@ -123,7 +123,7 @@ def opt_loc_model(
         study = opt.create_study(
             direction="minimize",
             study_name=study_dir.name,
-            storage="sqlite:///{}.db".format(study_dir / study_dir.name),
+            storage=f"sqlite:///{study_dir / study_dir.name}.db",
             load_if_exists=True,
         )
 

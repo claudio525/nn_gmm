@@ -544,7 +544,6 @@ def _run_site_ds_hazard(
     import seismic_hazard_analysis as sha
 
     run_config = nn_gmm.load_config(model_dir / "run_config.yaml")
-
     rupture_df = nn_gmm.get_ds_input_df(run_config, site_series, ds_source_df)
 
     pred_df = nn_gmm.run_predictions_dir(model_dir, rupture_df, device)

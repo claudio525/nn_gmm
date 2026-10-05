@@ -114,15 +114,6 @@ python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/unif
 python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 2475 "ln(Base Model/Location Model)" ratio_base_loc 250e/250e --cb-max 1.5
 
 # ### Total hazard maps (CS fault + DS)
-echo "Generating total hazard maps for pSA(5.0s) and RP=2475"
-python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Base Model" total_base 250e/250e  
-python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Location Model" total_loc 250e/250e 
-python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
-
-# # echo "Generating total hazard maps for pSA(0.5s) and RP=2475"
-python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Base Model" total_base 250e/250e  
-python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Location Model" total_loc 250e/250e  
-python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
 
 
 # # --------------------------------------- Electronic Supplement Figures ---------------------------------------
@@ -147,11 +138,13 @@ echo "Generating DS hazard ratio maps for ln(emp/base) at RP=2475"
 python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Empirical/Base Model)" ratio_emp_base 250e/250e  --cb-max 1.5
 python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Empirical/Base Model)" ratio_emp_base 250e/250e  --cb-max 1.5
 python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.01 475 "ln(Empirical/Base Model)" ratio_emp_base 250e/250e  --cb-max 1.5
+python gen_paper_figures.py hazard-ratio-map $emp_ds_hazard_results/uniform_grid $full_base_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.01 2475 "ln(Empirical/Base Model)" ratio_emp_base 250e/250e  --cb-max 1.5
 
 echo "Generating DS hazard ratio maps for ln(base/loc) at RP=475"
 python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_5.0 475 "ln(Base Model/Location Model)" ratio_base_loc 250e/250e  --cb-max 1.5
 python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.5 475 "ln(Base Model/Location Model)" ratio_base_loc 250e/250e  --cb-max 1.5
 python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.01 475 "ln(Base Model/Location Model)" ratio_base_loc 250e/250e  --cb-max 1.5
+python gen_paper_figures.py hazard-ratio-map $full_base_model_dir/ds_hazard/uniform_grid $full_location_model_dir/ds_hazard/uniform_grid $imdb_ffp $out_dir pSA_0.01 2475 "ln(Base Model/Location Model)" ratio_base_loc 250e/250e  --cb-max 1.5
 
 ### Total hazard maps (CS fault + DS)
 echo "Generating total hazard maps for pSA(5.0s) and RP=475"
@@ -168,6 +161,22 @@ echo "Generating total hazard maps for pSA(0.01s) and RP=475"
 python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.01 475 "CS 25.6 + Base Model" total_base 250e/250e  
 python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.01 475 "CS 25.6 + Location Model" total_loc 250e/250e  
 python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_0.01 475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
+
+echo "Generating total hazard maps for pSA(5.0s) and RP=2475"
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Base Model" total_base 250e/250e  
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Location Model" total_loc 250e/250e 
+python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_5.0 2475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
+
+echo "Generating total hazard maps for pSA(0.5s) and RP=2475"
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Base Model" total_base 250e/250e  
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Location Model" total_loc 250e/250e  
+python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_0.5 2475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
+
+echo "Generating total hazard maps for pSA(0.01s) and RP=2475"
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_base_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.01 2475 "CS 25.6 + Base Model" total_base 250e/250e  
+python gen_paper_figures.py total-hazard-map $imdb_ffp $full_location_model_dir/ds_hazard/uniform_grid $out_dir pSA_0.01 2475 "CS 25.6 + Location Model" total_loc 250e/250e  
+python gen_paper_figures.py total-hazard-map $imdb_ffp $emp_ds_hazard_results/uniform_grid $out_dir pSA_0.01 2475 "CS 25.6 + Empirical Logic Tree" total_emp 250e/250e  
+
 
 
 # ### Site Term Maps
